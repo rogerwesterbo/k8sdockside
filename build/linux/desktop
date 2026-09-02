@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A k8sdockside application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/k8sdockside %u
+Terminal=false
+Type=Application
+Icon=k8sdockside
+Categories=Utility;
+StartupWMClass=k8sdockside
+
+ 
