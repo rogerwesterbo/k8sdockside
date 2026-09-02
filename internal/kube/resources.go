@@ -1,0 +1,86 @@
+package kube
+
+// Cell is one table cell. Tone lets the frontend colour a value without having
+// to know what the value means: "ok", "warn", "error", "info" or "" for plain.
+type Cell struct {
+	Text string `json:"text"`
+	Tone string `json:"tone"`
+}
+
+// Row is one resource in a listing. Name and Namespace are carried separately
+// from Cells because they identify the object for a follow-up Describe call,
+// regardless of which columns the kind happens to render.
+type Row struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Cells     []Cell `json:"cells"`
+}
+
+// Table is a generic resource listing. Every kind returns this shape so the UI
+// renders them all through one component.
+type Table struct {
+	Kind       string   `json:"kind"`
+	Columns    []string `json:"columns"`
+	Rows       []Row    `json:"rows"`
+	Namespaced bool     `json:"namespaced"`
+	Error      string   `json:"error"`
+}
+
+// Stat is a ready/total counter on the dashboard.
+type Stat struct {
+	Label string `json:"label"`
+	Ready int    `json:"ready"`
+	Total int    `json:"total"`
+}
+
+// Gauge is a used/capacity measure on the dashboard.
+type Gauge struct {
+	Label    string  `json:"label"`
+	Used     float64 `json:"used"`
+	Capacity float64 `json:"capacity"`
+	Unit     string  `json:"unit"`
+}
+
+// Event is a cluster event as shown on the dashboard and in the events table.
+type Event struct {
+	Type    string `json:"type"`
+	Reason  string `json:"reason"`
+	Object  string `json:"object"`
+	Message string `json:"message"`
+	Age     string `json:"age"`
+}
+
+// Overview is the dashboard payload for one context.
+type Overview struct {
+	ContextID    string   `json:"contextId"`
+	Context      string   `json:"context"`
+	Cluster      string   `json:"cluster"`
+	Server       string   `json:"server"`
+	Version      string   `json:"version"`
+	Distribution string   `json:"distribution"`
+	Namespaces   []string `json:"namespaces"`
+	Stats        []Stat   `json:"stats"`
+	Gauges       []Gauge  `json:"gauges"`
+	Events       []Event  `json:"events"`
+	Error        string   `json:"error"`
+}
+
+// Resource kinds the UI can open a tab for. These strings are the contract
+// between the frontend nav catalogue and the table builders in stub.go.
+const (
+	KindNodes       = "nodes"
+	KindNamespaces  = "namespaces"
+	KindPods        = "pods"
+	KindDeployments = "deployments"
+	KindStatefulSet = "statefulsets"
+	KindDaemonSets  = "daemonsets"
+	KindJobs        = "jobs"
+	KindCronJobs    = "cronjobs"
+	KindServices    = "services"
+	KindIngresses   = "ingresses"
+	KindConfigMaps  = "configmaps"
+	KindSecrets     = "secrets"
+	KindPVCs        = "persistentvolumeclaims"
+	KindEvents      = "events"
+)

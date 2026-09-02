@@ -2,10 +2,9 @@ package main
 
 import (
 	"embed"
-
 	"log"
-	"time"
 
+	"github.com/roger/k8sdockside/internal/appconfig"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -17,28 +16,26 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-func init() {
-	// Register a custom event whose associated data type is string.
-	// This is not required, but the binding generator will pick up registered events
-	// and provide a strongly typed JS/TS API for them.
-	application.RegisterEvent[string]("time")
-}
-
-// main function serves as the application's entry point. It initializes the application, creates a window,
-// and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
-// logs any error that might occur.
+// main starts the app: it opens the settings file, wires up the three services
+// the frontend calls, and shows the main window.
 func main() {
+	// The settings store holds the user's kubeconfig paths, context aliases and
+	// colours. A failure here means we could not read an existing settings file,
+	// and carrying on would silently discard the user's customisation.
+	settings, err := appconfig.Open()
+	if err != nil {
+		log.Fatalf("k8sdockside: %v", err)
+	}
 
-	// Create a new Wails application by providing the necessary options.
-	// Variables 'Name' and 'Description' are for application metadata.
-	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
-	// 'Bind' is a list of Go struct instances. The frontend has access to the methods of these instances.
-	// 'Mac' options tailor the application when running an macOS.
+	configs := NewKubeconfigService(settings)
+
 	app := application.New(application.Options{
 		Name:        "k8sdockside",
-		Description: "A demo of using raw HTML & CSS",
+		Description: "A Kubernetes workspace for your local kubeconfig contexts",
 		Services: []application.Service{
-			application.NewService(&GreetService{}),
+			application.NewService(configs),
+			application.NewService(NewSettingsService(settings)),
+			application.NewService(NewResourceService(configs)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -48,40 +45,24 @@ func main() {
 		},
 	})
 
-	// Create a new window with the necessary options.
-	// 'Title' is the title of the window.
-	// 'Mac' options tailor the window when running on macOS.
-	// 'BackgroundColour' is the background colour of the window.
-	// 'URL' is the URL that will be loaded into the webview.
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
-		// Window sized to the golden ratio (1000 / 618 ≈ 1.618).
-		Width:  1000,
-		Height: 618,
+		Title: "k8sdockside",
+		// Wide enough for the sidebar, a tab bar and a docked detail panel
+		// side by side without anything collapsing.
+		Width:     1440,
+		Height:    900,
+		MinWidth:  960,
+		MinHeight: 600,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
-		BackgroundColour: application.NewRGB(6, 7, 15),
+		BackgroundColour: application.NewRGB(0x0f, 0x13, 0x1a),
 		URL:              "/",
 	})
 
-	// Create a goroutine that emits an event containing the current time every second.
-	// The frontend can listen to this event and update the UI accordingly.
-	go func() {
-		for {
-			now := time.Now().Format(time.RFC1123)
-			app.Event.Emit("time", now)
-			time.Sleep(time.Second)
-		}
-	}()
-
-	// Run the application. This blocks until the application has been exited.
-	err := app.Run()
-
-	// If an error occurred while running the application, log it and exit.
-	if err != nil {
+	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -1,106 +1,335 @@
+<!--
+  The application shell: sidebar, tab strip, the active view, and the docked
+  detail panel. All of the state it renders lives in the workspace store.
+-->
 <script lang="ts">
-  import {onMount} from 'svelte';
-  import {Events, WML} from "@wailsio/runtime";
-  import {GreetService} from "../bindings/github.com/roger/k8sdockside";
+    import { onMount } from 'svelte';
+    import { DASHBOARD } from './lib/catalogue';
+    import Dashboard from './lib/components/Dashboard.svelte';
+    import DetailPanel from './lib/components/DetailPanel.svelte';
+    import Icon from './lib/components/Icon.svelte';
+    import ResourceTable from './lib/components/ResourceTable.svelte';
+    import Sidebar from './lib/components/Sidebar.svelte';
+    import TabBar from './lib/components/TabBar.svelte';
+    import { workspace } from './lib/state/workspace.svelte';
 
-  const wailsVersion = "v3.0.0-beta.16";
+    const MIN_SIDEBAR = 200;
+    const MAX_SIDEBAR = 520;
 
-  let name: string = $state('');
-  let time: string = $state('Listening for Time event...');
+    let draggingSidebar = $state(false);
 
-  let titleNameEl: HTMLElement;
-  let toastEl: HTMLElement;
-  let resultEl: HTMLElement;
-  let toastTimer: ReturnType<typeof setTimeout>;
-
-  onMount(() => {
-    Events.On('time', (v: any) => {
-      // On a narrow screen the full RFC1123 stamp is too wide for the footer, so
-      // show just the clock time there (matching the CSS breakpoint).
-      const full = v.data;
-      const compact = (full.match(/\d{1,2}:\d{2}:\d{2}/) || [full])[0];
-      time = window.matchMedia('(max-width: 640px)').matches ? compact : full;
+    onMount(() => {
+        workspace.load();
     });
-    // Wire up data-wml-openURL links (logos + footer "Docs" link).
-    WML.Reload();
-  });
 
-  // Crossfade the framework word in the heading ("Wails + Svelte") to the name
-  // the user entered ("Wails + <name>"): the old word fades out while the new one
-  // fades in over the same spot.
-  function swapTitleName(name: string): void {
-    const current = titleNameEl.querySelector('.title-name-text:not(.is-outgoing)');
-    if (!current || current.textContent === name) {
-      return;
+    // Notices are informational; they should not need dismissing by hand.
+    $effect(() => {
+        if (!workspace.notice) return;
+        const timer = setTimeout(() => workspace.dismissNotice(), 6000);
+        return () => clearTimeout(timer);
+    });
+
+    function startSidebarResize(event: PointerEvent): void {
+        event.preventDefault();
+        draggingSidebar = true;
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     }
-    const incoming = document.createElement('span');
-    incoming.className = 'title-name-text is-entering';
-    incoming.textContent = name;
-    current.classList.add('is-outgoing');
-    titleNameEl.appendChild(incoming);
-    // Force a reflow so the transitions run from the starting state.
-    void incoming.offsetWidth;
-    incoming.classList.remove('is-entering');
-    current.classList.add('is-leaving');
-    current.addEventListener('transitionend', () => current.remove(), {once: true});
-  }
 
-  // Pop the toast with the message Go returned, then auto-dismiss it.
-  function showToast(message: string): void {
-    resultEl.innerText = message;
-    toastEl.classList.add('is-visible');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('is-visible'), 4000);
-  }
+    function onSidebarResize(event: PointerEvent): void {
+        if (!draggingSidebar) return;
+        workspace.setSidebarWidth(Math.max(MIN_SIDEBAR, Math.min(event.clientX, MAX_SIDEBAR)));
+    }
 
-  const doGreet = (): void => {
-    let n = name || 'anonymous';
-    swapTitleName(n);
-    GreetService.Greet(n).then(showToast).catch(console.error);
-  }
+    function endSidebarResize(event: PointerEvent): void {
+        draggingSidebar = false;
+        (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    }
+
+    function onSidebarKey(event: KeyboardEvent): void {
+        const step = event.shiftKey ? 48 : 16;
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            workspace.setSidebarWidth(Math.max(MIN_SIDEBAR, workspace.sidebarWidth - step));
+        } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            workspace.setSidebarWidth(Math.min(MAX_SIDEBAR, workspace.sidebarWidth + step));
+        }
+    }
 </script>
 
-<main class="container">
-  <header class="brand">
-    <span class="brand-mark" data-wml-openURL="https://v3.wails.io">
-      <img src="/wails.png" class="brand-logo" alt="Wails logo"/>
-    </span>
-    <span class="brand-badge" data-wml-openURL="https://svelte.dev">
-      <img src="/svelte.svg" alt="Svelte logo"/>
-    </span>
-  </header>
+<div class="shell">
+    <div class="body">
+        <Sidebar />
 
-  <h1 class="title"><span class="title-accent">Wails +</span> <span class="title-name" bind:this={titleNameEl}><span class="title-name-text">Svelte</span></span></h1>
-  <p class="subtitle">Build beautiful cross-platform apps with Go and Svelte.</p>
+        <!-- A focusable separator is the ARIA "window splitter" pattern; the
+             a11y rules below only key off the role, which they treat as static. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+            class="sidebar-handle"
+            class:active={draggingSidebar}
+            role="separator"
+            aria-label="Resize sidebar"
+            aria-orientation="vertical"
+            aria-valuenow={workspace.sidebarWidth}
+            aria-valuemin={MIN_SIDEBAR}
+            aria-valuemax={MAX_SIDEBAR}
+            tabindex="0"
+            onpointerdown={startSidebarResize}
+            onpointermove={onSidebarResize}
+            onpointerup={endSidebarResize}
+            onpointercancel={endSidebarResize}
+            onkeydown={onSidebarKey}
+        ></div>
 
-  <div class="greet">
-    <div class="input-box">
-      <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <input aria-label="input" class="input" bind:value={name} type="text" placeholder="Your name" autocomplete="off"/>
-      <button aria-label="greet-btn" class="btn" onclick={doGreet}>Greet
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-      </button>
+        <main>
+            <TabBar />
+
+            <div class="stage" class:stack={workspace.dock === 'bottom'}>
+                <div class="content">
+                    {#if workspace.activeTab}
+                        {#key workspace.activeTab.id}
+                            {#if workspace.activeTab.kind === DASHBOARD}
+                                <Dashboard contextId={workspace.activeTab.contextId} />
+                            {:else}
+                                <ResourceTable
+                                    contextId={workspace.activeTab.contextId}
+                                    kind={workspace.activeTab.kind}
+                                />
+                            {/if}
+                        {/key}
+                    {:else}
+                        <div class="welcome">
+                            <h1>k8sdockside</h1>
+                            {#if workspace.contexts.length > 0}
+                                <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
+                                <p class="hint">
+                                    Tabs take the colour of their context, so you always know which cluster you are
+                                    looking at. Drag them to reorder.
+                                </p>
+                            {:else if workspace.loaded}
+                                <p>No kubeconfig contexts yet.</p>
+                                <p class="hint">
+                                    Sync picks up <code>~/.kube/config</code>, everything in <code>$KUBECONFIG</code>,
+                                    and other kubeconfigs in <code>~/.kube</code>. You can also add a file from
+                                    anywhere on disk.
+                                </p>
+                                <div class="welcome-actions">
+                                    <button onclick={() => workspace.sync()}>
+                                        <Icon name="refresh" size={14} /> Sync
+                                    </button>
+                                    <button onclick={() => workspace.addFile()}>
+                                        <Icon name="plus" size={14} /> Add kubeconfig
+                                    </button>
+                                </div>
+                            {:else}
+                                <p>Looking for kubeconfig files…</p>
+                            {/if}
+                        </div>
+                    {/if}
+                </div>
+
+                <DetailPanel />
+            </div>
+        </main>
     </div>
-  </div>
-</main>
 
-<!-- <hr class="footer-divider"/> -->
-<footer class="footer">
-  <span class="footer-version">{wailsVersion}</span>
-  <span class="footer-time">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    <span>{time}</span>
-  </span>
-  <a class="footer-docs" data-wml-openURL="https://v3.wails.io" aria-label="Wails documentation">Docs
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
-  </a>
-</footer>
+    <footer class="statusbar">
+        {#if workspace.notice}
+            <span class="notice" class:error={workspace.notice.tone === 'error'}>
+                {#if workspace.notice.tone === 'error'}<Icon name="alert" size={12} />{/if}
+                {workspace.notice.text}
+            </span>
+            <button class="dismiss" onclick={() => workspace.dismissNotice()} aria-label="Dismiss message">
+                <Icon name="close" size={11} />
+            </button>
+        {:else if workspace.selectedContext}
+            <span class="dot" style:background={workspace.colorOf(workspace.selectedContext.id)}></span>
+            <span>{workspace.displayName(workspace.selectedContext)}</span>
+            {#if workspace.selectedContext.server}
+                <span class="dim mono">{workspace.selectedContext.server}</span>
+            {/if}
+        {/if}
 
-<div class="toast" bind:this={toastEl} role="status" aria-live="polite">
-  <span class="toast-label">From Go</span>
-  <span aria-label="result" class="toast-msg" bind:this={resultEl}></span>
+        <span class="spacer"></span>
+        <span class="dim">{workspace.contexts.length} contexts · {workspace.files.length} files</span>
+        {#if workspace.configPath}
+            <span class="dim mono" title="Where your context names, colours and layout are stored">
+                {workspace.configPath}
+            </span>
+        {/if}
+    </footer>
 </div>
 
 <style>
-  /* Put your standard CSS here */
+    .shell {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .body {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    /* Sits over the sidebar's right border so the whole seam is grabbable. */
+    .sidebar-handle {
+        width: 5px;
+        margin-left: -3px;
+        margin-right: -2px;
+        z-index: 3;
+        cursor: col-resize;
+        background: transparent;
+        transition: background 120ms ease;
+    }
+
+    .sidebar-handle:hover,
+    .sidebar-handle.active,
+    .sidebar-handle:focus-visible {
+        background: var(--accent);
+    }
+
+    main {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+    }
+
+    .stage {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        min-width: 0;
+    }
+
+    .stage.stack {
+        flex-direction: column;
+    }
+
+    .content {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .welcome {
+        max-width: 520px;
+        padding: 64px 32px;
+        margin: 0 auto;
+        text-align: center;
+    }
+
+    .welcome h1 {
+        margin: 0 0 12px;
+        font-size: 22px;
+        font-weight: 600;
+    }
+
+    .welcome p {
+        margin: 0 0 10px;
+        color: var(--text-dim);
+    }
+
+    .welcome .hint {
+        font-size: 12px;
+        color: var(--text-faint);
+        line-height: 1.7;
+    }
+
+    .welcome code {
+        font-family: var(--mono);
+        font-size: 11px;
+        background: var(--bg-raised);
+        border-radius: 3px;
+        padding: 1px 5px;
+    }
+
+    .welcome-actions {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 18px;
+    }
+
+    .welcome-actions button {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 14px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-raised);
+        color: var(--text);
+    }
+
+    .welcome-actions button:hover {
+        background: var(--bg-active);
+    }
+
+    .statusbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 24px;
+        padding: 0 12px;
+        flex: 0 0 auto;
+        background: var(--bg-sidebar);
+        border-top: 1px solid var(--border);
+        font-size: 11px;
+        color: var(--text-dim);
+        white-space: nowrap;
+        overflow: hidden;
+    }
+
+    .spacer {
+        flex: 1 1 auto;
+    }
+
+    .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        flex: 0 0 auto;
+    }
+
+    .dim {
+        color: var(--text-faint);
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .mono {
+        font-family: var(--mono);
+        font-size: 10px;
+    }
+
+    .notice {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .notice.error {
+        color: var(--error);
+    }
+
+    .dismiss {
+        display: grid;
+        place-items: center;
+        width: 16px;
+        height: 16px;
+        border-radius: 3px;
+        color: var(--text-faint);
+    }
+
+    .dismiss:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
 </style>

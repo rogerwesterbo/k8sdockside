@@ -1,0 +1,258 @@
+// Package appconfig persists the user's own choices -- which kubeconfig files
+// they added, what they renamed each context to, the colour they gave it, and
+// where they docked the detail panel. None of this can be derived from the
+// kubeconfig files themselves, so it lives in its own file under the user
+// config directory.
+package appconfig
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+)
+
+// ContextPrefs is what the user decided about one kubeconfig context. Alias
+// overrides the context's name in the UI; Color tints its sidebar entry and
+// every tab opened against it. An empty field means "use the default".
+type ContextPrefs struct {
+	Alias string `json:"alias"`
+	Color string `json:"color"`
+}
+
+// TabRef identifies one open tab: a kubeconfig context and the resource kind
+// shown in it. It is stored as a pair rather than a joined string because
+// context IDs contain a file path, so a composite key could not be split back
+// apart reliably.
+type TabRef struct {
+	ContextID string `json:"contextId"`
+	Kind      string `json:"kind"`
+}
+
+// Layout is the arrangement the user last left the window in.
+type Layout struct {
+	DetailDock   string `json:"detailDock"`   // right | bottom | left
+	DetailSize   int    `json:"detailSize"`   // px along the docked edge
+	SidebarWidth int    `json:"sidebarWidth"` // px
+}
+
+// Settings is the whole persisted file.
+type Settings struct {
+	ManualFiles []string                `json:"manualFiles"`
+	Contexts    map[string]ContextPrefs `json:"contexts"`
+	TabOrder    []TabRef                `json:"tabOrder"`
+	Layout      Layout                  `json:"layout"`
+}
+
+// Defaults returns a settings value that is safe to use before anything has
+// been saved, and that also fills in any field missing from an older file.
+func Defaults() Settings {
+	return Settings{
+		ManualFiles: []string{},
+		Contexts:    map[string]ContextPrefs{},
+		TabOrder:    []TabRef{},
+		Layout:      Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260},
+	}
+}
+
+// Store is the settings file plus the lock guarding it. Wails calls service
+// methods from multiple goroutines, so every read and write goes through the
+// mutex and hands back a copy.
+type Store struct {
+	mu   sync.Mutex
+	path string
+	data Settings
+}
+
+// Open loads the settings file, creating nothing on disk. A missing file is not
+// an error -- it just means the user has not customised anything yet. A file
+// that exists but cannot be parsed *is* an error, because silently replacing it
+// with defaults would throw away the user's colours and aliases.
+func Open() (*Store, error) {
+	path, err := defaultPath()
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{path: path, data: Defaults()}
+
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return s, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	loaded := Defaults()
+	if err := json.Unmarshal(raw, &loaded); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	s.data = normalise(loaded)
+	return s, nil
+}
+
+// Path is where the settings are stored, surfaced in the UI so the user can
+// find (or delete) the file.
+func (s *Store) Path() string { return s.path }
+
+// Get returns a copy of the current settings.
+func (s *Store) Get() Settings {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return clone(s.data)
+}
+
+// ManualFiles returns the kubeconfig paths the user added by hand.
+func (s *Store) ManualFiles() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.ManualFiles)
+}
+
+// update applies a change under the lock and flushes to disk. If the write
+// fails the in-memory state is rolled back, so what the UI shows after an error
+// still matches what is on disk.
+func (s *Store) update(fn func(*Settings)) (Settings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	before := clone(s.data)
+	fn(&s.data)
+	s.data = normalise(s.data)
+
+	if err := s.flush(); err != nil {
+		s.data = before
+		return clone(s.data), err
+	}
+	return clone(s.data), nil
+}
+
+// SetContextPrefs records the alias and colour for one context.
+func (s *Store) SetContextPrefs(id string, prefs ContextPrefs) (Settings, error) {
+	if id == "" {
+		return s.Get(), errors.New("context id is required")
+	}
+	return s.update(func(d *Settings) {
+		if prefs.Alias == "" && prefs.Color == "" {
+			delete(d.Contexts, id)
+			return
+		}
+		d.Contexts[id] = prefs
+	})
+}
+
+// AddManualFile remembers a kubeconfig path the user chose. Adding a path that
+// is already known is a no-op rather than an error.
+func (s *Store) AddManualFile(path string) (Settings, error) {
+	if path == "" {
+		return s.Get(), errors.New("path is required")
+	}
+	return s.update(func(d *Settings) {
+		if !slices.Contains(d.ManualFiles, path) {
+			d.ManualFiles = append(d.ManualFiles, path)
+		}
+	})
+}
+
+// RemoveManualFile forgets a path the user added. Auto-discovered files cannot
+// be removed this way -- they will simply reappear on the next sync.
+func (s *Store) RemoveManualFile(path string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.ManualFiles = slices.DeleteFunc(d.ManualFiles, func(p string) bool { return p == path })
+	})
+}
+
+// SetLayout records the sidebar width and detail-panel dock and size.
+func (s *Store) SetLayout(l Layout) (Settings, error) {
+	return s.update(func(d *Settings) { d.Layout = l })
+}
+
+// SetTabOrder records the order the user dragged their tabs into.
+func (s *Store) SetTabOrder(order []TabRef) (Settings, error) {
+	return s.update(func(d *Settings) { d.TabOrder = slices.Clone(order) })
+}
+
+// flush writes the settings via a temp file and a rename, so an interrupted
+// write cannot leave a half-written config behind. The caller holds the lock.
+func (s *Store) flush() error {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", dir, err)
+	}
+
+	raw, err := json.MarshalIndent(s.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+
+	tmp, err := os.CreateTemp(dir, ".settings-*.json")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename below has succeeded
+
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, s.path)
+}
+
+// normalise fills in anything a hand-edited or older settings file left out, so
+// the rest of the app never has to check for zero values.
+func normalise(s Settings) Settings {
+	if s.ManualFiles == nil {
+		s.ManualFiles = []string{}
+	}
+	if s.Contexts == nil {
+		s.Contexts = map[string]ContextPrefs{}
+	}
+	if s.TabOrder == nil {
+		s.TabOrder = []TabRef{}
+	}
+	d := Defaults().Layout
+	switch s.Layout.DetailDock {
+	case "right", "bottom", "left":
+	default:
+		s.Layout.DetailDock = d.DetailDock
+	}
+	if s.Layout.DetailSize < 200 {
+		s.Layout.DetailSize = d.DetailSize
+	}
+	if s.Layout.SidebarWidth < 180 {
+		s.Layout.SidebarWidth = d.SidebarWidth
+	}
+	return s
+}
+
+func clone(s Settings) Settings {
+	out := s
+	out.ManualFiles = slices.Clone(s.ManualFiles)
+	out.TabOrder = slices.Clone(s.TabOrder)
+	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
+	for k, v := range s.Contexts {
+		out.Contexts[k] = v
+	}
+	return out
+}
+
+func defaultPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("locating user config directory: %w", err)
+	}
+	return filepath.Join(dir, "k8sdockside", "settings.json"), nil
+}

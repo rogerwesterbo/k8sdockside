@@ -81,7 +81,10 @@ build-frontend: ## Build the frontend into frontend/dist.
 .PHONY: generate
 generate: ## Regenerate the TypeScript bindings from the Go services.
 	@printf "$(CYAN)Generating bindings...$(RESET)\n"
-	@wails3 generate bindings -clean=true -ts
+	# -i must match build/Taskfile.yml's generate:bindings, which reruns on every
+	# build. Without it this target emits model classes and non-null slices, and
+	# the next build silently replaces them with interfaces and nullable ones.
+	@wails3 generate bindings -clean=true -ts -i
 	@printf "$(GREEN)✓ Bindings generated$(RESET)\n"
 
 .PHONY: clean
