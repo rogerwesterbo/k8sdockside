@@ -46,6 +46,8 @@ export interface Notice {
 function defaultSettings(): Settings {
     return {
         manualFiles: [],
+        manualFolders: [],
+        excludedFiles: [],
         contexts: {},
         tabOrder: [],
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260 },
@@ -97,6 +99,10 @@ class Workspace {
     configPath = $state('');
 
     contexts = $derived(this.files.flatMap((f) => f.contexts));
+    /** The folders being watched, listed in the sidebar so one can be dropped. */
+    folders = $derived(this.settings.manualFolders);
+    /** Files the user has hidden, so the sidebar can offer to show them again. */
+    excluded = $derived(this.settings.excludedFiles);
     activeTab = $derived(this.tabs.find((t) => t.id === this.activeTabId) ?? null);
     selectedContext = $derived(this.contexts.find((c) => c.id === this.selectedContextId) ?? null);
     /** Files that could not be parsed, surfaced in the sidebar rather than dropped. */
@@ -155,7 +161,56 @@ class Workspace {
             this.settings = adoptSettings(await SettingsService.Get());
             this.ensureSelection();
         } catch (err) {
+            // Picking several files at once can partly succeed. The message
+            // names what failed, but the ones that worked are already stored,
+            // so the sidebar has to be brought up to date regardless.
             this.fail(message(err));
+            await this.reload();
+        }
+    }
+
+    /** Watches a folder, adding every kubeconfig in it. */
+    async addFolder(): Promise<void> {
+        try {
+            this.files = adoptFiles(await KubeconfigService.BrowseForFolder());
+            this.settings = adoptSettings(await SettingsService.Get());
+            this.ensureSelection();
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
+    /** Shows a hidden kubeconfig again. */
+    async restoreFile(path: string): Promise<void> {
+        try {
+            this.files = adoptFiles(await KubeconfigService.RestoreFile(path));
+            this.settings = adoptSettings(await SettingsService.Get());
+            this.ensureSelection();
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
+    /** Stops watching a folder; its configs leave the sidebar with it. */
+    async removeFolder(path: string): Promise<void> {
+        try {
+            this.files = adoptFiles(await KubeconfigService.RemoveFolder(path));
+            this.settings = adoptSettings(await SettingsService.Get());
+            this.dropTabsForMissingContexts();
+            this.ensureSelection();
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
+    /** Re-reads the current file list without rescanning the disk. */
+    private async reload(): Promise<void> {
+        try {
+            this.files = adoptFiles(await KubeconfigService.Files());
+            this.settings = adoptSettings(await SettingsService.Get());
+            this.ensureSelection();
+        } catch {
+            // Already reporting the failure that got us here.
         }
     }
 
@@ -236,12 +291,26 @@ class Workspace {
 
     // ----- tabs ----------------------------------------------------------
 
-    /** Opens a tab, or focuses it if this context/kind pair is already open. */
+    /**
+     * Opens a tab, or focuses it if this context/kind pair is already open.
+     *
+     * A new tab lands immediately right of the selected one rather than at the
+     * far end of the strip: it was almost always opened from the view you were
+     * looking at, so that is where you will look for it, and a long strip means
+     * the end of it may not even be on screen. With nothing selected there is
+     * no "beside", so it goes last.
+     */
     openTab(contextId: string, kind: string): void {
         const id = tabId(contextId, kind);
         if (!this.tabs.some((t) => t.id === id)) {
             const title = kind === DASHBOARD ? 'Dashboard' : labelFor(kind);
-            this.tabs = [...this.tabs, { id, contextId, kind, title }];
+            const tab: Tab = { id, contextId, kind, title };
+            const at = this.tabs.findIndex((t) => t.id === this.activeTabId);
+
+            this.tabs =
+                at === -1
+                    ? [...this.tabs, tab]
+                    : [...this.tabs.slice(0, at + 1), tab, ...this.tabs.slice(at + 1)];
             this.persistTabOrder();
         }
         this.activateTab(id);
@@ -266,17 +335,65 @@ class Workspace {
 
     /** Closes a tab, moving focus to its neighbour so the view is never blank. */
     closeTab(id: string): void {
-        const index = this.tabs.findIndex((t) => t.id === id);
-        if (index === -1) return;
+        this.retainTabs((tab) => tab.id !== id);
+    }
 
-        this.tabs = this.tabs.filter((t) => t.id !== id);
-        if (this.activeTabId === id) {
-            const next = this.tabs[index] ?? this.tabs[index - 1] ?? null;
-            this.activeTabId = next?.id ?? null;
-            if (next) this.selectContext(next.contextId);
+    /**
+     * Closes every tab but one. Pass a context to spare the tabs belonging to
+     * other clusters -- "clear out staging, leave prod alone".
+     */
+    closeOtherTabs(id: string, withinContextId?: string): void {
+        this.retainTabs(
+            (tab) => tab.id === id || (withinContextId !== undefined && tab.contextId !== withinContextId),
+        );
+    }
+
+    /** Closes every tab, or every tab belonging to one context. */
+    closeAllTabs(withinContextId?: string): void {
+        this.retainTabs((tab) => withinContextId !== undefined && tab.contextId !== withinContextId);
+    }
+
+    /**
+     * Keeps the tabs matching `keep` and drops the rest, which is every closing
+     * operation there is. Closing one tab and closing nine differ only in the
+     * predicate; what they share -- where focus lands, that the detail panel
+     * describes an object that may no longer be on screen, and that the order
+     * is written once -- is the part worth having in one place.
+     */
+    private retainTabs(keep: (tab: Tab) => boolean): void {
+        const survivors = this.tabs.filter(keep);
+        if (survivors.length === this.tabs.length) return;
+
+        const hadActive = this.activeTabId !== null;
+        const stillActive = survivors.some((t) => t.id === this.activeTabId);
+        const successor = hadActive && !stillActive ? this.successorFor(this.activeTabId, keep) : null;
+
+        this.tabs = survivors;
+
+        if (hadActive && !stillActive) {
+            this.activeTabId = successor?.id ?? null;
+            if (successor) this.selectContext(successor.contextId);
             this.closeDetail();
         }
         this.persistTabOrder();
+    }
+
+    /**
+     * The tab that takes over when the active one closes: the first survivor to
+     * its right, else the nearest to its left, so focus moves the short way and
+     * lands where the eye already is.
+     */
+    private successorFor(activeId: string | null, keep: (tab: Tab) => boolean): Tab | null {
+        const index = this.tabs.findIndex((t) => t.id === activeId);
+        if (index === -1) return null;
+
+        for (let i = index + 1; i < this.tabs.length; i++) {
+            if (keep(this.tabs[i])) return this.tabs[i];
+        }
+        for (let i = index - 1; i >= 0; i--) {
+            if (keep(this.tabs[i])) return this.tabs[i];
+        }
+        return null;
     }
 
     /** Reorders tabs after a drag. Both indices are positions in `tabs`. */

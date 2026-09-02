@@ -42,20 +42,31 @@ type Layout struct {
 
 // Settings is the whole persisted file.
 type Settings struct {
-	ManualFiles []string                `json:"manualFiles"`
-	Contexts    map[string]ContextPrefs `json:"contexts"`
-	TabOrder    []TabRef                `json:"tabOrder"`
-	Layout      Layout                  `json:"layout"`
+	ManualFiles []string `json:"manualFiles"`
+	// ManualFolders are directories the user asked us to watch. They are kept
+	// as folders rather than expanded into their files at the time they were
+	// added, so that a config dropped into one later is picked up by the next
+	// sync instead of needing to be added by hand.
+	ManualFolders []string `json:"manualFolders"`
+	// ExcludedFiles are kubeconfigs found by discovery that the user has said
+	// they do not want. A discovered file cannot simply be forgotten -- the
+	// next scan would find it again -- so refusing it has to be recorded.
+	ExcludedFiles []string                `json:"excludedFiles"`
+	Contexts      map[string]ContextPrefs `json:"contexts"`
+	TabOrder      []TabRef                `json:"tabOrder"`
+	Layout        Layout                  `json:"layout"`
 }
 
 // Defaults returns a settings value that is safe to use before anything has
 // been saved, and that also fills in any field missing from an older file.
 func Defaults() Settings {
 	return Settings{
-		ManualFiles: []string{},
-		Contexts:    map[string]ContextPrefs{},
-		TabOrder:    []TabRef{},
-		Layout:      Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260},
+		ManualFiles:   []string{},
+		ManualFolders: []string{},
+		ExcludedFiles: []string{},
+		Contexts:      map[string]ContextPrefs{},
+		TabOrder:      []TabRef{},
+		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260},
 	}
 }
 
@@ -113,6 +124,13 @@ func (s *Store) ManualFiles() []string {
 	return slices.Clone(s.data.ManualFiles)
 }
 
+// ManualFolders returns the directories the user asked us to scan.
+func (s *Store) ManualFolders() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.ManualFolders)
+}
+
 // update applies a change under the lock and flushes to disk. If the write
 // fails the in-memory state is rolled back, so what the UI shows after an error
 // still matches what is on disk.
@@ -163,6 +181,64 @@ func (s *Store) AddManualFile(path string) (Settings, error) {
 func (s *Store) RemoveManualFile(path string) (Settings, error) {
 	return s.update(func(d *Settings) {
 		d.ManualFiles = slices.DeleteFunc(d.ManualFiles, func(p string) bool { return p == path })
+	})
+}
+
+// ExcludedFiles returns the discovered kubeconfigs the user has hidden.
+func (s *Store) ExcludedFiles() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.ExcludedFiles)
+}
+
+// ExcludeFile hides a discovered kubeconfig from the sidebar.
+func (s *Store) ExcludeFile(path string) (Settings, error) {
+	if path == "" {
+		return s.Get(), errors.New("path is required")
+	}
+	return s.update(func(d *Settings) {
+		if !slices.Contains(d.ExcludedFiles, path) {
+			d.ExcludedFiles = append(d.ExcludedFiles, path)
+		}
+	})
+}
+
+// UnexcludeFile lets a hidden kubeconfig be discovered again.
+func (s *Store) UnexcludeFile(path string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.ExcludedFiles = slices.DeleteFunc(d.ExcludedFiles, func(p string) bool { return p == path })
+	})
+}
+
+// ClearExclusionsIn forgets what was hidden inside one directory, so that
+// re-adding a folder starts from a clean slate rather than quietly continuing
+// to hide files the user can no longer see listed anywhere.
+func (s *Store) ClearExclusionsIn(dir string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.ExcludedFiles = slices.DeleteFunc(d.ExcludedFiles, func(p string) bool {
+			return filepath.Dir(p) == dir
+		})
+	})
+}
+
+// AddManualFolder remembers a directory to scan for kubeconfigs. Adding one
+// that is already known is a no-op rather than an error.
+func (s *Store) AddManualFolder(path string) (Settings, error) {
+	if path == "" {
+		return s.Get(), errors.New("path is required")
+	}
+	return s.update(func(d *Settings) {
+		if !slices.Contains(d.ManualFolders, path) {
+			d.ManualFolders = append(d.ManualFolders, path)
+		}
+	})
+}
+
+// RemoveManualFolder stops scanning a directory. The configs found through it
+// disappear from the sidebar on the next sync.
+func (s *Store) RemoveManualFolder(path string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.ManualFolders = slices.DeleteFunc(d.ManualFolders, func(p string) bool { return p == path })
 	})
 }
 
@@ -217,6 +293,12 @@ func normalise(s Settings) Settings {
 	if s.ManualFiles == nil {
 		s.ManualFiles = []string{}
 	}
+	if s.ManualFolders == nil {
+		s.ManualFolders = []string{}
+	}
+	if s.ExcludedFiles == nil {
+		s.ExcludedFiles = []string{}
+	}
 	if s.Contexts == nil {
 		s.Contexts = map[string]ContextPrefs{}
 	}
@@ -241,6 +323,8 @@ func normalise(s Settings) Settings {
 func clone(s Settings) Settings {
 	out := s
 	out.ManualFiles = slices.Clone(s.ManualFiles)
+	out.ManualFolders = slices.Clone(s.ManualFolders)
+	out.ExcludedFiles = slices.Clone(s.ExcludedFiles)
 	out.TabOrder = slices.Clone(s.TabOrder)
 	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
 	for k, v := range s.Contexts {

@@ -28,12 +28,43 @@ export function AddFile(path: string): $CancellablePromise<kube$0.File[] | null>
 }
 
 /**
- * BrowseForFile opens the native file picker and adds whatever the user chose.
- * It returns the new file list; cancelling the dialog leaves everything as it
- * was and is not an error.
+ * AddFiles remembers several kubeconfig paths at once. Files that parse are
+ * kept even when others alongside them do not, because discarding a good
+ * selection over one bad file would mean picking them all again.
+ */
+export function AddFiles(paths: string[] | null): $CancellablePromise<kube$0.File[] | null> {
+    return $Call.ByID(2448602104, paths);
+}
+
+/**
+ * AddFolder starts watching a directory for kubeconfigs and rescans.
+ * 
+ * The folder is scanned before being stored so that choosing one with nothing
+ * in it fails with a message, rather than being accepted and then appearing to
+ * have done nothing.
+ */
+export function AddFolder(path: string): $CancellablePromise<kube$0.File[] | null> {
+    return $Call.ByID(472245013, path);
+}
+
+/**
+ * BrowseForFile opens the native file picker and adds everything the user
+ * chose. It returns the new file list; cancelling the dialog leaves everything
+ * as it was and is not an error.
+ * 
+ * Several files can be picked at once, and one bad choice does not discard the
+ * good ones: every file is tried, and the failures are reported together.
  */
 export function BrowseForFile(): $CancellablePromise<kube$0.File[] | null> {
     return $Call.ByID(2885395557);
+}
+
+/**
+ * BrowseForFolder opens the native picker in directory mode and watches the
+ * folder the user chose.
+ */
+export function BrowseForFolder(): $CancellablePromise<kube$0.File[] | null> {
+    return $Call.ByID(1945478287);
 }
 
 /**
@@ -45,6 +76,15 @@ export function Contexts(): $CancellablePromise<kube$0.Context[] | null> {
 }
 
 /**
+ * Excluded returns the files the user has hidden, so the sidebar can say how
+ * many a folder is holding back and offer to show them again. Hidden state that
+ * cannot be seen anywhere is hidden state nobody can undo.
+ */
+export function Excluded(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(1912182292);
+}
+
+/**
  * Files returns the last scan, running one first if the app has just started.
  */
 export function Files(): $CancellablePromise<kube$0.File[] | null> {
@@ -52,12 +92,43 @@ export function Files(): $CancellablePromise<kube$0.File[] | null> {
 }
 
 /**
- * RemoveFile forgets a user-added kubeconfig. Auto-discovered files cannot be
- * removed -- the next sync would find them again -- so that is reported as an
- * error rather than appearing to work.
+ * Folders returns the directories being watched, so the sidebar can list them
+ * and offer to stop watching one.
+ */
+export function Folders(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(1323338567);
+}
+
+/**
+ * RemoveFile takes a kubeconfig out of the sidebar, whatever put it there.
+ * 
+ * From the user's side this is one action -- "I do not want this file" -- but
+ * it has two implementations. A file they added by hand is simply forgotten. A
+ * file discovery found cannot be forgotten, because the next sync would find it
+ * again, so refusing it is recorded as an exclusion instead.
  */
 export function RemoveFile(path: string): $CancellablePromise<kube$0.File[] | null> {
     return $Call.ByID(298433948, path);
+}
+
+/**
+ * RemoveFolder stops watching a directory. The configs found through it leave
+ * the sidebar with the rescan this triggers.
+ * 
+ * Anything hidden inside that folder is forgotten with it: keeping those
+ * exclusions would mean re-adding the folder silently produced fewer files than
+ * it contains, with nothing on screen explaining why.
+ */
+export function RemoveFolder(path: string): $CancellablePromise<kube$0.File[] | null> {
+    return $Call.ByID(2132634946, path);
+}
+
+/**
+ * RestoreFile un-hides a file that was excluded, letting discovery find it
+ * again on this sync.
+ */
+export function RestoreFile(path: string): $CancellablePromise<kube$0.File[] | null> {
+    return $Call.ByID(2752321370, path);
 }
 
 /**

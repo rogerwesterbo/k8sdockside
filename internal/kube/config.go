@@ -8,11 +8,14 @@
 package kube
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,6 +27,7 @@ const (
 	SourceEnv     = "env"     // listed in $KUBECONFIG
 	SourceScan    = "scan"    // found by scanning ~/.kube
 	SourceManual  = "manual"  // added by the user
+	SourceFolder  = "folder"  // found in a folder the user asked us to watch
 )
 
 // maxConfigSize caps how much of a candidate file we are willing to read. A
@@ -87,40 +91,56 @@ func ContextID(path, name string) string {
 // failure is reported in the returned File rather than as an error, because the
 // caller is building a list and one bad file should not sink the rest.
 func ParseFile(path, source string) File {
+	f, _ := parseFile(path, source)
+	return f
+}
+
+// parseFile is ParseFile plus whether the failure was simply that nothing is at
+// that path. Discover treats an absent file differently from one it found but
+// could not read, and asking here avoids a second stat to tell them apart.
+func parseFile(path, source string) (File, bool) {
 	f := File{Path: path, Source: source, Contexts: []Context{}}
 
 	info, err := os.Stat(path)
 	if err != nil {
 		f.Error = err.Error()
-		return f
+		return f, errors.Is(err, fs.ErrNotExist)
 	}
 	if info.IsDir() {
 		f.Error = "not a file"
-		return f
+		return f, false
 	}
 	if info.Size() > maxConfigSize {
 		f.Error = fmt.Sprintf("file is too large to be a kubeconfig (%d bytes)", info.Size())
-		return f
+		return f, false
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		f.Error = err.Error()
-		return f
+		return f, false
+	}
+
+	// A cheap guard before handing anything to the YAML parser. It matters most
+	// for a folder the user pointed at, where every file is tried regardless of
+	// its name: reporting "not a text file" beats a parse error full of binary.
+	if !utf8.Valid(data) {
+		f.Error = "not a text file"
+		return f, false
 	}
 
 	var raw rawConfig
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		f.Error = "not valid YAML: " + err.Error()
-		return f
+		return f, false
 	}
 	if raw.Kind != "" && raw.Kind != "Config" {
 		f.Error = "not a kubeconfig (kind: " + raw.Kind + ")"
-		return f
+		return f, false
 	}
 	if len(raw.Contexts) == 0 {
 		f.Error = "no contexts defined"
-		return f
+		return f, false
 	}
 
 	servers := make(map[string]string, len(raw.Clusters))
@@ -143,7 +163,7 @@ func ParseFile(path, source string) File {
 			Current:   c.Name == raw.CurrentContext,
 		})
 	}
-	return f
+	return f, false
 }
 
 // candidate is a path we intend to try, tagged with how we found it.
@@ -152,11 +172,29 @@ type candidate struct {
 	source string
 }
 
+// Sources is what the user has told us about where their kubeconfigs are, and
+// which of the ones we find they do not want to see.
+type Sources struct {
+	Files    []string // added by hand
+	Folders  []string // scanned on every sync
+	Excluded []string // found, but hidden at the user's request
+}
+
 // Discover finds every kubeconfig the app should offer: ~/.kube/config, the
-// entries in $KUBECONFIG, the paths the user added by hand, and anything in
-// ~/.kube that looks like a kubeconfig. Files are returned in that order, which
-// is also the precedence used when the same file turns up twice.
-func Discover(manual []string) []File {
+// entries in $KUBECONFIG, the paths the user added by hand, everything in the
+// folders they asked us to watch, and anything in ~/.kube that looks like a
+// kubeconfig. Files are returned in that order, which is also the precedence
+// used when the same file turns up twice.
+func Discover(sources Sources) []File {
+	manual, folders := sources.Files, sources.Folders
+
+	excluded := make(map[string]bool, len(sources.Excluded))
+	for _, p := range sources.Excluded {
+		if resolved := resolve(p); resolved != "" {
+			excluded[resolved] = true
+		}
+	}
+
 	var candidates []candidate
 
 	home, err := os.UserHomeDir()
@@ -178,6 +216,15 @@ func Discover(manual []string) []File {
 		}
 	}
 
+	// Folders the user chose are scanned before ~/.kube, so a config that is in
+	// both is labelled with the folder they picked rather than as an incidental
+	// scan hit they cannot remove.
+	for _, dir := range folders {
+		for _, p := range scanFolder(dir) {
+			candidates = append(candidates, candidate{p, SourceFolder})
+		}
+	}
+
 	if err == nil {
 		for _, p := range scanKubeDir(filepath.Join(home, ".kube")) {
 			candidates = append(candidates, candidate{p, SourceScan})
@@ -193,16 +240,71 @@ func Discover(manual []string) []File {
 		}
 		seen[resolved] = true
 
-		parsed := ParseFile(resolved, c.source)
+		// Hidden at the user's request. Checked after dedup so that a file
+		// reached by two routes is hidden by either of them.
+		if excluded[resolved] {
+			continue
+		}
+
+		parsed, missing := parseFile(resolved, c.source)
 		// A glob hit that turns out not to be a kubeconfig is not an error the
-		// user needs to see -- they never asked for that file. Paths they named
-		// (or that $KUBECONFIG names) are reported even when broken.
-		if parsed.Error != "" && c.source == SourceScan {
+		// user needs to see -- they never asked for that file. Nor is an absent
+		// ~/.kube/config: plenty of people keep every cluster in $KUBECONFIG or
+		// in files they add by hand, and we offer that path unasked. Paths the
+		// user named (or that $KUBECONFIG names) are reported even when broken,
+		// as is a default config that exists but cannot be read.
+		if parsed.Error != "" && (c.source == SourceScan || c.source == SourceFolder ||
+			(c.source == SourceDefault && missing)) {
 			continue
 		}
 		files = append(files, parsed)
 	}
 	return files
+}
+
+// scanFolder lists the files directly inside a folder the user chose.
+//
+// Unlike the ~/.kube scan it does not filter by name: the user pointed at this
+// folder deliberately, and kubeconfigs are routinely saved with no extension at
+// all. Every regular file is offered to ParseFile, which is what decides -- by
+// reading it -- whether it is a kubeconfig. Sub-directories are not descended;
+// one level is what "the files in this folder" means, and it keeps a folder
+// chosen by mistake from walking a whole tree.
+func scanFolder(dir string) []string {
+	resolved := resolve(dir)
+	if resolved == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(resolved)
+	if err != nil {
+		return nil
+	}
+
+	var found []string
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		// Sockets, devices and the like are not files we should be opening.
+		if info, err := e.Info(); err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		found = append(found, filepath.Join(resolved, e.Name()))
+	}
+	sort.Strings(found)
+	return found
+}
+
+// ScanFolder reports the kubeconfigs a folder contains, for the caller that
+// wants to know before committing to watching it.
+func ScanFolder(dir string) []File {
+	var out []File
+	for _, path := range scanFolder(dir) {
+		if parsed := ParseFile(path, SourceFolder); parsed.Error == "" {
+			out = append(out, parsed)
+		}
+	}
+	return out
 }
 
 // scanKubeDir returns the entries of ~/.kube that are plausibly kubeconfigs.

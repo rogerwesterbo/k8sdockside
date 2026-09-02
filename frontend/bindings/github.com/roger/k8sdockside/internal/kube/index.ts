@@ -4,11 +4,11 @@
 export type {
     Cell,
     Context,
-    Event,
     File,
     Gauge,
     Overview,
     Row,
+    Snapshot,
     Stat,
     Table
 } from "./models.js";

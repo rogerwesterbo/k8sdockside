@@ -1,0 +1,469 @@
+package kube
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+// column is one column of a live table: a header, plus how to get its value out
+// of an object.
+//
+// Path is a JSONPath expression, the same form a CRD's additionalPrinterColumns
+// uses -- which is the point: custom resources describe their own columns that
+// way, so serving built-in kinds through the same mechanism means there is one
+// renderer rather than two. From is for the columns JSONPath genuinely cannot
+// express, where the value is computed rather than read: a pod's ready count is
+// a tally across its containers, not a field.
+type column struct {
+	Name string
+	Path string
+	From func(*unstructured.Unstructured) Cell
+}
+
+// value renders one column for one object.
+func (c column) value(u *unstructured.Unstructured) Cell {
+	if c.From != nil {
+		return c.From(u)
+	}
+	return plain(evalPath(u, c.Path))
+}
+
+// nameColumn and namespaceColumn open every table, matching how the tables have
+// always been laid out and what Row carries separately for the describe panel.
+var nameColumn = column{Name: "Name", From: func(u *unstructured.Unstructured) Cell { return plain(u.GetName()) }}
+var namespaceColumn = column{Name: "Namespace", From: func(u *unstructured.Unstructured) Cell { return muted(u.GetNamespace()) }}
+var ageColumn = column{Name: "Age", From: func(u *unstructured.Unstructured) Cell {
+	return timeCell(u.GetCreationTimestamp().Time)
+}}
+
+// defaultOrder names the column a kind is arranged by before the frontend ever
+// sees it. Everything absent from here is ordered by namespace then name.
+//
+// Events are the case that motivates it: a list of what has just gone wrong is
+// close to useless in alphabetical order, and the reader wants the most recent
+// line first every time the table refreshes, not only on the first paint.
+var defaultOrder = map[string]string{
+	KindEvents: "Last Seen",
+}
+
+// buildLiveTable projects cached objects into the table the UI renders.
+func buildLiveTable(kind string, cols []column, namespaced bool, items []*unstructured.Unstructured) Table {
+	headers := make([]string, len(cols))
+	for i, c := range cols {
+		headers[i] = c.Name
+	}
+
+	rows := make([]Row, 0, len(items))
+	for _, u := range items {
+		cells := make([]Cell, len(cols))
+		for i, c := range cols {
+			cells[i] = c.value(u)
+		}
+		rows = append(rows, Row{
+			ID:        rowID(kind, u.GetNamespace(), u.GetName()),
+			Name:      u.GetName(),
+			Namespace: u.GetNamespace(),
+			Cells:     cells,
+		})
+	}
+
+	orderRows(kind, headers, rows)
+
+	return Table{Kind: kind, Columns: headers, Rows: rows, Namespaced: namespaced}
+}
+
+// columnsFor returns the columns for a kind. Custom resources are asked what
+// their columns are -- a CRD carries additionalPrinterColumns precisely so that
+// clients do not have to know anything about the kind in advance -- and every
+// other kind uses the set compiled in below.
+func (c *clusterClient) columnsFor(kind string, namespaced bool) ([]column, error) {
+	if _, _, ok := ParseCustomKind(kind); ok {
+		return c.customColumns(kind, namespaced)
+	}
+	cols, ok := builtinColumns[kind]
+	if !ok {
+		return nil, fmt.Errorf("no columns defined for %s", kind)
+	}
+	return withNamespace(cols, namespaced), nil
+}
+
+// withNamespace inserts the Namespace column after Name for namespaced kinds.
+func withNamespace(cols []column, namespaced bool) []column {
+	if !namespaced {
+		return cols
+	}
+	out := make([]column, 0, len(cols)+1)
+	out = append(out, cols[0], namespaceColumn)
+	return append(out, cols[1:]...)
+}
+
+// ---- value helpers ---------------------------------------------------------
+
+func nestedString(u *unstructured.Unstructured, fields ...string) string {
+	s, _, _ := unstructured.NestedString(u.Object, fields...)
+	return s
+}
+
+func nestedInt(u *unstructured.Unstructured, fields ...string) int64 {
+	n, _, _ := unstructured.NestedInt64(u.Object, fields...)
+	return n
+}
+
+func nestedSlice(u *unstructured.Unstructured, fields ...string) []any {
+	s, _, _ := unstructured.NestedSlice(u.Object, fields...)
+	return s
+}
+
+func asMap(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+func mapString(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+// ageOf renders how long ago an object was created, in the same shape the rest
+// of the app uses.
+func ageOf(u *unstructured.Unstructured) string {
+	t := u.GetCreationTimestamp()
+	if t.IsZero() {
+		return ""
+	}
+	return age(int(time.Since(t.Time).Minutes()))
+}
+
+// conditionStatus reports the status of one condition, the shape shared by
+// almost every modern API including the Gateway API.
+func conditionStatus(u *unstructured.Unstructured, want string, fields ...string) string {
+	for _, raw := range nestedSlice(u, fields...) {
+		c := asMap(raw)
+		if mapString(c, "type") == want {
+			return mapString(c, "status")
+		}
+	}
+	return ""
+}
+
+// conditionCell renders a True/False condition with the matching tone.
+func conditionCell(want string, fields ...string) func(*unstructured.Unstructured) Cell {
+	return func(u *unstructured.Unstructured) Cell {
+		switch conditionStatus(u, want, fields...) {
+		case "True":
+			return toned("True", "ok")
+		case "False":
+			return toned("False", "error")
+		default:
+			return muted("Unknown")
+		}
+	}
+}
+
+// ---- built-in column sets --------------------------------------------------
+
+var builtinColumns = map[string][]column{
+	KindPods: {
+		nameColumn,
+		{Name: "Ready", From: podReady},
+		{Name: "Status", From: podStatus},
+		{Name: "Restarts", From: podRestarts},
+		{Name: "Node", Path: ".spec.nodeName"},
+		{Name: "QoS", Path: ".status.qosClass"},
+		ageColumn,
+	},
+	KindDeployments:  workloadColumns,
+	KindStatefulSet:  workloadColumns,
+	KindDaemonSets: {
+		nameColumn,
+		{Name: "Desired", Path: ".status.desiredNumberScheduled"},
+		{Name: "Current", Path: ".status.currentNumberScheduled"},
+		{Name: "Ready", From: func(u *unstructured.Unstructured) Cell {
+			return ratio(nestedInt(u, "status", "numberReady"), nestedInt(u, "status", "desiredNumberScheduled"))
+		}},
+		{Name: "Node Selector", From: func(u *unstructured.Unstructured) Cell {
+			sel, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "spec", "nodeSelector")
+			return muted(joinMap(sel))
+		}},
+		ageColumn,
+	},
+	KindJobs: {
+		nameColumn,
+		{Name: "Completions", From: func(u *unstructured.Unstructured) Cell {
+			want := nestedInt(u, "spec", "completions")
+			if want == 0 {
+				want = 1
+			}
+			return ratio(nestedInt(u, "status", "succeeded"), want)
+		}},
+		{Name: "Duration", From: jobDuration},
+		ageColumn,
+		{Name: "Condition", From: jobCondition},
+	},
+	KindCronJobs: {
+		nameColumn,
+		{Name: "Schedule", Path: ".spec.schedule"},
+		{Name: "Suspend", From: func(u *unstructured.Unstructured) Cell {
+			suspended, _, _ := unstructured.NestedBool(u.Object, "spec", "suspend")
+			if suspended {
+				return toned("True", "warn")
+			}
+			return toned("False", "ok")
+		}},
+		{Name: "Active", From: func(u *unstructured.Unstructured) Cell {
+			return number(len(nestedSlice(u, "status", "active")))
+		}},
+		{Name: "Last Schedule", From: func(u *unstructured.Unstructured) Cell {
+			return timeCell(parseTime(nestedString(u, "status", "lastScheduleTime")))
+		}},
+		ageColumn,
+	},
+	KindServices: {
+		nameColumn,
+		{Name: "Type", Path: ".spec.type"},
+		{Name: "Cluster IP", Path: ".spec.clusterIP"},
+		{Name: "Ports", From: servicePorts},
+		{Name: "External IP", From: serviceExternalIP},
+		ageColumn,
+	},
+	KindIngresses: {
+		nameColumn,
+		{Name: "Class", Path: ".spec.ingressClassName"},
+		{Name: "Hosts", From: ingressHosts},
+		{Name: "Address", From: loadBalancerAddress},
+		ageColumn,
+	},
+	KindConfigMaps: {
+		nameColumn,
+		{Name: "Keys", From: func(u *unstructured.Unstructured) Cell {
+			data, _, _ := unstructured.NestedMap(u.Object, "data")
+			binary, _, _ := unstructured.NestedMap(u.Object, "binaryData")
+			return number(len(data) + len(binary))
+		}},
+		ageColumn,
+	},
+	KindSecrets: {
+		nameColumn,
+		{Name: "Type", Path: ".type"},
+		{Name: "Keys", From: func(u *unstructured.Unstructured) Cell {
+			data, _, _ := unstructured.NestedMap(u.Object, "data")
+			return number(len(data))
+		}},
+		ageColumn,
+	},
+	KindPVCs: {
+		nameColumn,
+		{Name: "Storage Class", Path: ".spec.storageClassName"},
+		{Name: "Size", From: func(u *unstructured.Unstructured) Cell {
+			return quantityCell(nestedString(u, "status", "capacity", "storage"))
+		}},
+		{Name: "Volume", Path: ".spec.volumeName"},
+		ageColumn,
+		{Name: "Status", From: func(u *unstructured.Unstructured) Cell {
+			return status(nestedString(u, "status", "phase"))
+		}},
+	},
+	KindNodes: {
+		nameColumn,
+		{Name: "Roles", From: nodeRoles},
+		{Name: "Version", Path: ".status.nodeInfo.kubeletVersion"},
+		// Capacity, not usage: live usage comes from the metrics API, which is
+		// a separate server that is not always installed.
+		{Name: "CPU", Path: ".status.capacity.cpu"},
+		{Name: "Memory", Path: ".status.capacity.memory"},
+		{Name: "Taints", From: func(u *unstructured.Unstructured) Cell {
+			return number(len(nestedSlice(u, "spec", "taints")))
+		}},
+		ageColumn,
+		{Name: "Conditions", From: nodeCondition},
+	},
+	KindNamespaces: {
+		nameColumn,
+		{Name: "Labels", From: func(u *unstructured.Unstructured) Cell { return muted(joinMap(u.GetLabels())) }},
+		ageColumn,
+		{Name: "Status", From: func(u *unstructured.Unstructured) Cell {
+			return status(nestedString(u, "status", "phase"))
+		}},
+	},
+	KindEvents: {
+		{Name: "Type", From: func(u *unstructured.Unstructured) Cell { return status(nestedString(u, "type")) }},
+		{Name: "Message", From: func(u *unstructured.Unstructured) Cell { return plain(nestedString(u, "message")) }},
+		{Name: "Reason", From: func(u *unstructured.Unstructured) Cell { return muted(nestedString(u, "reason")) }},
+		{Name: "Involved Object", From: func(u *unstructured.Unstructured) Cell {
+			return muted(nestedString(u, "involvedObject", "kind") + "/" + nestedString(u, "involvedObject", "name"))
+		}},
+		{Name: "Last Seen", From: func(u *unstructured.Unstructured) Cell {
+			return timeCell(parseTime(lastSeen(u)))
+		}},
+	},
+
+	// ---- Gateway API -------------------------------------------------------
+	KindGatewayClasses: {
+		nameColumn,
+		{Name: "Controller", Path: ".spec.controllerName"},
+		{Name: "Accepted", From: conditionCell("Accepted", "status", "conditions")},
+		ageColumn,
+	},
+	KindGateways: {
+		nameColumn,
+		{Name: "Class", Path: ".spec.gatewayClassName"},
+		{Name: "Address", From: gatewayAddress},
+		{Name: "Programmed", From: conditionCell("Programmed", "status", "conditions")},
+		ageColumn,
+	},
+	KindHTTPRoutes:      routeColumns,
+	KindGRPCRoutes:      routeColumns,
+	KindReferenceGrants: {nameColumn, {Name: "From", From: referenceGrantFrom}, ageColumn},
+
+	KindCRDs: {
+		nameColumn,
+		{Name: "Group", Path: ".spec.group"},
+		{Name: "Version", From: crdVersions},
+		{Name: "Scope", Path: ".spec.scope"},
+		{Name: "Kind", Path: ".spec.names.kind"},
+		ageColumn,
+	},
+}
+
+// workloadColumns is shared by Deployments and StatefulSets, which report the
+// same things under the same field names.
+var workloadColumns = []column{
+	nameColumn,
+	{Name: "Pods", From: func(u *unstructured.Unstructured) Cell {
+		return ratio(nestedInt(u, "status", "readyReplicas"), nestedInt(u, "spec", "replicas"))
+	}},
+	{Name: "Image", From: firstImage},
+	ageColumn,
+	{Name: "Condition", From: workloadCondition},
+}
+
+// routeColumns is shared by HTTPRoute and GRPCRoute.
+var routeColumns = []column{
+	nameColumn,
+	{Name: "Hostnames", From: func(u *unstructured.Unstructured) Cell {
+		return plain(joinAny(nestedSlice(u, "spec", "hostnames"), 3))
+	}},
+	{Name: "Parents", From: routeParents},
+	ageColumn,
+}
+
+// crdResource is where CustomResourceDefinitions themselves live.
+var crdResource = schema.GroupVersionResource{
+	Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+}
+
+// customColumns asks a CRD what its own table looks like.
+//
+// This is the whole reason custom resources need no special-casing anywhere
+// else: a CRD carries additionalPrinterColumns -- a header and a JSONPath for
+// each -- precisely so a client can render a kind it has never heard of. It is
+// where `kubectl get` gets its columns too, so the tables match what the user
+// sees on the command line.
+func (c *clusterClient) customColumns(kind string, namespaced bool) ([]column, error) {
+	plural, group, ok := ParseCustomKind(kind)
+	if !ok {
+		return nil, fmt.Errorf("not a custom resource kind: %s", kind)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+
+	crd, err := c.dynamic.Resource(crdResource).Get(ctx, plural+"."+group, metav1.GetOptions{})
+	if err != nil {
+		// Without the CRD we still know every object's name, namespace and age,
+		// so fall back to those rather than failing the tab outright: a user
+		// without RBAC on CRDs can often still list the resources themselves.
+		return withNamespace([]column{nameColumn, ageColumn}, namespaced), nil
+	}
+
+	cols := []column{nameColumn}
+	for _, raw := range pickCRDVersion(crd) {
+		spec := asMap(raw)
+		name, path := mapString(spec, "name"), mapString(spec, "jsonPath")
+		if name == "" || path == "" {
+			continue
+		}
+		// A CRD is free to define an Age column of its own; ours goes last, so
+		// dropping the duplicate keeps the table from carrying two.
+		if strings.EqualFold(name, "Age") {
+			continue
+		}
+		cols = append(cols, column{Name: name, Path: path})
+	}
+	cols = append(cols, ageColumn)
+
+	return withNamespace(cols, namespaced), nil
+}
+
+// pickCRDVersion returns the printer columns of the version the cluster stores,
+// falling back to the first served version. A CRD may serve several versions
+// with different columns, and the storage version is the one whose shape the
+// other views (describe, in particular) will report.
+func pickCRDVersion(crd *unstructured.Unstructured) []any {
+	versions := nestedSlice(crd, "spec", "versions")
+	var first []any
+	for _, raw := range versions {
+		v := asMap(raw)
+		if served, _ := v["served"].(bool); !served {
+			continue
+		}
+		cols, _ := v["additionalPrinterColumns"].([]any)
+		if stored, _ := v["storage"].(bool); stored {
+			return cols
+		}
+		if first == nil {
+			first = cols
+		}
+	}
+	return first
+}
+
+
+// orderRows arranges a kind's rows: by its declared column where it has one,
+// otherwise by namespace and name.
+func orderRows(kind string, headers []string, rows []Row) {
+	at := -1
+	if want, ok := defaultOrder[kind]; ok {
+		at = slices.Index(headers, want)
+	}
+
+	if at == -1 {
+		sort.SliceStable(rows, func(i, j int) bool {
+			if rows[i].Namespace != rows[j].Namespace {
+				return rows[i].Namespace < rows[j].Namespace
+			}
+			return rows[i].Name < rows[j].Name
+		})
+		return
+	}
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		return sortKeyAt(rows[i], at) < sortKeyAt(rows[j], at)
+	})
+}
+
+// sortKeyAt is what a cell sorts by: its Sort value where it has one, its text
+// otherwise. Numeric keys are compared as numbers, which is why they are padded
+// here rather than at every call site that builds one.
+func sortKeyAt(row Row, at int) string {
+	if at >= len(row.Cells) {
+		return ""
+	}
+	cell := row.Cells[at]
+	if cell.Sort == "" {
+		return cell.Text
+	}
+	if n, err := strconv.ParseInt(cell.Sort, 10, 64); err == nil {
+		return fmt.Sprintf("%019d", n)
+	}
+	return cell.Sort
+}

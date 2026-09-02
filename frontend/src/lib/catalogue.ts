@@ -49,6 +49,16 @@ export const NAV_GROUPS: NavGroup[] = [
         ],
     },
     {
+        label: 'Gateway API',
+        items: [
+            { kind: 'gatewayclasses', label: 'Gateway Classes', icon: 'gateway' },
+            { kind: 'gateways', label: 'Gateways', icon: 'gateway' },
+            { kind: 'httproutes', label: 'HTTP Routes', icon: 'route' },
+            { kind: 'grpcroutes', label: 'gRPC Routes', icon: 'route' },
+            { kind: 'referencegrants', label: 'Reference Grants', icon: 'grant' },
+        ],
+    },
+    {
         label: 'Config',
         items: [
             { kind: 'configmaps', label: 'Config Maps', icon: 'sliders' },
@@ -59,20 +69,69 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Storage',
         items: [{ kind: 'persistentvolumeclaims', label: 'Persistent Volume Claims', icon: 'drive' }],
     },
+    {
+        label: 'Definitions',
+        items: [{ kind: 'customresourcedefinitions', label: 'Custom Resource Definitions', icon: 'puzzle' }],
+    },
 ];
+
+/**
+ * The prefix marking a kind that names a custom resource rather than one of the
+ * kinds listed above: `crd:<plural>.<group>`.
+ *
+ * A tab's kind is an opaque string everywhere else -- it is persisted, reordered
+ * and restored without anything looking inside it -- so a custom resource can be
+ * a tab without any of that machinery learning a second shape. This module and
+ * internal/kube/kinds.go are the only two places that parse it.
+ */
+export const CUSTOM_PREFIX = 'crd:';
+
+export interface CustomKind {
+    plural: string;
+    group: string;
+}
+
+/** Splits a `crd:` kind into its plural and group, or null if it is not one. */
+export function parseCustomKind(kind: string): CustomKind | null {
+    if (!kind.startsWith(CUSTOM_PREFIX)) return null;
+
+    const rest = kind.slice(CUSTOM_PREFIX.length);
+    const dot = rest.indexOf('.');
+    if (dot <= 0 || dot === rest.length - 1) return null;
+
+    return { plural: rest.slice(0, dot), group: rest.slice(dot + 1) };
+}
+
+/** The kind string that opens the instance tab for a CustomResourceDefinition. */
+export function customKindFor(definitionName: string): string {
+    return CUSTOM_PREFIX + definitionName;
+}
 
 const BY_KIND = new Map<string, NavItem>(
     NAV_GROUPS.flatMap((group) => group.items).map((item) => [item.kind, item]),
 );
 
-/** The tab title for a kind; falls back to the raw kind so nothing renders blank. */
+/**
+ * The tab title for a kind; falls back to the raw kind so nothing renders blank.
+ *
+ * A custom resource is titled from its plural, which is the only name we have
+ * without asking the cluster -- the CRD's own display kind lives on the server.
+ */
 export function labelFor(kind: string): string {
-    return BY_KIND.get(kind)?.label ?? kind;
+    const known = BY_KIND.get(kind);
+    if (known) return known.label;
+
+    const custom = parseCustomKind(kind);
+    if (custom) return custom.plural.charAt(0).toUpperCase() + custom.plural.slice(1);
+
+    return kind;
 }
 
-/** The icon name for a kind. */
+/** The icon name for a kind. Custom resources all share one. */
 export function iconFor(kind: string): string {
-    return BY_KIND.get(kind)?.icon ?? 'box';
+    const known = BY_KIND.get(kind);
+    if (known) return known.icon;
+    return parseCustomKind(kind) ? 'puzzle' : 'box';
 }
 
 /**

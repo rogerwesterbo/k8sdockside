@@ -36,6 +36,9 @@ go.work.sum
 bin
 frontend/dist
 frontend/node_modules
+# vitest browser-mode leftovers from a failed assertion
+frontend/.vitest-attachments
+frontend/src/**/__screenshots__
 build/linux/appimage/build
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
 # Mobile generated (per-machine; overlays hold absolute paths)

@@ -146,6 +146,12 @@ test: ## Run unit tests.
 	@go tool cover -html=coverage.out -o coverage.html
 	@printf "$(GREEN)✓ Tests complete - coverage report: $(BOLD)coverage.html$(RESET)\n"
 
+.PHONY: test-frontend
+test-frontend: ## Run the Svelte tests (vitest: state in jsdom, components in a browser).
+	@printf "$(CYAN)Running vitest...$(RESET)\n"
+	@cd $(FRONTEND_DIR) && npm test
+	@printf "$(GREEN)✓ Frontend tests complete$(RESET)\n"
+
 .PHONY: bench
 bench: ## Run benchmarks (override with BENCH=<regex>, PKG=<package pattern>, COUNT=<n>)
 	@bench_regex=$${BENCH:-.}; \

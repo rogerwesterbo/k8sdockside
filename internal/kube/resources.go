@@ -5,6 +5,11 @@ package kube
 type Cell struct {
 	Text string `json:"text"`
 	Tone string `json:"tone"`
+	// Sort is compared in place of Text where the two do not share an order.
+	// An age reads "3d" but belongs in seconds; a volume reads "500Mi" but
+	// belongs in bytes. Sorting the text would put "5m" before "2h" before
+	// "3d". Empty means Text is already in the right order.
+	Sort string `json:"sort"`
 }
 
 // Row is one resource in a listing. Name and Namespace are carried separately
@@ -62,8 +67,11 @@ type Overview struct {
 	Namespaces   []string `json:"namespaces"`
 	Stats        []Stat   `json:"stats"`
 	Gauges       []Gauge  `json:"gauges"`
-	Events       []Event  `json:"events"`
-	Error        string   `json:"error"`
+	// Events is the same Table the events tab renders, capped to what the
+	// dashboard has room for, so both are sorted and sortable by the same code
+	// rather than by two implementations that can disagree.
+	Events Table  `json:"events"`
+	Error  string `json:"error"`
 }
 
 // Resource kinds the UI can open a tab for. These strings are the contract

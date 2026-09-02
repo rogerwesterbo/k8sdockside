@@ -110,18 +110,10 @@
                             {:else if workspace.loaded}
                                 <p>No kubeconfig contexts yet.</p>
                                 <p class="hint">
-                                    Sync picks up <code>~/.kube/config</code>, everything in <code>$KUBECONFIG</code>,
-                                    and other kubeconfigs in <code>~/.kube</code>. You can also add a file from
-                                    anywhere on disk.
+                                    Nothing turned up in <code>~/.kube</code> or <code>$KUBECONFIG</code>. Use the
+                                    sidebar to add kubeconfig files, or point it at a folder and it will take every
+                                    one in there, whatever they are named.
                                 </p>
-                                <div class="welcome-actions">
-                                    <button onclick={() => workspace.sync()}>
-                                        <Icon name="refresh" size={14} /> Sync
-                                    </button>
-                                    <button onclick={() => workspace.addFile()}>
-                                        <Icon name="plus" size={14} /> Add kubeconfig
-                                    </button>
-                                </div>
                             {:else}
                                 <p>Looking for kubeconfig files…</p>
                             {/if}
@@ -247,27 +239,6 @@
         background: var(--bg-raised);
         border-radius: 3px;
         padding: 1px 5px;
-    }
-
-    .welcome-actions {
-        display: flex;
-        justify-content: center;
-        gap: 10px;
-        margin-top: 18px;
-    }
-
-    .welcome-actions button {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        padding: 7px 14px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-raised);
-        color: var(--text);
-    }
-
-    .welcome-actions button:hover {
-        background: var(--bg-active);
     }
 
     .statusbar {

@@ -23,6 +23,8 @@ export interface ConfigFile {
 /** The persisted user preferences. */
 export interface Settings {
     manualFiles: string[];
+    manualFolders: string[];
+    excludedFiles: string[];
     contexts: Record<string, { alias: string; color: string }>;
     tabOrder: { contextId: string; kind: string }[];
     layout: { detailDock: string; detailSize: number; sidebarWidth: number };
@@ -55,12 +57,15 @@ export interface Overview {
     namespaces: string[];
     stats: kube.Stat[];
     gauges: kube.Gauge[];
-    events: kube.Event[];
+    /** The same shape a resource tab renders, so both sort through one path. */
+    events: Table;
 }
 
 export function adoptSettings(settings: appconfig.Settings): Settings {
     return {
         manualFiles: [...(settings.manualFiles ?? [])],
+        manualFolders: [...(settings.manualFolders ?? [])],
+        excludedFiles: [...(settings.excludedFiles ?? [])],
         contexts: Object.fromEntries(
             Object.entries(settings.contexts ?? {}).map(([id, prefs]) => [
                 id,
@@ -106,6 +111,6 @@ export function adoptOverview(overview: kube.Overview): Overview {
         namespaces: [...(overview.namespaces ?? [])],
         stats: [...(overview.stats ?? [])],
         gauges: [...(overview.gauges ?? [])],
-        events: [...(overview.events ?? [])],
+        events: adoptTable(overview.events),
     };
 }

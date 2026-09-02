@@ -8,6 +8,14 @@
 export interface Cell {
     "text": string;
     "tone": string;
+
+    /**
+     * Sort is compared in place of Text where the two do not share an order.
+     * An age reads "3d" but belongs in seconds; a volume reads "500Mi" but
+     * belongs in bytes. Sorting the text would put "5m" before "2h" before
+     * "3d". Empty means Text is already in the right order.
+     */
+    "sort": string;
 }
 
 /**
@@ -23,17 +31,6 @@ export interface Context {
     "server": string;
     "file": string;
     "current": boolean;
-}
-
-/**
- * Event is a cluster event as shown on the dashboard and in the events table.
- */
-export interface Event {
-    "type": string;
-    "reason": string;
-    "object": string;
-    "message": string;
-    "age": string;
 }
 
 /**
@@ -71,7 +68,13 @@ export interface Overview {
     "namespaces": string[] | null;
     "stats": Stat[] | null;
     "gauges": Gauge[] | null;
-    "events": Event[] | null;
+
+    /**
+     * Events is the same Table the events tab renders, capped to what the
+     * dashboard has room for, so both are sorted and sortable by the same code
+     * rather than by two implementations that can disagree.
+     */
+    "events": Table;
     "error": string;
 }
 
@@ -85,6 +88,21 @@ export interface Row {
     "name": string;
     "namespace": string;
     "cells": Cell[] | null;
+}
+
+/**
+ * Snapshot is one push to the frontend: the whole current contents of a
+ * subscribed collection.
+ * 
+ * Deltas would be cheaper on the wire, but a Row is a *projection* of an object
+ * and the frontend cannot apply a delta without redoing that projection. The
+ * informer keeps a local cache, so rebuilding the entire table costs no API
+ * traffic at all -- only the projection itself, which is why sending the whole
+ * thing is affordable.
+ */
+export interface Snapshot {
+    "subscriptionId": string;
+    "table": Table;
 }
 
 /**

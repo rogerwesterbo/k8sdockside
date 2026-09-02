@@ -127,7 +127,7 @@ func TestDiscoverFindsEverySource(t *testing.T) {
 	}
 
 	sources := map[string]string{}
-	for _, f := range Discover([]string{manual}) {
+	for _, f := range Discover(Sources{Files: []string{manual}}) {
 		sources[f.Path] = f.Source
 	}
 
@@ -160,7 +160,7 @@ func TestDiscoverDeduplicatesAndPrefersTheFirstSource(t *testing.T) {
 	}
 	t.Setenv("KUBECONFIG", def)
 
-	files := Discover([]string{link})
+	files := Discover(Sources{Files: []string{link}})
 	if len(files) != 1 {
 		t.Fatalf("got %d files, want 1: %v", len(files), files)
 	}
@@ -180,7 +180,7 @@ func TestDiscoverSkipsJunkInKubeDirButReportsNamedFiles(t *testing.T) {
 	writeFile(t, filepath.Join(home, ".kube"), "notes.yaml", "hello: world\n")
 	broken := writeFile(t, t.TempDir(), "broken.yaml", "hello: world\n")
 
-	files := Discover([]string{broken})
+	files := Discover(Sources{Files: []string{broken}})
 
 	var scanned, manual int
 	for _, f := range files {
@@ -211,5 +211,137 @@ func TestResolveExpandsHome(t *testing.T) {
 	}
 	if resolve("   ") != "" {
 		t.Error("a blank path should resolve to nothing")
+	}
+}
+
+func TestDiscoverIgnoresAMissingDefaultConfig(t *testing.T) {
+	home := t.TempDir()
+	elsewhere := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// No ~/.kube/config at all: the user keeps their clusters elsewhere.
+	fromEnv := writeFile(t, elsewhere, "env-config", twoContexts)
+	t.Setenv("KUBECONFIG", fromEnv)
+
+	files := Discover(Sources{})
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want only the $KUBECONFIG one: %+v", len(files), files)
+	}
+	if files[0].Path != fromEnv {
+		t.Errorf("path = %q, want %q", files[0].Path, fromEnv)
+	}
+}
+
+func TestDiscoverStillReportsAnUnreadableDefaultConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KUBECONFIG", "")
+
+	// A default config that exists but is not a kubeconfig is the user's
+	// problem to see, unlike one that is simply absent.
+	writeFile(t, filepath.Join(home, ".kube"), "config", "just: some yaml\n")
+
+	files := Discover(Sources{})
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %+v", len(files), files)
+	}
+	if files[0].Error == "" {
+		t.Error("a malformed ~/.kube/config was silently dropped")
+	}
+}
+
+func TestScanFolderFindsConfigsWhateverTheyAreNamed(t *testing.T) {
+	dir := t.TempDir()
+
+	// A folder of kubeconfigs as people actually keep them: some with an
+	// extension, some with none at all.
+	writeFile(t, dir, "hrw.config", twoContexts)
+	writeFile(t, dir, "kubeconfig-test01-af3e", twoContexts)
+	writeFile(t, dir, "plain", twoContexts)
+
+	found := ScanFolder(dir)
+	if len(found) != 3 {
+		t.Fatalf("found %d configs, want 3: %+v", len(found), found)
+	}
+	for _, f := range found {
+		if f.Source != SourceFolder {
+			t.Errorf("%s: source = %q, want %q", filepath.Base(f.Path), f.Source, SourceFolder)
+		}
+	}
+}
+
+func TestScanFolderSkipsWhatIsNotAKubeconfig(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, dir, "real.config", twoContexts)
+	writeFile(t, dir, "notes.txt", "just some notes\n")
+	writeFile(t, dir, "other.yaml", "apiVersion: v1\nkind: Secret\ndata: {}\n")
+	writeFile(t, dir, "empty.yaml", "")
+	// A binary file must be rejected as such rather than fed to the YAML parser.
+	if err := os.WriteFile(filepath.Join(dir, "ca.crt"), []byte{0x00, 0x01, 0xff, 0xfe, 0x00}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Sub-directories are not descended.
+	writeFile(t, filepath.Join(dir, "nested"), "deep.config", twoContexts)
+
+	found := ScanFolder(dir)
+	if len(found) != 1 {
+		t.Fatalf("found %d configs, want only the real one: %+v", len(found), found)
+	}
+	if filepath.Base(found[0].Path) != "real.config" {
+		t.Errorf("found %q", found[0].Path)
+	}
+}
+
+func TestParseFileRejectsBinaryAsNotText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keys.p12")
+	if err := os.WriteFile(path, []byte{0x30, 0x82, 0x00, 0xff, 0xfe}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := ParseFile(path, SourceManual)
+	if f.Error != "not a text file" {
+		t.Errorf("Error = %q, want %q", f.Error, "not a text file")
+	}
+}
+
+func TestDiscoverIncludesWatchedFolders(t *testing.T) {
+	home := t.TempDir()
+	watched := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KUBECONFIG", "")
+
+	inFolder := writeFile(t, watched, "cluster-a", twoContexts)
+	writeFile(t, watched, "readme.md", "# not a kubeconfig\n")
+
+	files := Discover(Sources{Folders: []string{watched}})
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %+v", len(files), files)
+	}
+	if files[0].Path != inFolder {
+		t.Errorf("path = %q, want %q", files[0].Path, inFolder)
+	}
+	if files[0].Source != SourceFolder {
+		t.Errorf("source = %q, want %q", files[0].Source, SourceFolder)
+	}
+}
+
+func TestAFileNamedDirectlyKeepsItsSourceOverAWatchedFolder(t *testing.T) {
+	home := t.TempDir()
+	watched := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KUBECONFIG", "")
+
+	path := writeFile(t, watched, "cluster-a", twoContexts)
+
+	// The user added this file by hand and also happens to watch its folder.
+	// It must appear once, labelled as theirs, so it stays removable.
+	files := Discover(Sources{Files: []string{path}, Folders: []string{watched}})
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %+v", len(files), files)
+	}
+	if files[0].Source != SourceManual {
+		t.Errorf("source = %q, want %q", files[0].Source, SourceManual)
 	}
 }

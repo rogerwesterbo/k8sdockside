@@ -45,13 +45,26 @@
             class:spinning={workspace.syncing}
             onclick={() => workspace.sync()}
             disabled={workspace.syncing}
-            title="Rescan ~/.kube, $KUBECONFIG and your added files"
+            title="Rescan ~/.kube, $KUBECONFIG, your added files and watched folders"
             aria-label="Sync kubeconfig files"
         >
             <Icon name="refresh" size={15} />
         </button>
-        <button class="action" onclick={() => workspace.addFile()} title="Add a kubeconfig file" aria-label="Add a kubeconfig file">
+        <button
+            class="action"
+            onclick={() => workspace.addFile()}
+            title="Add kubeconfig files"
+            aria-label="Add kubeconfig files"
+        >
             <Icon name="plus" size={15} />
+        </button>
+        <button
+            class="action"
+            onclick={() => workspace.addFolder()}
+            title="Watch a folder of kubeconfigs"
+            aria-label="Watch a folder of kubeconfigs"
+        >
+            <Icon name="folder-plus" size={15} />
         </button>
     </header>
 
@@ -68,17 +81,16 @@
                 <div class="file-head" title={file.path}>
                     <Icon name="file" size={12} />
                     <span class="file-name">{basename(file.path)}</span>
-                    <span class="source">{file.source}</span>
-                    {#if file.source === 'manual'}
-                        <button
-                            class="remove"
-                            onclick={() => workspace.removeFile(file.path)}
-                            title="Stop tracking this file"
-                            aria-label="Stop tracking {basename(file.path)}"
-                        >
-                            <Icon name="close" size={12} />
-                        </button>
-                    {/if}
+                    <button
+                        class="remove"
+                        onclick={() => workspace.removeFile(file.path)}
+                        title={file.source === 'manual'
+                            ? 'Stop tracking this file'
+                            : 'Hide this file. Discovery would find it again, so it is remembered as hidden.'}
+                        aria-label="Remove {basename(file.path)}"
+                    >
+                        <Icon name="close" size={12} />
+                    </button>
                 </div>
 
                 {#if file.error}
@@ -98,15 +110,63 @@
                 {:else}
                     <p>No kubeconfig found.</p>
                     <p class="hint">
-                        k8sdockside looks in <code>~/.kube</code> and <code>$KUBECONFIG</code>. Add a file to get started.
+                        k8sdockside looks in <code>~/.kube</code> and <code>$KUBECONFIG</code>. Add files, or point it
+                        at a folder and it will take every kubeconfig in there — whatever they are named.
                     </p>
-                    <button class="cta" onclick={() => workspace.addFile()}>
-                        <Icon name="plus" size={14} /> Add kubeconfig
-                    </button>
+                    <div class="ctas">
+                        <button class="cta" onclick={() => workspace.addFile()}>
+                            <Icon name="plus" size={14} /> Add kubeconfigs
+                        </button>
+                        <button class="cta" onclick={() => workspace.addFolder()}>
+                            <Icon name="folder-plus" size={14} /> Add a folder
+                        </button>
+                    </div>
                 {/if}
             </div>
         {/if}
     </div>
+
+    {#if workspace.folders.length > 0 || workspace.excluded.length > 0}
+        <div class="sources">
+            {#if workspace.folders.length > 0}
+                <p class="group">Watched folders</p>
+                {#each workspace.folders as folder (folder)}
+                    <div class="source-row">
+                        <Icon name="folder" size={12} />
+                        <span class="path" title={folder}>{basename(folder)}</span>
+                        <button
+                            class="drop"
+                            onclick={() => workspace.removeFolder(folder)}
+                            title="Stop watching {folder}"
+                            aria-label="Stop watching {folder}"
+                        >
+                            <Icon name="close" size={11} />
+                        </button>
+                    </div>
+                {/each}
+            {/if}
+
+            <!-- A discovered file cannot be forgotten, only hidden -- so the
+                 hiding has to be visible, or it is state nobody can undo. -->
+            {#if workspace.excluded.length > 0}
+                <p class="group">Hidden</p>
+                {#each workspace.excluded as path (path)}
+                    <div class="source-row">
+                        <Icon name="file" size={12} />
+                        <span class="path" title={path}>{basename(path)}</span>
+                        <button
+                            class="drop restore"
+                            onclick={() => workspace.restoreFile(path)}
+                            title="Show {path} again"
+                            aria-label="Show {basename(path)} again"
+                        >
+                            <Icon name="undo" size={11} />
+                        </button>
+                    </div>
+                {/each}
+            {/if}
+        </div>
+    {/if}
 
     {#if workspace.selectedContext}
         <ContextSettings context={workspace.selectedContext} />
@@ -214,19 +274,12 @@
     }
 
     .file-name {
+        flex: 1 1 auto;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         letter-spacing: 0.03em;
-    }
-
-    .source {
-        margin-left: auto;
-        flex: 0 0 auto;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        font-size: 9px;
-        opacity: 0.75;
     }
 
     .remove {
@@ -275,6 +328,63 @@
         background: var(--bg-raised);
         border-radius: 3px;
         padding: 1px 4px;
+    }
+
+    .ctas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+    }
+
+    /* The watched folders sit above the context settings, out of the scrolling
+       tree: they are about where configs come from, not about one cluster. */
+    .sources {
+        flex: 0 0 auto;
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px 10px;
+        border-top: 1px solid var(--border);
+    }
+
+    .sources .group {
+        margin: 0 0 4px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+    }
+
+    .source-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 2px;
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+
+    .source-row .path {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .drop {
+        flex: 0 0 auto;
+        color: var(--text-faint);
+        opacity: 0.7;
+    }
+
+    .drop:hover {
+        color: var(--error);
+        opacity: 1;
+    }
+
+    .drop.restore:hover {
+        color: var(--accent);
     }
 
     .cta {

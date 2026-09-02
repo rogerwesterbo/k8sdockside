@@ -36,6 +36,21 @@ export interface Layout {
  */
 export interface Settings {
     "manualFiles": string[] | null;
+
+    /**
+     * ManualFolders are directories the user asked us to watch. They are kept
+     * as folders rather than expanded into their files at the time they were
+     * added, so that a config dropped into one later is picked up by the next
+     * sync instead of needing to be added by hand.
+     */
+    "manualFolders": string[] | null;
+
+    /**
+     * ExcludedFiles are kubeconfigs found by discovery that the user has said
+     * they do not want. A discovered file cannot simply be forgotten -- the
+     * next scan would find it again -- so refusing it has to be recorded.
+     */
+    "excludedFiles": string[] | null;
     "contexts": { [_ in string]?: ContextPrefs } | null;
     "tabOrder": TabRef[] | null;
     "layout": Layout;

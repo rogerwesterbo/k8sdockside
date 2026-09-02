@@ -11,9 +11,20 @@ cluster you are looking at.
 ## What it does
 
 - **Finds kubeconfigs on disk.** `~/.kube/config`, every path in `$KUBECONFIG`,
-  anything else in `~/.kube` that parses as a kubeconfig, plus files you add
-  yourself. **Sync** rescans; a file that fails to parse is shown with the
-  reason rather than silently dropped.
+  anything else in `~/.kube` that parses as a kubeconfig, plus files and folders
+  you add yourself. **Sync** rescans; a file that fails to parse is shown with
+  the reason rather than silently dropped.
+- **Point it at a folder.** Watched folders are scanned one level deep and the
+  name is ignored entirely: every regular file is opened, and whatever turns out
+  to be text, then YAML, then a kubeconfig with contexts is taken. That is how a
+  directory of `cluster-a`, `kubeconfig-prod` and `staging.config` loads without
+  any of them being named the way a glob would expect. The folder is remembered,
+  so a config dropped in later appears on the next sync.
+- **Remove any of them.** The × on a file means "I do not want this", whatever
+  put it there. One you added by hand is forgotten; one discovery found is
+  recorded as hidden instead, because forgetting it would only mean finding it
+  again on the next sync. Hidden files are listed at the foot of the sidebar
+  with a button to bring each one back.
 - **Names and colours each context.** Select a context and the panel at the
   bottom of the sidebar renames it and picks its colour. Both are yours alone —
   the kubeconfig file is never modified.
@@ -25,18 +36,61 @@ cluster you are looking at.
   slides in from the edge. Dock it right, bottom or left, and drag its edge to
   resize; both are remembered.
 
-## Status: the cluster data is stubbed
+## How the cluster data gets here
 
-The kubeconfig reading is real. The resource listings behind each tab are not
-yet: they are fabricated in [`internal/kube/stub.go`](internal/kube/stub.go),
-deterministically per context, so the whole interface can be built and used
-before a live API client exists.
+Resource listings are **live and watched**, not polled. Opening a tab starts a
+`client-go` informer against the cluster; the backend pushes the whole current
+table to the frontend whenever anything changes, so a rollout repaints as it
+happens and nothing has a refresh button.
 
-The fabricated data is coherent — pods belong to workloads that exist, run on
-nodes that exist, and events reference real pods — and it is shaped exactly like
-the real thing. Wiring in `client-go` means replacing the bodies in `stub.go`,
-`tables.go` and `overview.go`. The types in `internal/kube/resources.go`, the
-service signatures and the entire frontend stay as they are.
+Some details worth knowing:
+
+- **Everything goes through the dynamic client.** Built-in kinds, the Gateway
+  API and arbitrary CRDs are all `unstructured` objects on one code path, which
+  is what lets a custom resource open in a tab without anything being compiled
+  in for it.
+- **One watch per kind per context**, shared by every tab looking at it, closed
+  when the last of them does. The namespace filter is applied to the informer's
+  cache, so changing it repaints without reopening anything.
+- **Columns are data.** Most are JSONPath expressions; the few that are computed
+  rather than read (a pod's ready count, a workload's condition) have a Go
+  function instead. Custom resources supply their own columns from the CRD's
+  `additionalPrinterColumns` -- the same source `kubectl get` uses, so the
+  tables match the command line.
+- **Secrets are redacted before they are cached.** An informer holds the whole
+  collection in memory; the tables only ever show how many keys a secret has, so
+  the values are dropped on the way in.
+- **Node and dashboard figures are capacity and requests, not usage.** Live
+  usage comes from the metrics API, a separate server that is not always
+  installed.
+
+Credentials come from `clientcmd`, so client certificates, tokens and `exec`
+plugins all work. Note that the kubeconfig is read twice by design: the parser
+in [`internal/kube/config.go`](internal/kube/config.go) reads the little needed
+to *list* contexts and is forgiving of files it cannot fully understand, while
+`clientcmd` reads what is needed to *connect*.
+
+### The frontend tests
+
+`make test-frontend` runs two vitest projects. Application state (`*.test.ts`)
+runs in jsdom with the Wails bindings mocked -- it is plain logic over runes and
+does not need a browser. Components (`*.browser.test.ts`) run in headless
+Chromium through Playwright, because `$effect`, focus and pointer handling only
+behave as they do in the app when there is a real browser under them.
+
+The browser project needs Chromium once: `cd frontend && npx playwright install
+chromium`.
+
+### Running the Go tests against a real cluster
+
+Most of the package is tested against literals. The live tests are opt-in,
+because they need a cluster:
+
+```sh
+K8SDOCKSIDE_TEST_KUBECONFIG=~/kubeconfig/example.config \
+K8SDOCKSIDE_TEST_CONTEXT=admin@example \
+  go test ./internal/kube/ -run Live -v
+```
 
 ## Requirements
 
@@ -51,11 +105,12 @@ service signatures and the entire frontend stay as they are.
 ## Running
 
 ```sh
-make dev      # hot-reloading desktop app
-make build    # production build into bin/
-make test     # Go unit tests with a coverage report
+make dev             # hot-reloading desktop app
+make build           # production build into bin/
+make test            # Go unit tests with a coverage report
+make test-frontend   # Svelte tests (vitest)
 make lint-frontend   # svelte-check
-make help     # every target
+make help            # every target
 ```
 
 There is also a headless mode that runs the app as a plain HTTP server with no

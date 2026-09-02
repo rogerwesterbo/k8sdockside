@@ -5,6 +5,7 @@
     import { adoptOverview, type Overview } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
+    import SortableTable from './SortableTable.svelte';
 
     interface Props {
         contextId: string;
@@ -98,20 +99,16 @@
 
         <section class="events">
             <h2>Recent events</h2>
-            {#if overview.events.length === 0}
-                <p class="status quiet">Nothing to report.</p>
+            {#if overview.events.error}
+                <p class="status quiet">{overview.events.error}</p>
             {:else}
-                <ul>
-                    {#each overview.events as event, i (`${event.object}-${event.reason}-${i}`)}
-                        <li class={event.type === 'Warning' ? 'warn' : 'ok'}>
-                            <span class="type">{event.type}</span>
-                            <span class="reason">{event.reason}</span>
-                            <span class="message">{event.message}</span>
-                            <span class="object">{event.object}</span>
-                            <span class="age">{event.age}</span>
-                        </li>
-                    {/each}
-                </ul>
+                <div class="events-table">
+                    <SortableTable
+                        columns={overview.events.columns}
+                        rows={overview.events.rows}
+                        empty="Nothing to report."
+                    />
+                </div>
             {/if}
         </section>
     {/if}
@@ -277,72 +274,12 @@
         background: var(--warn) !important;
     }
 
-    .events ul {
-        list-style: none;
-        margin: 0;
-        padding: 0;
+    /* The events panel is the shared table; it only needs a frame and a bound
+       on its height, since the dashboard scrolls as a whole. */
+    .events-table {
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        overflow: hidden;
-    }
-
-    .events li {
-        display: grid;
-        grid-template-columns: 66px 130px 1fr auto 52px;
-        gap: 12px;
-        align-items: baseline;
-        padding: 7px 12px;
-        font-size: 12px;
-        background: var(--bg-panel);
-    }
-
-    .events li + li {
-        border-top: 1px solid var(--border-soft);
-    }
-
-    .type {
-        font-size: 10px;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-    }
-
-    li.warn .type {
-        color: var(--warn);
-    }
-
-    li.ok .type {
-        color: var(--ok);
-    }
-
-    .reason {
-        color: var(--text);
-    }
-
-    .message,
-    .object,
-    .age {
-        color: var(--text-dim);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .object,
-    .age {
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--text-faint);
-    }
-
-    @media (max-width: 900px) {
-        .events li {
-            grid-template-columns: 60px 1fr 52px;
-        }
-
-        .events .message,
-        .events .object {
-            grid-column: 1 / -1;
-            white-space: normal;
-        }
+        overflow: auto;
+        max-height: 340px;
     }
 </style>

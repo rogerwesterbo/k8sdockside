@@ -2,11 +2,18 @@
   A resource listing. Every kind renders through this one component because the
   backend returns them all in the same Table shape. Selecting a row opens the
   describe panel.
+
+  The rows are live: the tab subscribes to a watch on the cluster and the backend
+  pushes the whole table whenever anything changes, so nothing here polls or
+  refreshes.
 -->
 <script lang="ts">
+    import { untrack } from 'svelte';
     import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
-    import { adoptTable, type Row, type Table } from '../state/adopt';
-    import { labelFor } from '../catalogue';
+    import { type Row, type Table } from '../state/adopt';
+    import { subscribe, type Subscription } from '../state/subscriptions';
+    import { customKindFor, labelFor } from '../catalogue';
+    import SortableTable from './SortableTable.svelte';
     import { alpha } from '../colors';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
@@ -22,8 +29,6 @@
     let namespaces = $state<string[]>([]);
     let namespace = $state('');
     let query = $state('');
-    let sortColumn = $state(0);
-    let sortDescending = $state(false);
     let loading = $state(true);
     let error = $state<string | null>(null);
 
@@ -34,28 +39,46 @@
             : null,
     );
 
-    // Reload whenever the tab's identity or the namespace filter changes. The
-    // cancelled flag stops a slow response from overwriting a newer one.
+    let subscription: Subscription | null = null;
+
+    // Open a watch for the tab's identity. The namespace is deliberately not a
+    // dependency: the watch is cluster-wide and the filter is applied to its
+    // cache, so changing it must not tear the watch down and start again.
     $effect(() => {
-        const [id, k, ns] = [contextId, kind, namespace];
-        let cancelled = false;
+        const [id, k] = [contextId, kind];
         loading = true;
         error = null;
+        table = null;
 
-        ResourceService.Table(id, k, ns)
-            .then((result) => {
-                if (!cancelled) table = adoptTable(result);
-            })
-            .catch((err: unknown) => {
-                if (!cancelled) error = err instanceof Error ? err.message : String(err);
-            })
-            .finally(() => {
-                if (!cancelled) loading = false;
-            });
+        // Read untracked: naming it as a dependency would reopen the watch on
+        // every filter change, which is exactly what SetNamespace exists to
+        // avoid. The effect below moves the filter on the open subscription.
+        const sub = subscribe(
+            id,
+            k,
+            untrack(() => namespace),
+            (result) => {
+                table = result;
+                loading = false;
+            },
+            (message) => {
+                error = message;
+                loading = false;
+            },
+        );
+        subscription = sub;
 
         return () => {
-            cancelled = true;
+            subscription = null;
+            sub.close();
         };
+    });
+
+    // Move the filter on the open subscription. The next snapshot arrives with
+    // the new namespace applied.
+    $effect(() => {
+        const ns = namespace;
+        subscription?.setNamespace(ns);
     });
 
     // The namespace list belongs to the context, not the kind, so it is fetched
@@ -75,36 +98,41 @@
         };
     });
 
+    // Filtering only: the ordering is SortableTable's, and the backend has
+    // already put the rows in this kind's natural order.
     let rows = $derived.by(() => {
         if (!table) return [];
         const needle = query.trim().toLowerCase();
-        const filtered = needle
-            ? table.rows.filter((row) => row.cells.some((cell) => cell.text.toLowerCase().includes(needle)))
-            : table.rows;
-
-        const column = Math.min(sortColumn, Math.max(0, (table.columns.length || 1) - 1));
-        const sorted = [...filtered].sort((a, b) =>
-            (a.cells[column]?.text ?? '').localeCompare(b.cells[column]?.text ?? '', undefined, {
-                numeric: true,
-                sensitivity: 'base',
-            }),
-        );
-        return sortDescending ? sorted.reverse() : sorted;
+        if (!needle) return table.rows;
+        return table.rows.filter((row) => row.cells.some((cell) => cell.text.toLowerCase().includes(needle)));
     });
-
-    function sortBy(index: number): void {
-        if (sortColumn === index) {
-            sortDescending = !sortDescending;
-        } else {
-            sortColumn = index;
-            sortDescending = false;
-        }
-    }
 
     function select(row: Row): void {
         workspace.openDetail({ contextId, kind, namespace: row.namespace, name: row.name });
     }
+
+    // A CustomResourceDefinition is the one row that leads somewhere: its name
+    // opens a tab listing the objects of that kind. A definition is named
+    // "<plural>.<group>", which is exactly the kind string such a tab wants.
+    let drillable = $derived(kind === 'customresourcedefinitions');
+
+    function openInstances(row: Row, event: MouseEvent): void {
+        event.stopPropagation();
+        workspace.openTab(contextId, customKindFor(row.name));
+    }
 </script>
+
+<!-- A CustomResourceDefinition's name opens a tab of its objects; every other
+     cell is plain text. -->
+{#snippet drillCell(row: Row, index: number)}
+    {#if index === 0}
+        <button class="drill" onclick={(event) => openInstances(row, event)} title="List the {row.name} in this cluster">
+            {row.cells[0]?.text}
+        </button>
+    {:else}
+        {row.cells[index]?.text}
+    {/if}
+{/snippet}
 
 <div class="view" style:--ctx-tint={alpha(color, 0.1)}>
     <div class="toolbar">
@@ -136,37 +164,14 @@
         {:else if loading && !table}
             <p class="status">Loading {labelFor(kind).toLowerCase()}…</p>
         {:else if table}
-            <table>
-                <thead>
-                    <tr>
-                        {#each table.columns as column, index (column)}
-                            <th class:sorted={sortColumn === index}>
-                                <button onclick={() => sortBy(index)}>
-                                    {column}
-                                    {#if sortColumn === index}
-                                        <Icon name={sortDescending ? 'chevron-down' : 'chevron-right'} size={11} />
-                                    {/if}
-                                </button>
-                            </th>
-                        {/each}
-                    </tr>
-                </thead>
-                <tbody>
-                    {#each rows as row (row.id)}
-                        <tr class:selected={selectedRowId === row.id} onclick={() => select(row)}>
-                            {#each row.cells as cell, index (index)}
-                                <td class={cell.tone}>{cell.text}</td>
-                            {/each}
-                        </tr>
-                    {:else}
-                        <tr class="none">
-                            <td colspan={table.columns.length}>
-                                {query.trim() ? `Nothing matches “${query}”.` : `No ${labelFor(kind).toLowerCase()} here.`}
-                            </td>
-                        </tr>
-                    {/each}
-                </tbody>
-            </table>
+            <SortableTable
+                columns={table.columns}
+                {rows}
+                {selectedRowId}
+                onselect={select}
+                empty={query.trim() ? `Nothing matches “${query}”.` : `No ${labelFor(kind).toLowerCase()} here.`}
+                cell={drillable ? drillCell : undefined}
+            />
         {/if}
     </div>
 </div>
@@ -255,88 +260,32 @@
         color: var(--error);
     }
 
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-    }
 
-    thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        background: var(--bg);
-        border-bottom: 1px solid var(--border);
+
+
+
+
+
+
+
+
+    /* A name that opens a tab of its own, rather than just the describe panel. */
+    .drill {
+        font: inherit;
+        color: var(--accent);
         text-align: left;
-        font-weight: 500;
-        padding: 0;
-        white-space: nowrap;
-    }
-
-    thead button {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        width: 100%;
-        padding: 7px 12px;
-        color: var(--text-faint);
-        font-size: 11px;
-        letter-spacing: 0.03em;
-    }
-
-    thead button:hover {
-        color: var(--text);
-    }
-
-    th.sorted button {
-        color: var(--text);
-    }
-
-    tbody tr {
-        cursor: default;
-        border-bottom: 1px solid var(--border-soft);
-    }
-
-    tbody tr:hover {
-        background: var(--bg-hover);
-    }
-
-    tbody tr.selected {
-        background: var(--bg-active);
-    }
-
-    td {
-        padding: 6px 12px;
-        white-space: nowrap;
+        max-width: 100%;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 340px;
     }
 
-    /* The tone the backend put on the cell, so status colouring is decided once. */
-    td.ok {
-        color: var(--ok);
+    .drill:hover {
+        text-decoration: underline;
     }
 
-    td.warn {
-        color: var(--warn);
-    }
 
-    td.error {
-        color: var(--error);
-    }
 
-    td.info {
-        color: var(--text-dim);
-    }
 
-    tr.none td {
-        padding: 22px 16px;
-        color: var(--text-faint);
-        text-align: left;
-    }
 
-    tr.none:hover {
-        background: none;
-    }
+
 </style>
