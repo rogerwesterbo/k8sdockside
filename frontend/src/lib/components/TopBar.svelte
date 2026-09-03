@@ -12,7 +12,7 @@
 -->
 <header class="topbar">
     <div class="title">
-        <img src="/k8s_dockside_harbour_scene_no_text.svg" alt="" width="18" height="18" />
+        <img src="/icon-ship.svg" alt="" width="18" height="18" />
         <span>K8S Dockside</span>
     </div>
 </header>
