@@ -27,15 +27,36 @@ beforeEach(() => {
     workspace.expanded = ['x'];
 });
 
-// The measurement that motivated collapsing at all: the full tree is ~1194px
-// against a sidebar viewport nearer 820px.
-test('the default folding brings a context back inside the viewport', async () => {
+// Why the defaults fold anything at all. With close to fifty kinds on offer a
+// context cannot be made to fit the sidebar outright -- doing that would mean
+// folding away Workloads or Network, which is worse than scrolling. What the
+// defaults have to earn is a materially shorter tree whose everyday sections
+// are all still there.
+test('the default folding hides a large part of the tree', async () => {
+    workspace.settings.layout.collapsedGroups = [];
+    workspace.settings.contexts = {};
+    render(ContextTree, { props: { context: CTX } });
+    await settle();
+    const openHeight = height();
+
+    document.body.innerHTML = '';
+    workspace.settings.layout.collapsedGroups = null;
+    render(ContextTree, { props: { context: CTX } });
+    await settle();
+
+    expect(height()).toBeLessThan(openHeight * 0.75);
+});
+
+test('the everyday sections are still open by default', async () => {
     workspace.settings.layout.collapsedGroups = null;
     workspace.settings.contexts = {};
     render(ContextTree, { props: { context: CTX } });
     await settle();
 
-    expect(height()).toBeLessThan(820);
+    const shown = [...document.querySelectorAll('.tree .item')].map((el) => el.textContent?.trim());
+    for (const everyday of ['Pods', 'Deployments', 'Nodes', 'Services', 'Config Maps', 'Dashboard']) {
+        expect(shown).toContain(everyday);
+    }
 });
 
 test('unfolding everything gives back every item', async () => {
@@ -134,3 +155,4 @@ test('alt-clicking applies the change to every cluster', async () => {
     expect(workspace.collapsedGroups).toContain('Network');
     expect(workspace.hasFoldingOverride(CTX.id)).toBe(false);
 });
+

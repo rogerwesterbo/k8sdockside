@@ -27,6 +27,18 @@ export function Describe(contextID: string, kind: string, $namespace: string, na
 }
 
 /**
+ * HelmReleases lists the Helm releases installed in a cluster.
+ * 
+ * It is a plain call rather than a subscription because Helm releases are not a
+ * watchable resource: they are Secrets whose payload has to be decoded, and
+ * that payload is exactly what must not be kept in the informer cache. The
+ * table is built and the payload dropped in the same breath.
+ */
+export function HelmReleases(contextID: string, $namespace: string): $CancellablePromise<kube$0.Table> {
+    return $Call.ByID(4249468707, contextID, $namespace);
+}
+
+/**
  * Namespaces lists the namespaces available for the namespace filter.
  */
 export function Namespaces(contextID: string): $CancellablePromise<string[] | null> {

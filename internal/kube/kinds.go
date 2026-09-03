@@ -19,6 +19,9 @@ const GatewayGroup = "gateway.networking.k8s.io"
 // not the policies; both resolve through the same optional-kind path.
 const AdmissionGroup = "admissionregistration.k8s.io"
 
+// RBACGroup holds the roles and the bindings that grant them.
+const RBACGroup = "rbac.authorization.k8s.io"
+
 // Gateway API and CRD kinds, continuing the contract in resources.go: these
 // strings are what the frontend catalogue sends to BuildTable and Subscribe.
 const (
@@ -99,6 +102,20 @@ var builtinKinds = map[string]schema.GroupKind{
 	KindMutatingAdmissionPolicyBindings:   {Group: AdmissionGroup, Kind: "MutatingAdmissionPolicyBinding"},
 	KindValidatingAdmissionPolicies:       {Group: AdmissionGroup, Kind: "ValidatingAdmissionPolicy"},
 	KindValidatingAdmissionPolicyBindings: {Group: AdmissionGroup, Kind: "ValidatingAdmissionPolicyBinding"},
+
+	KindEndpointSlices:  {Group: "discovery.k8s.io", Kind: "EndpointSlice"},
+	KindEndpoints:       {Kind: "Endpoints"},
+	KindIngressClasses:  {Group: "networking.k8s.io", Kind: "IngressClass"},
+	KindNetworkPolicies: {Group: "networking.k8s.io", Kind: "NetworkPolicy"},
+
+	KindStorageClasses: {Group: "storage.k8s.io", Kind: "StorageClass"},
+	KindPVs:            {Kind: "PersistentVolume"},
+
+	KindServiceAccounts:     {Kind: "ServiceAccount"},
+	KindRoles:               {Group: RBACGroup, Kind: "Role"},
+	KindRoleBindings:        {Group: RBACGroup, Kind: "RoleBinding"},
+	KindClusterRoles:        {Group: RBACGroup, Kind: "ClusterRole"},
+	KindClusterRoleBindings: {Group: RBACGroup, Kind: "ClusterRoleBinding"},
 
 	KindGatewayClasses:  {Group: GatewayGroup, Kind: "GatewayClass"},
 	KindGateways:        {Group: GatewayGroup, Kind: "Gateway"},

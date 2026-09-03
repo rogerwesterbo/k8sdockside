@@ -8,6 +8,7 @@
 
 import { Events } from '@wailsio/runtime';
 import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
+import { HELM_RELEASES } from '../catalogue';
 import { adoptTable, type Table } from './adopt';
 
 type Listener = (table: Table) => void;
@@ -52,6 +53,14 @@ export function subscribe(
     onTable: Listener,
     onError: (message: string) => void,
 ): Subscription {
+    // Helm releases are not a watchable resource -- they are Secrets the
+    // backend decodes, and their payload is exactly what must not be cached, so
+    // they are fetched once instead. Handled here rather than in the tab so
+    // that a view still just asks for rows and gets them.
+    if (kind === HELM_RELEASES) {
+        return fetchOnce(contextId, namespace, onTable, onError);
+    }
+
     let id: string | null = null;
     let closed = false;
     // Where the namespace filter has been moved to while we were still waiting
@@ -95,6 +104,40 @@ export function subscribe(
             pending.delete(id);
             void ResourceService.Unsubscribe(id);
             id = null;
+        },
+    };
+}
+
+/**
+ * A "subscription" that resolves once and never updates, for the kinds that are
+ * read rather than watched. Changing the namespace re-reads; closing it stops
+ * whatever is in flight from calling back.
+ */
+function fetchOnce(
+    contextId: string,
+    namespace: string,
+    onTable: Listener,
+    onError: (message: string) => void,
+): Subscription {
+    let closed = false;
+
+    function load(ns: string): void {
+        ResourceService.HelmReleases(contextId, ns)
+            .then((table) => {
+                if (!closed) onTable(adoptTable(table));
+            })
+            .catch((err: unknown) => {
+                if (!closed) onError(err instanceof Error ? err.message : String(err));
+            });
+    }
+    load(namespace);
+
+    return {
+        setNamespace(next: string): void {
+            if (!closed) load(next);
+        },
+        close(): void {
+            closed = true;
         },
     };
 }

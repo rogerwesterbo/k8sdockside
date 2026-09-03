@@ -9,6 +9,9 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
+        // Activating a tab unfolds the section its resource is listed under,
+        // and that folding is a per-context preference, so it is written here.
+        SetContextPrefs: vi.fn().mockResolvedValue({}),
         SetTabOrder: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
     },

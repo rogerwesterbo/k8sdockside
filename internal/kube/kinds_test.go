@@ -218,3 +218,128 @@ func TestClusterScopedKindsAreNotGivenANamespaceColumn(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointSlicesSummariseTheirEndpoints(t *testing.T) {
+	cells := project(t, KindEndpointSlices, true, map[string]any{
+		"metadata":    map[string]any{"name": "api-abc", "namespace": "prod"},
+		"addressType": "IPv4",
+		"ports":       []any{map[string]any{"port": int64(8080), "name": "http"}},
+		"endpoints": []any{
+			map[string]any{"addresses": []any{"10.0.0.1"}, "conditions": map[string]any{"ready": true}},
+			map[string]any{"addresses": []any{"10.0.0.2"}, "conditions": map[string]any{"ready": false}},
+		},
+	})
+
+	want(t, cells, "Address Type", "IPv4")
+	want(t, cells, "Ports", "8080")
+	// The count that matters is how many are actually taking traffic.
+	want(t, cells, "Ready", "1/2")
+}
+
+func TestEndpointsListTheAddressesBehindAService(t *testing.T) {
+	cells := project(t, KindEndpoints, true, map[string]any{
+		"metadata": map[string]any{"name": "api", "namespace": "prod"},
+		"subsets": []any{map[string]any{
+			"addresses": []any{map[string]any{"ip": "10.0.0.1"}, map[string]any{"ip": "10.0.0.2"}},
+			"ports":     []any{map[string]any{"port": int64(8080)}},
+		}},
+	})
+
+	want(t, cells, "Endpoints", "10.0.0.1, 10.0.0.2")
+}
+
+func TestIngressClassesNameTheirController(t *testing.T) {
+	cells := project(t, KindIngressClasses, false, map[string]any{
+		"metadata": map[string]any{
+			"name":        "nginx",
+			"annotations": map[string]any{"ingressclass.kubernetes.io/is-default-class": "true"},
+		},
+		"spec": map[string]any{"controller": "k8s.io/ingress-nginx"},
+	})
+
+	want(t, cells, "Controller", "k8s.io/ingress-nginx")
+	want(t, cells, "Default", "true")
+}
+
+func TestNetworkPoliciesShowWhatTheySelectAndGovern(t *testing.T) {
+	cells := project(t, KindNetworkPolicies, true, map[string]any{
+		"metadata": map[string]any{"name": "deny-all", "namespace": "prod"},
+		"spec": map[string]any{
+			"podSelector": map[string]any{"matchLabels": map[string]any{"app": "api"}},
+			"policyTypes": []any{"Ingress", "Egress"},
+		},
+	})
+
+	want(t, cells, "Pod Selector", "app=api")
+	want(t, cells, "Types", "Ingress, Egress")
+}
+
+func TestStorageClassesShowProvisionerAndDefault(t *testing.T) {
+	cells := project(t, KindStorageClasses, false, map[string]any{
+		"metadata": map[string]any{
+			"name":        "gp3",
+			"annotations": map[string]any{"storageclass.kubernetes.io/is-default-class": "true"},
+		},
+		"provisioner":       "ebs.csi.aws.com",
+		"reclaimPolicy":     "Delete",
+		"volumeBindingMode": "WaitForFirstConsumer",
+	})
+
+	want(t, cells, "Provisioner", "ebs.csi.aws.com")
+	want(t, cells, "Default", "true")
+	want(t, cells, "Reclaim", "Delete")
+}
+
+func TestPersistentVolumesShowWhatTheyAreBoundTo(t *testing.T) {
+	cells := project(t, KindPVs, false, map[string]any{
+		"metadata": map[string]any{"name": "pvc-123"},
+		"spec": map[string]any{
+			"capacity":                      map[string]any{"storage": "20Gi"},
+			"storageClassName":              "gp3",
+			"persistentVolumeReclaimPolicy": "Delete",
+			"claimRef":                      map[string]any{"namespace": "prod", "name": "data-api-0"},
+		},
+		"status": map[string]any{"phase": "Bound"},
+	})
+
+	want(t, cells, "Capacity", "20Gi")
+	want(t, cells, "Claim", "prod/data-api-0")
+	want(t, cells, "Status", "Bound")
+}
+
+func TestServiceAccountsCountTheirSecrets(t *testing.T) {
+	cells := project(t, KindServiceAccounts, true, map[string]any{
+		"metadata": map[string]any{"name": "deployer", "namespace": "prod"},
+		"secrets":  []any{map[string]any{"name": "deployer-token"}},
+	})
+
+	want(t, cells, "Secrets", "1")
+}
+
+func TestRolesCountTheRulesTheyGrant(t *testing.T) {
+	for _, kind := range []string{KindRoles, KindClusterRoles} {
+		cells := project(t, kind, kind == KindRoles, map[string]any{
+			"metadata": map[string]any{"name": "reader", "namespace": "prod"},
+			"rules": []any{
+				map[string]any{"verbs": []any{"get", "list"}, "resources": []any{"pods"}},
+				map[string]any{"verbs": []any{"get"}, "resources": []any{"configmaps"}},
+			},
+		})
+		want(t, cells, "Rules", "2")
+	}
+}
+
+func TestRoleBindingsNameWhatTheyBindAndToWhom(t *testing.T) {
+	for _, kind := range []string{KindRoleBindings, KindClusterRoleBindings} {
+		cells := project(t, kind, kind == KindRoleBindings, map[string]any{
+			"metadata": map[string]any{"name": "readers", "namespace": "prod"},
+			"roleRef":  map[string]any{"kind": "ClusterRole", "name": "view"},
+			"subjects": []any{
+				map[string]any{"kind": "ServiceAccount", "name": "deployer", "namespace": "prod"},
+				map[string]any{"kind": "Group", "name": "devs"},
+			},
+		})
+		want(t, cells, "Role", "ClusterRole/view")
+		want(t, cells, "Subjects", "ServiceAccount/deployer, Group/devs")
+	}
+}

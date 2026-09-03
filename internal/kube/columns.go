@@ -422,6 +422,187 @@ var builtinColumns = map[string][]column{
 	},
 	KindMutatingAdmissionPolicyBindings:   policyBindingColumns,
 	KindValidatingAdmissionPolicyBindings: policyBindingColumns,
+
+	// ---- Networking --------------------------------------------------------
+	KindEndpointSlices: {
+		nameColumn,
+		{Name: "Address Type", Path: ".addressType"},
+		{Name: "Ports", From: func(u *unstructured.Unstructured) Cell {
+			var ports []string
+			for _, p := range nestedSlice(u, "ports") {
+				if n := mapNumber(asMap(p), "port"); n != "" {
+					ports = append(ports, n)
+				}
+			}
+			return plain(strings.Join(ports, ", "))
+		}},
+		// How many endpoints are actually taking traffic, which is the question
+		// a slice is usually opened to answer.
+		{Name: "Ready", From: func(u *unstructured.Unstructured) Cell {
+			items := nestedSlice(u, "endpoints")
+			var ready int64
+			for _, e := range items {
+				conds, _ := asMap(e)["conditions"].(map[string]any)
+				if isReady, ok := conds["ready"].(bool); ok && isReady {
+					ready++
+				}
+			}
+			return ratio(ready, int64(len(items)))
+		}},
+		ageColumn,
+	},
+	KindEndpoints: {
+		nameColumn,
+		{Name: "Endpoints", From: endpointAddresses},
+		ageColumn,
+	},
+	KindIngressClasses: {
+		nameColumn,
+		{Name: "Controller", Path: ".spec.controller"},
+		{Name: "Default", From: annotationFlag("ingressclass.kubernetes.io/is-default-class")},
+		ageColumn,
+	},
+	KindNetworkPolicies: {
+		nameColumn,
+		{Name: "Pod Selector", From: func(u *unstructured.Unstructured) Cell {
+			labels, _, _ := unstructured.NestedStringMap(u.Object, "spec", "podSelector", "matchLabels")
+			if len(labels) == 0 {
+				// An empty selector is not nothing: it is every pod in the
+				// namespace, which is the opposite of what blank would suggest.
+				return muted("all pods")
+			}
+			return plain(joinMap(labels))
+		}},
+		{Name: "Types", From: func(u *unstructured.Unstructured) Cell {
+			return plain(joinAny(nestedSlice(u, "spec", "policyTypes"), 3))
+		}},
+		ageColumn,
+	},
+
+	// ---- Cluster storage ---------------------------------------------------
+	KindStorageClasses: {
+		nameColumn,
+		{Name: "Provisioner", Path: ".provisioner"},
+		{Name: "Default", From: annotationFlag("storageclass.kubernetes.io/is-default-class")},
+		{Name: "Reclaim", Path: ".reclaimPolicy"},
+		{Name: "Binding", Path: ".volumeBindingMode"},
+		ageColumn,
+	},
+	KindPVs: {
+		nameColumn,
+		{Name: "Capacity", From: func(u *unstructured.Unstructured) Cell {
+			return quantityCell(nestedString(u, "spec", "capacity", "storage"))
+		}},
+		{Name: "Access", From: func(u *unstructured.Unstructured) Cell {
+			return muted(joinAny(nestedSlice(u, "spec", "accessModes"), 3))
+		}},
+		{Name: "Reclaim", Path: ".spec.persistentVolumeReclaimPolicy"},
+		{Name: "Claim", From: func(u *unstructured.Unstructured) Cell {
+			ns := nestedString(u, "spec", "claimRef", "namespace")
+			name := nestedString(u, "spec", "claimRef", "name")
+			if name == "" {
+				return muted("")
+			}
+			return plain(ns + "/" + name)
+		}},
+		{Name: "Class", Path: ".spec.storageClassName"},
+		ageColumn,
+		{Name: "Status", From: func(u *unstructured.Unstructured) Cell {
+			return status(nestedString(u, "status", "phase"))
+		}},
+	},
+
+	// ---- Access ------------------------------------------------------------
+	KindServiceAccounts: {
+		nameColumn,
+		{Name: "Secrets", From: func(u *unstructured.Unstructured) Cell {
+			return number(len(nestedSlice(u, "secrets")))
+		}},
+		ageColumn,
+	},
+	KindRoles:               roleColumns,
+	KindClusterRoles:        roleColumns,
+	KindRoleBindings:        bindingColumns,
+	KindClusterRoleBindings: bindingColumns,
+}
+
+// roleColumns is shared by Roles and ClusterRoles, which differ only in scope.
+// The rule count stands in for the permissions themselves: a rule is a list of
+// verbs over a list of resources and does not fit a table cell, so the number
+// says how much there is to read and the describe panel shows it.
+var roleColumns = []column{
+	nameColumn,
+	{Name: "Rules", From: func(u *unstructured.Unstructured) Cell {
+		return number(len(nestedSlice(u, "rules")))
+	}},
+	ageColumn,
+}
+
+// bindingColumns is shared by RoleBindings and ClusterRoleBindings.
+var bindingColumns = []column{
+	nameColumn,
+	{Name: "Role", From: func(u *unstructured.Unstructured) Cell {
+		kind := nestedString(u, "roleRef", "kind")
+		name := nestedString(u, "roleRef", "name")
+		if name == "" {
+			return muted("")
+		}
+		return plain(kind + "/" + name)
+	}},
+	{Name: "Subjects", From: func(u *unstructured.Unstructured) Cell {
+		var subjects []string
+		for _, s := range nestedSlice(u, "subjects") {
+			m := asMap(s)
+			if name := mapString(m, "name"); name != "" {
+				subjects = append(subjects, mapString(m, "kind")+"/"+name)
+			}
+		}
+		return plain(strings.Join(subjects, ", "))
+	}},
+	ageColumn,
+}
+
+// endpointAddresses lists the addresses behind a (deprecated) Endpoints object.
+func endpointAddresses(u *unstructured.Unstructured) Cell {
+	var addresses []string
+	for _, subset := range nestedSlice(u, "subsets") {
+		for _, a := range nestedSlice(&unstructured.Unstructured{Object: asMap(subset)}, "addresses") {
+			if ip := mapString(asMap(a), "ip"); ip != "" {
+				addresses = append(addresses, ip)
+			}
+		}
+	}
+	if len(addresses) == 0 {
+		return muted("")
+	}
+	if len(addresses) > 4 {
+		return plain(strings.Join(addresses[:4], ", ") + fmt.Sprintf(" +%d more", len(addresses)-4))
+	}
+	return plain(strings.Join(addresses, ", "))
+}
+
+// annotationFlag reads one of the "is-default-class" annotations, which is how
+// both IngressClass and StorageClass mark the default rather than by a field.
+func annotationFlag(key string) func(*unstructured.Unstructured) Cell {
+	return func(u *unstructured.Unstructured) Cell {
+		if u.GetAnnotations()[key] == "true" {
+			return toned("true", "ok")
+		}
+		return muted("false")
+	}
+}
+
+// mapNumber reads a numeric field as text, whatever shape the JSON gave it.
+func mapNumber(m map[string]any, key string) string {
+	switch v := m[key].(type) {
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case string:
+		return v
+	}
+	return ""
 }
 
 // replicaColumns is shared by ReplicaSets and ReplicationControllers, which

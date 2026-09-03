@@ -74,3 +74,4 @@ test('clicking a tab whose section is already open changes nothing', async () =>
 
     expect(workspace.hasFoldingOverride(CTX.id)).toBe(false);
 });
+

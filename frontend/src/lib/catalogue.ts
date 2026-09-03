@@ -5,6 +5,13 @@
 
 export const DASHBOARD = 'dashboard';
 
+/**
+ * Helm releases: a kind the sidebar offers that no Kubernetes API serves. It is
+ * read from Helm's own release Secrets rather than watched, so the few places
+ * that have to know the difference name it from here.
+ */
+export const HELM_RELEASES = 'helmreleases';
+
 export interface NavItem {
     /** Resource kind passed to the backend, or DASHBOARD for the overview. */
     kind: string;
@@ -50,7 +57,13 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Network',
         items: [
             { kind: 'services', label: 'Services', icon: 'share' },
+            { kind: 'endpointslices', label: 'Endpoint Slices', icon: 'share' },
+            // Deprecated in Kubernetes 1.33 in favour of Endpoint Slices, but
+            // still what many clusters and controllers carry.
+            { kind: 'endpoints', label: 'Endpoints', icon: 'share' },
             { kind: 'ingresses', label: 'Ingresses', icon: 'globe' },
+            { kind: 'ingressclasses', label: 'Ingress Classes', icon: 'globe' },
+            { kind: 'networkpolicies', label: 'Network Policies', icon: 'shield' },
         ],
     },
     {
@@ -74,7 +87,28 @@ export const NAV_GROUPS: NavGroup[] = [
     },
     {
         label: 'Storage',
-        items: [{ kind: 'persistentvolumeclaims', label: 'Persistent Volume Claims', icon: 'drive' }],
+        items: [
+            { kind: 'persistentvolumeclaims', label: 'Persistent Volume Claims', icon: 'drive' },
+            { kind: 'persistentvolumes', label: 'Persistent Volumes', icon: 'drive' },
+            { kind: 'storageclasses', label: 'Storage Classes', icon: 'database' },
+        ],
+    },
+    {
+        // Who may do what.
+        label: 'Access',
+        items: [
+            { kind: 'serviceaccounts', label: 'Service Accounts', icon: 'grant' },
+            { kind: 'roles', label: 'Roles', icon: 'policy' },
+            { kind: 'rolebindings', label: 'Role Bindings', icon: 'link' },
+            { kind: 'clusterroles', label: 'Cluster Roles', icon: 'policy' },
+            { kind: 'clusterrolebindings', label: 'Cluster Role Bindings', icon: 'link' },
+        ],
+    },
+    {
+        // Not Kubernetes objects: Helm keeps its releases in Secrets, which the
+        // backend decodes. See internal/kube/helm.go.
+        label: 'Helm',
+        items: [{ kind: 'helmreleases', label: 'Helm Releases', icon: 'helm' }],
     },
     {
         // What may be evicted, and in what order things get scheduled.
@@ -118,7 +152,7 @@ export const NAV_GROUPS: NavGroup[] = [
  * The names live here, beside the groups they refer to, rather than in the Go
  * settings store -- which remembers only the strings it is handed.
  */
-export const DEFAULT_COLLAPSED_GROUPS = ['Gateway API', 'Scheduling', 'Admission', 'Definitions'];
+export const DEFAULT_COLLAPSED_GROUPS = ['Gateway API', 'Scheduling', 'Admission', 'Access', 'Definitions'];
 
 /**
  * The prefix marking a kind that names a custom resource rather than one of the

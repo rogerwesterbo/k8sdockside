@@ -158,7 +158,7 @@
                         {/key}
                     {:else}
                         <div class="welcome">
-                            <h1>k8sdockside</h1>
+                            <h1>K8s Dockside</h1>
                             {#if workspace.contexts.length > 0}
                                 <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
                                 <p class="hint">

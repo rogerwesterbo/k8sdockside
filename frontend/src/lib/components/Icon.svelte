@@ -68,6 +68,8 @@
         policy: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6z', 'M13 3v6h6', 'M8.5 15l2.5 2.5 4.5-4.5'],
         // A chain link: a binding tying a policy to what it applies to.
         link: ['M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2', 'M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2'],
+        // A ship's wheel, which is what Helm is named for.
+        helm: ['M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', 'M12 4v5', 'M12 15v5', 'M4 12h5', 'M15 12h5'],
         refresh: ['M20.5 12a8.5 8.5 0 1 1-2.6-6.1', 'M20.5 4v5h-5'],
         // Double chevrons, echoing the single chevron on each context's twisty:
         // one chevron opens a context, two open the lot.

@@ -116,4 +116,27 @@ const (
 	KindMutatingAdmissionPolicyBindings   = "mutatingadmissionpolicybindings"
 	KindValidatingAdmissionPolicies       = "validatingadmissionpolicies"
 	KindValidatingAdmissionPolicyBindings = "validatingadmissionpolicybindings"
+
+	// Networking beyond Services and Ingresses. Endpoints is deprecated as of
+	// Kubernetes 1.33 in favour of EndpointSlices, but is still what many
+	// clusters and controllers actually carry, so both are offered.
+	KindEndpointSlices  = "endpointslices"
+	KindEndpoints       = "endpoints"
+	KindIngressClasses  = "ingressclasses"
+	KindNetworkPolicies = "networkpolicies"
+
+	// Cluster-wide storage, beside the namespaced claims.
+	KindStorageClasses = "storageclasses"
+	KindPVs            = "persistentvolumes"
+
+	// Who may do what.
+	KindServiceAccounts     = "serviceaccounts"
+	KindRoles               = "roles"
+	KindRoleBindings        = "rolebindings"
+	KindClusterRoles        = "clusterroles"
+	KindClusterRoleBindings = "clusterrolebindings"
+
+	// Not a Kubernetes kind: Helm keeps its releases in Secrets, and this one is
+	// served by decoding them rather than by watching a resource. See helm.go.
+	KindHelmReleases = "helmreleases"
 )
