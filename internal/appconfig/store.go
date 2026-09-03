@@ -22,6 +22,12 @@ import (
 type ContextPrefs struct {
 	Alias string `json:"alias"`
 	Color string `json:"color"`
+	// CollapsedGroups overrides Layout.CollapsedGroups for this context alone.
+	// Nil means "follow the global setting", which is the usual case -- a
+	// cluster only carries its own list once the user folds a group for it
+	// specifically, e.g. because this is the one cluster with the Gateway API
+	// installed.
+	CollapsedGroups []string `json:"collapsedGroups"`
 }
 
 // TabRef identifies one open tab: a kubeconfig context and the resource kind
@@ -38,6 +44,19 @@ type Layout struct {
 	DetailDock   string `json:"detailDock"`   // right | bottom | left
 	DetailSize   int    `json:"detailSize"`   // px along the docked edge
 	SidebarWidth int    `json:"sidebarWidth"` // px
+	// Zoom is the webview scale, 1 being normal size. Persisted so the window
+	// comes back the size the user left it readable at.
+	Zoom float64 `json:"zoom"`
+	// CollapsedGroups are the sidebar's resource-tree headings the user has
+	// folded away. It is deliberately nullable: nil means they have never
+	// chosen, which is what lets the frontend fold the specialist groups once
+	// on a fresh install, while an empty list is the real choice "show me
+	// everything" and must not be defaulted over. The names are the frontend
+	// catalogue's group labels; the store only remembers what it is handed.
+	//
+	// No omitempty: it would drop an empty list on write, turning "I expanded
+	// everything" back into "never chosen" on the next read.
+	CollapsedGroups []string `json:"collapsedGroups"`
 }
 
 // Settings is the whole persisted file.
@@ -66,9 +85,18 @@ func Defaults() Settings {
 		ExcludedFiles: []string{},
 		Contexts:      map[string]ContextPrefs{},
 		TabOrder:      []TabRef{},
-		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260},
+		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
 	}
 }
+
+// The range the webview may be scaled to. Below MinZoom the native macOS
+// traffic lights no longer fit the window's own title bar, which is drawn in
+// CSS pixels and so shrinks with the zoom; above MaxZoom the sidebar can no
+// longer show a context name.
+const (
+	MinZoom = 0.5
+	MaxZoom = 2.0
+)
 
 // Store is the settings file plus the lock guarding it. Wails calls service
 // methods from multiple goroutines, so every read and write goes through the
@@ -88,6 +116,14 @@ func Open() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	return openAt(path)
+}
+
+// openAt is Open against a named file. It exists so the tests can run against a
+// temporary directory: os.UserConfigDir ignores XDG_CONFIG_HOME on macOS and
+// Windows, so a test that sets that variable and calls Open reads and writes
+// the developer's own settings file instead of a sandbox.
+func openAt(path string) (*Store, error) {
 	s := &Store{path: path, data: Defaults()}
 
 	raw, err := os.ReadFile(path)
@@ -155,7 +191,10 @@ func (s *Store) SetContextPrefs(id string, prefs ContextPrefs) (Settings, error)
 		return s.Get(), errors.New("context id is required")
 	}
 	return s.update(func(d *Settings) {
-		if prefs.Alias == "" && prefs.Color == "" {
+		// A folding override is a preference in its own right, so a context
+		// carrying only that one is kept. An empty override is meaningful: it
+		// says "show every group here", which is not the same as no override.
+		if prefs.Alias == "" && prefs.Color == "" && prefs.CollapsedGroups == nil {
 			delete(d.Contexts, id)
 			return
 		}
@@ -317,6 +356,11 @@ func normalise(s Settings) Settings {
 	if s.Layout.SidebarWidth < 180 {
 		s.Layout.SidebarWidth = d.SidebarWidth
 	}
+	// A file written before zoom existed unmarshals to 0, which would render
+	// the window at nothing.
+	if s.Layout.Zoom < MinZoom || s.Layout.Zoom > MaxZoom {
+		s.Layout.Zoom = d.Zoom
+	}
 	return s
 }
 
@@ -326,8 +370,11 @@ func clone(s Settings) Settings {
 	out.ManualFolders = slices.Clone(s.ManualFolders)
 	out.ExcludedFiles = slices.Clone(s.ExcludedFiles)
 	out.TabOrder = slices.Clone(s.TabOrder)
+	// slices.Clone keeps nil as nil, which is what preserves "never chosen".
+	out.Layout.CollapsedGroups = slices.Clone(s.Layout.CollapsedGroups)
 	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
 	for k, v := range s.Contexts {
+		v.CollapsedGroups = slices.Clone(v.CollapsedGroups)
 		out.Contexts[k] = v
 	}
 	return out

@@ -112,7 +112,12 @@
 
 <style>
     .settings {
-        flex: 0 0 auto;
+        /* Shrinkable, unlike the rest of the sidebar's fixed rows. It already
+           scrolls its own contents, so giving way when the window is short --
+           or the zoom high -- costs nothing, whereas refusing to made the tree
+           above it collapse to a single heading. */
+        flex: 0 1 auto;
+        min-height: 84px;
         border-top: 1px solid var(--border);
         background: var(--bg-panel);
         padding: 10px 12px 12px;

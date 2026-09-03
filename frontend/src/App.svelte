@@ -23,6 +23,59 @@
         workspace.load();
     });
 
+    // Zoom is applied as CSS on the app's own element, not through the window.
+    //
+    // Wails' native zoom cannot do this job on macOS: it clamps the scale to a
+    // minimum of 1.0, so zooming out is silently discarded, and what it does
+    // apply is -[WKWebView setMagnification:], which scales the rendered
+    // surface without reflowing -- so the page keeps its full layout width and
+    // spills out of the window with its own scrollbars, outside anything CSS
+    // can say about overflow.
+    //
+    // CSS zoom reflows instead. Everything sized in pixels scales together, the
+    // sidebar included, and the regions that scroll go on scrolling. It is set
+    // on #app rather than the root because a percentage height under a zoomed
+    // root ignores that zoom -- see the note in public/style.css.
+    $effect(() => {
+        const scale = workspace.zoom;
+        document.documentElement.style.setProperty('--app-zoom', String(scale));
+
+        // The title bar is the one thing that must not scale away. It is drawn
+        // here in CSS pixels, while the macOS traffic lights over it keep their
+        // real size -- so zooming out has to make it proportionally taller to
+        // go on containing them. Zooming in it grows on its own.
+        document.documentElement.style.setProperty('--topbar-h', `${Math.max(44, 44 / scale)}px`);
+    });
+
+    function onZoomKey(event: KeyboardEvent): void {
+        if (!event.metaKey && !event.ctrlKey) return;
+        // `code` as well as `key`, so the numeric keypad works and so that a
+        // layout where + needs shift is still recognised.
+        switch (event.key) {
+            case '+':
+            case '=':
+                event.preventDefault();
+                workspace.zoomIn();
+                return;
+            case '-':
+            case '_':
+                event.preventDefault();
+                workspace.zoomOut();
+                return;
+            case '0':
+                event.preventDefault();
+                workspace.resetZoom();
+                return;
+        }
+        if (event.code === 'NumpadAdd') {
+            event.preventDefault();
+            workspace.zoomIn();
+        } else if (event.code === 'NumpadSubtract') {
+            event.preventDefault();
+            workspace.zoomOut();
+        }
+    }
+
     // Notices are informational; they should not need dismissing by hand.
     $effect(() => {
         if (!workspace.notice) return;
@@ -57,6 +110,8 @@
         }
     }
 </script>
+
+<svelte:window onkeydown={onZoomKey} />
 
 <div class="shell">
     <TopBar />

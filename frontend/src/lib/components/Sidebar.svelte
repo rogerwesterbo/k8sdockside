@@ -198,6 +198,9 @@
         flex-direction: column;
         min-width: 0;
         height: 100%;
+        /* With minimums on the rows inside, the column can be asked for more
+           than it has; clipping is better than spilling over the status bar. */
+        overflow: hidden;
         background: var(--bg-sidebar);
         border-right: 1px solid var(--border);
     }
@@ -283,6 +286,9 @@
 
     .scroll {
         flex: 1 1 auto;
+        /* A floor for the tree, so the panels below can never squeeze it down
+           to nothing however short the window or high the zoom. */
+        min-height: 140px;
         overflow-y: auto;
         padding: 6px 8px 12px;
     }

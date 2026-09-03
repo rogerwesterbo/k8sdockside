@@ -23,7 +23,10 @@
         display: flex;
         align-items: center;
         flex: 0 0 auto;
-        height: 44px;
+        /* Set from the zoom level: the webview scales CSS pixels but the
+           native traffic lights over this bar keep their real size, so the bar
+           has to grow as the zoom shrinks to go on containing them. */
+        height: var(--topbar-h, 44px);
         background: var(--bg-sidebar);
         border-bottom: 1px solid var(--border);
         /* Dragging the bar moves the window, as a title bar should. Wails reads

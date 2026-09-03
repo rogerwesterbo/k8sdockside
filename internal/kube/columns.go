@@ -332,6 +332,137 @@ var builtinColumns = map[string][]column{
 		{Name: "Kind", Path: ".spec.names.kind"},
 		ageColumn,
 	},
+
+	// ---- Workloads ---------------------------------------------------------
+	KindReplicaSets:            replicaColumns,
+	KindReplicationControllers: replicaColumns,
+	KindHPAs: {
+		nameColumn,
+		// Which workload this scales is the first thing worth knowing; an HPA
+		// row without it is just a name and three numbers.
+		{Name: "Reference", From: func(u *unstructured.Unstructured) Cell {
+			kind := nestedString(u, "spec", "scaleTargetRef", "kind")
+			name := nestedString(u, "spec", "scaleTargetRef", "name")
+			if kind == "" && name == "" {
+				return muted("")
+			}
+			return plain(kind + "/" + name)
+		}},
+		{Name: "Min", Path: ".spec.minReplicas"},
+		{Name: "Max", Path: ".spec.maxReplicas"},
+		{Name: "Replicas", Path: ".status.currentReplicas"},
+		ageColumn,
+	},
+
+	// ---- Namespace configuration and coordination --------------------------
+	KindResourceQuotas: {
+		nameColumn,
+		// Summarised rather than counted: "4 constraints" tells the reader
+		// nothing, and how close used is to hard is the whole question.
+		{Name: "Hard", From: quantityMap("hard")},
+		{Name: "Used", From: quantityMap("used")},
+		ageColumn,
+	},
+	KindLimitRanges: {
+		nameColumn,
+		{Name: "Limit Types", From: func(u *unstructured.Unstructured) Cell {
+			var types []string
+			for _, item := range nestedSlice(u, "spec", "limits") {
+				if t := mapString(asMap(item), "type"); t != "" {
+					types = append(types, t)
+				}
+			}
+			return plain(strings.Join(types, ", "))
+		}},
+		ageColumn,
+	},
+	KindLeases: {
+		nameColumn,
+		{Name: "Holder", Path: ".spec.holderIdentity"},
+		ageColumn,
+	},
+
+	// ---- Scheduling and availability ---------------------------------------
+	KindPDBs: {
+		nameColumn,
+		{Name: "Min Available", Path: ".spec.minAvailable"},
+		{Name: "Max Unavailable", Path: ".spec.maxUnavailable"},
+		{Name: "Allowed Disruptions", Path: ".status.disruptionsAllowed"},
+		ageColumn,
+	},
+	KindPriorityClasses: {
+		nameColumn,
+		{Name: "Value", Path: ".value"},
+		{Name: "Global Default", Path: ".globalDefault"},
+		{Name: "Preemption", Path: ".preemptionPolicy"},
+		ageColumn,
+	},
+	KindRuntimeClasses: {
+		nameColumn,
+		{Name: "Handler", Path: ".handler"},
+		ageColumn,
+	},
+
+	// ---- Admission ---------------------------------------------------------
+	KindMutatingWebhooks:   webhookColumns,
+	KindValidatingWebhooks: webhookColumns,
+	KindMutatingAdmissionPolicies: {
+		nameColumn,
+		{Name: "Failure Policy", Path: ".spec.failurePolicy"},
+		{Name: "Reinvocation", Path: ".spec.reinvocationPolicy"},
+		ageColumn,
+	},
+	KindValidatingAdmissionPolicies: {
+		nameColumn,
+		{Name: "Failure Policy", Path: ".spec.failurePolicy"},
+		{Name: "Validations", From: func(u *unstructured.Unstructured) Cell {
+			return number(len(nestedSlice(u, "spec", "validations")))
+		}},
+		ageColumn,
+	},
+	KindMutatingAdmissionPolicyBindings:   policyBindingColumns,
+	KindValidatingAdmissionPolicyBindings: policyBindingColumns,
+}
+
+// replicaColumns is shared by ReplicaSets and ReplicationControllers, which
+// report the same counts under the same field names and carry the same pod
+// template.
+var replicaColumns = []column{
+	nameColumn,
+	{Name: "Desired", Path: ".spec.replicas"},
+	{Name: "Current", Path: ".status.replicas"},
+	{Name: "Ready", From: func(u *unstructured.Unstructured) Cell {
+		return ratio(nestedInt(u, "status", "readyReplicas"), nestedInt(u, "spec", "replicas"))
+	}},
+	{Name: "Image", From: firstImage},
+	ageColumn,
+}
+
+// webhookColumns is shared by the mutating and validating webhook
+// configurations, which differ only in when they run.
+var webhookColumns = []column{
+	nameColumn,
+	{Name: "Webhooks", From: func(u *unstructured.Unstructured) Cell {
+		return number(len(nestedSlice(u, "webhooks")))
+	}},
+	ageColumn,
+}
+
+// policyBindingColumns is shared by the mutating and validating policy
+// bindings, whose job is entirely to name a policy and who it applies to.
+var policyBindingColumns = []column{
+	nameColumn,
+	{Name: "Policy", Path: ".spec.policyName"},
+	ageColumn,
+}
+
+// quantityMap renders one of a ResourceQuota's resource maps as "cpu=10,
+// memory=20Gi", sorted so the two columns line up row to row.
+func quantityMap(field string) func(*unstructured.Unstructured) Cell {
+	return func(u *unstructured.Unstructured) Cell {
+		values, _, _ := unstructured.NestedStringMap(u.Object, "status", field)
+		return muted(joinMap(values))
+	}
 }
 
 // workloadColumns is shared by Deployments and StatefulSets, which report the

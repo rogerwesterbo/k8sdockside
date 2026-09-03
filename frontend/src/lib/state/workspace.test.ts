@@ -482,3 +482,247 @@ describe('revealing the context a tab belongs to', () => {
         expect(seen.size).toBe(3);
     });
 });
+
+describe('the default folding', () => {
+    beforeEach(() => {
+        workspace.settings.contexts = {};
+    });
+
+    test('the specialist groups start folded on a fresh install', () => {
+        workspace.settings.layout.collapsedGroups = null;
+
+        expect(workspace.isGroupCollapsed(PROD, 'Gateway API')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Scheduling')).toBe(true);
+    });
+
+    test('the everyday groups start open', () => {
+        workspace.settings.layout.collapsedGroups = null;
+
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(false);
+        expect(workspace.isGroupCollapsed(PROD, 'Cluster')).toBe(false);
+        expect(workspace.isGroupCollapsed(PROD, 'Config')).toBe(false);
+    });
+
+    // The distinction the store goes to trouble to preserve: an empty list is a
+    // choice, and re-applying the defaults over it would undo the user's work
+    // every time they restarted.
+    test('an explicitly empty list means nothing is folded, not "use the defaults"', () => {
+        workspace.settings.layout.collapsedGroups = [];
+
+        expect(workspace.isGroupCollapsed(PROD, 'Gateway API')).toBe(false);
+        expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(false);
+    });
+
+    test('a stored list is used exactly as it is', () => {
+        workspace.settings.layout.collapsedGroups = ['Workloads'];
+
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Gateway API')).toBe(false);
+    });
+
+    test('toggling folds an open group', () => {
+        workspace.settings.layout.collapsedGroups = [];
+
+        workspace.toggleGroup(PROD, 'Workloads');
+
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(true);
+    });
+
+    test('toggling unfolds a folded group', () => {
+        workspace.settings.layout.collapsedGroups = ['Workloads'];
+
+        workspace.toggleGroup(PROD, 'Workloads');
+
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(false);
+    });
+
+});
+
+describe('per-context folding', () => {
+    beforeEach(() => {
+        workspace.settings.layout.collapsedGroups = ['Gateway API'];
+        workspace.settings.contexts = {};
+    });
+
+    test('a context nobody has folded anything in follows the defaults', () => {
+        expect(workspace.isGroupCollapsed(PROD, 'Gateway API')).toBe(true);
+        expect(workspace.isGroupCollapsed(STAGING, 'Gateway API')).toBe(true);
+    });
+
+    // The whole point: folding a section is about the cluster you are looking
+    // at, not about every cluster you have.
+    test('folding a group changes only the context it was folded in', () => {
+        workspace.toggleGroup(PROD, 'Network');
+
+        expect(workspace.isGroupCollapsed(PROD, 'Network')).toBe(true);
+        expect(workspace.isGroupCollapsed(STAGING, 'Network')).toBe(false);
+    });
+
+    test('unfolding a group changes only that context too', () => {
+        workspace.toggleGroup(PROD, 'Gateway API');
+
+        expect(workspace.isGroupCollapsed(PROD, 'Gateway API')).toBe(false);
+        expect(workspace.isGroupCollapsed(STAGING, 'Gateway API')).toBe(true);
+    });
+
+    // A context that has been folded in keeps what it was given, even if it
+    // happens to agree with the defaults: it has its own answer now, and a
+    // later "apply everywhere" elsewhere should not quietly move it.
+    test('a context keeps its own folding once it has one', () => {
+        workspace.toggleGroup(PROD, 'Network');
+        workspace.toggleGroup(PROD, 'Network');
+
+        expect(workspace.hasFoldingOverride(PROD)).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Network')).toBe(false);
+    });
+
+    test('each context can end up folded differently', () => {
+        // Baseline folds only Gateway API, so each toggle here folds something
+        // new in one context and leaves the other where it was.
+        workspace.toggleGroup(PROD, 'Admission');
+        workspace.toggleGroup(STAGING, 'Workloads');
+
+        expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(true);
+        expect(workspace.isGroupCollapsed(STAGING, 'Admission')).toBe(false);
+        expect(workspace.isGroupCollapsed(STAGING, 'Workloads')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(false);
+    });
+
+    test('folding survives beside an alias and colour', () => {
+        workspace.setContextPrefs(PROD, 'Prod', '#ff0000');
+
+        workspace.toggleGroup(PROD, 'Admission');
+
+        expect(workspace.settings.contexts[PROD].alias).toBe('Prod');
+        expect(workspace.settings.contexts[PROD].color).toBe('#ff0000');
+        expect(workspace.hasFoldingOverride(PROD)).toBe(true);
+    });
+
+    describe('applying one to every cluster', () => {
+        test('sets the shared default and brings every context into line', () => {
+            workspace.toggleGroup(PROD, 'Workloads');
+            workspace.toggleGroup(STAGING, 'Network');
+
+            workspace.toggleGroup(PROD, 'Admission', { allContexts: true });
+
+            // Every context now shows the same thing, including the one that
+            // had been folded differently a moment ago.
+            expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(true);
+            expect(workspace.isGroupCollapsed(STAGING, 'Admission')).toBe(true);
+            expect(workspace.isGroupCollapsed(STAGING, 'Network')).toBe(false);
+        });
+
+        test('clears the per-context folding, so nothing is left disagreeing', () => {
+            workspace.toggleGroup(PROD, 'Workloads');
+            expect(workspace.hasFoldingOverride(PROD)).toBe(true);
+
+            workspace.toggleGroup(PROD, 'Network', { allContexts: true });
+
+            expect(workspace.hasFoldingOverride(PROD)).toBe(false);
+            expect(workspace.hasFoldingOverride(STAGING)).toBe(false);
+        });
+
+        test('reaches contexts that do not exist yet', () => {
+            workspace.toggleGroup(PROD, 'Network', { allContexts: true });
+
+            expect(workspace.isGroupCollapsed('/new/config::admin@new', 'Network')).toBe(true);
+        });
+    });
+});
+
+describe('zoom', () => {
+    beforeEach(() => {
+        workspace.settings.layout.zoom = 1;
+    });
+
+    test('starts at normal size', () => {
+        expect(workspace.zoom).toBe(1);
+    });
+
+    test('zooming in and out steps the scale', () => {
+        workspace.zoomIn();
+        expect(workspace.zoom).toBeGreaterThan(1);
+
+        workspace.zoomOut();
+        expect(workspace.zoom).toBe(1);
+    });
+
+    test('reset returns to normal size from either direction', () => {
+        workspace.zoomIn();
+        workspace.zoomIn();
+        workspace.resetZoom();
+        expect(workspace.zoom).toBe(1);
+
+        workspace.zoomOut();
+        workspace.resetZoom();
+        expect(workspace.zoom).toBe(1);
+    });
+
+    test('will not zoom out past the point the title bar stops fitting', () => {
+        for (let i = 0; i < 40; i++) workspace.zoomOut();
+        expect(workspace.zoom).toBeGreaterThanOrEqual(0.5);
+    });
+
+    test('will not zoom in without limit', () => {
+        for (let i = 0; i < 40; i++) workspace.zoomIn();
+        expect(workspace.zoom).toBeLessThanOrEqual(2);
+    });
+});
+
+describe('showing the section an activated tab lives in', () => {
+    beforeEach(() => {
+        workspace.closeAllTabs();
+        workspace.settings.layout.collapsedGroups = ['Admission'];
+        workspace.settings.contexts = {};
+    });
+
+    test('activating a tab unfolds the section its resource is listed under', () => {
+        workspace.openTab(PROD, 'mutatingwebhookconfigurations');
+        workspace.openTab(PROD, 'pods');
+        // Fold it back with the tab already open, then return to that tab.
+        workspace.toggleGroup(PROD, 'Admission');
+        expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(true);
+
+        workspace.activateTab(`${PROD}#mutatingwebhookconfigurations`);
+
+        expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(false);
+    });
+
+    test('it unfolds only for the context the tab belongs to', () => {
+        workspace.openTab(PROD, 'mutatingwebhookconfigurations');
+        workspace.openTab(PROD, 'pods');
+        workspace.toggleGroup(PROD, 'Admission');
+
+        workspace.activateTab(`${PROD}#mutatingwebhookconfigurations`);
+
+        expect(workspace.isGroupCollapsed(STAGING, 'Admission')).toBe(true);
+    });
+
+    // Activating a tab in a section that is already open must not quietly give
+    // the context its own folding, or every tab click would pin it.
+    test('a tab in an open section leaves the folding alone', () => {
+        workspace.openTab(PROD, 'pods');
+
+        workspace.activateTab(`${PROD}#pods`);
+
+        expect(workspace.hasFoldingOverride(PROD)).toBe(false);
+    });
+
+    test('a custom resource tab is harmless, having no section', () => {
+        workspace.openTab(PROD, 'crd:certificates.cert-manager.io');
+
+        expect(() => workspace.activateTab(`${PROD}#crd:certificates.cert-manager.io`)).not.toThrow();
+        expect(workspace.hasFoldingOverride(PROD)).toBe(false);
+    });
+
+    test('the dashboard unfolds Overview when it has been put away', () => {
+        workspace.openTab(PROD, 'dashboard');
+        workspace.openTab(PROD, 'pods');
+        workspace.toggleGroup(PROD, 'Overview');
+
+        workspace.activateTab(`${PROD}#dashboard`);
+
+        expect(workspace.isGroupCollapsed(PROD, 'Overview')).toBe(false);
+    });
+});

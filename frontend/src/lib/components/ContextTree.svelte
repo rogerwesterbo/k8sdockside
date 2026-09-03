@@ -81,6 +81,16 @@
         head.classList.add('flash');
     });
 
+    // The modifier key is named for the platform, since the whole point of the
+    // hint is that someone can act on it.
+    const ALT = navigator.platform.startsWith('Mac') ? '\u2325' : 'Alt';
+
+    function groupTitle(label: string, folded: boolean, local: boolean): string {
+        const action = folded ? `Show ${label}` : `Hide ${label}`;
+        const here = `${action} for this cluster (${ALT}-click for every cluster)`;
+        return local ? `${here} \u2014 currently set differently here than elsewhere` : here;
+    }
+
     function statusTitle(state: Health): string {
         switch (state.status) {
             case 'connected':
@@ -140,17 +150,37 @@
     {#if expanded}
         <div class="tree">
             {#each NAV_GROUPS as group (group.label)}
-                <p class="group">{group.label}</p>
-                {#each group.items as item (item.kind)}
-                    <button
-                        class="item"
-                        class:open={isOpen(item.kind)}
-                        onclick={() => workspace.openTab(context.id, item.kind)}
-                    >
-                        <Icon name={item.icon} size={15} />
-                        <span>{item.label}</span>
-                    </button>
-                {/each}
+                {@const folded = workspace.isGroupCollapsed(context.id, group.label)}
+                {@const local = workspace.groupDiffersFromGlobal(context.id, group.label)}
+                <button
+                    class="group"
+                    class:folded
+                    class:local
+                    onclick={(event) => workspace.toggleGroup(context.id, group.label, {
+                        allContexts: event.altKey,
+                    })}
+                    aria-expanded={!folded}
+                    title={groupTitle(group.label, folded, local)}
+                >
+                    <Icon name={folded ? 'chevron-right' : 'chevron-down'} size={11} />
+                    <span>{group.label}</span>
+                    <!-- The count only earns its place when the group is shut:
+                         open, the items themselves say how many there are. -->
+                    {#if folded}<span class="tally">{group.items.length}</span>{/if}
+                </button>
+
+                {#if !folded}
+                    {#each group.items as item (item.kind)}
+                        <button
+                            class="item"
+                            class:open={isOpen(item.kind)}
+                            onclick={() => workspace.openTab(context.id, item.kind)}
+                        >
+                            <Icon name={item.icon} size={15} />
+                            <span>{item.label}</span>
+                        </button>
+                    {/each}
+                {/if}
             {/each}
         </div>
     {/if}
@@ -313,12 +343,58 @@
     }
 
     .group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        width: 100%;
         margin: 8px 0 2px;
-        padding-left: var(--indent);
+        /* One chevron width less than the items, so the arrow lines up with
+           where the group's contents begin rather than indenting past them. */
+        padding-left: calc(var(--indent) - 15px);
+        padding-right: 8px;
         font-size: 10px;
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: var(--text-faint);
+        text-align: left;
+        border-radius: var(--radius-sm);
+    }
+
+    .group:hover {
+        background: var(--bg-hover);
+        color: var(--text-dim);
+    }
+
+    .group span:first-of-type {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* A group this cluster has been set differently from the rest. Without a
+       mark, a sidebar that disagrees with every other cluster looks like a bug
+       rather than something the user asked for. */
+    .group.local span:first-of-type::after {
+        content: '';
+        display: inline-block;
+        width: 4px;
+        height: 4px;
+        margin-left: 5px;
+        vertical-align: middle;
+        border-radius: 50%;
+        background: var(--ctx-color);
+    }
+
+    /* How much is hidden, so a folded group is not a dead end. */
+    .tally {
+        margin-left: auto;
+        font-size: 9px;
+        letter-spacing: 0;
+        color: var(--text-faint);
+        background: var(--bg-raised);
+        border-radius: 7px;
+        padding: 0 5px;
+        line-height: 13px;
     }
 
     .item {

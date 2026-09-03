@@ -4,7 +4,12 @@
   on a 24x24 grid.
 -->
 <script lang="ts" module>
-    const PATHS: Record<string, string[]> = {
+    /**
+     * Exported so the catalogue can be checked against it: an icon name with no
+     * path here renders an empty svg, which lays out normally and so hides the
+     * typo until someone looks closely.
+     */
+    export const PATHS: Record<string, string[]> = {
         // Resource kinds
         dashboard: ['M4 4h6v6H4z', 'M14 4h6v6h-6z', 'M4 14h6v6H4z', 'M14 14h6v6h-6z'],
         server: ['M4 5h16v5H4z', 'M4 14h16v5H4z', 'M7.5 7.5h.01', 'M7.5 16.5h.01'],
@@ -46,6 +51,23 @@
         'chevron-left': ['M14.5 6l-6 6 6 6'],
         'chevron-right': ['M9.5 6l6 6-6 6'],
         'chevron-down': ['M6 9.5l6 6 6-6'],
+        // Two offset frames: a set of identical copies of one pod.
+        copies: ['M9 4h11v11', 'M4 9h11v11H4z'],
+        // Growing and shrinking along one axis, which is what an HPA does.
+        scale: ['M12 4v16', 'M8 8l4-4 4 4', 'M8 16l4 4 4-4'],
+        // A dial: how much of an allowance is spent.
+        gauge: ['M4 18a8 8 0 1 1 16 0', 'M12 18l4.5-5.5'],
+        shield: ['M12 3l7 3v6c0 4.2-2.9 7.4-7 9-4.1-1.6-7-4.8-7-9V6l7-3z'],
+        // Bars of increasing height: a rank order.
+        priority: ['M6 20v-5', 'M12 20V9', 'M18 20V4'],
+        // A chip with legs: the runtime a pod is handed to.
+        chip: ['M8 8h8v8H8z', 'M5 5h14v14H5z', 'M9 2v3', 'M15 2v3', 'M9 19v3', 'M15 19v3'],
+        // A plug: the cluster calling out to something else mid-request.
+        webhook: ['M8 3v8a4 4 0 0 0 8 0V3', 'M12 15v6', 'M9 21h6'],
+        // A rule sheet that has been checked.
+        policy: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6z', 'M13 3v6h6', 'M8.5 15l2.5 2.5 4.5-4.5'],
+        // A chain link: a binding tying a policy to what it applies to.
+        link: ['M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2', 'M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2'],
         refresh: ['M20.5 12a8.5 8.5 0 1 1-2.6-6.1', 'M20.5 4v5h-5'],
         // Double chevrons, echoing the single chevron on each context's twisty:
         // one chevron opens a context, two open the lot.

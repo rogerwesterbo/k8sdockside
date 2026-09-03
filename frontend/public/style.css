@@ -57,8 +57,15 @@ body {
     user-select: none;
 }
 
+/* The zoom is applied here rather than on :root, and the difference matters.
+   A percentage height inside a zoomed *root* does not account for that zoom, so
+   the shell resolves to the full viewport height and is then scaled past it --
+   which is what puts scrollbars on the window. On a child element the
+   containing block is divided by the element's own zoom, so `height: 100%`
+   keeps meaning "the window" at every scale. */
 #app {
     height: 100%;
+    zoom: var(--app-zoom, 1);
 }
 
 input,

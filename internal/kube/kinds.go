@@ -13,6 +13,12 @@ import (
 // Network group, they sit beside it.
 const GatewayGroup = "gateway.networking.k8s.io"
 
+// AdmissionGroup holds the webhook configurations and the newer admission
+// policies alike. The policy kinds arrived long after the webhooks and are
+// still reaching general availability, so a cluster may serve the webhooks and
+// not the policies; both resolve through the same optional-kind path.
+const AdmissionGroup = "admissionregistration.k8s.io"
+
 // Gateway API and CRD kinds, continuing the contract in resources.go: these
 // strings are what the frontend catalogue sends to BuildTable and Subscribe.
 const (
@@ -74,6 +80,25 @@ var builtinKinds = map[string]schema.GroupKind{
 	KindJobs:        {Group: "batch", Kind: "Job"},
 	KindCronJobs:    {Group: "batch", Kind: "CronJob"},
 	KindIngresses:   {Group: "networking.k8s.io", Kind: "Ingress"},
+
+	KindReplicaSets:            {Group: "apps", Kind: "ReplicaSet"},
+	KindReplicationControllers: {Kind: "ReplicationController"},
+	KindHPAs:                   {Group: "autoscaling", Kind: "HorizontalPodAutoscaler"},
+
+	KindResourceQuotas: {Kind: "ResourceQuota"},
+	KindLimitRanges:    {Kind: "LimitRange"},
+	KindLeases:         {Group: "coordination.k8s.io", Kind: "Lease"},
+
+	KindPDBs:            {Group: "policy", Kind: "PodDisruptionBudget"},
+	KindPriorityClasses: {Group: "scheduling.k8s.io", Kind: "PriorityClass"},
+	KindRuntimeClasses:  {Group: "node.k8s.io", Kind: "RuntimeClass"},
+
+	KindMutatingWebhooks:                  {Group: AdmissionGroup, Kind: "MutatingWebhookConfiguration"},
+	KindValidatingWebhooks:                {Group: AdmissionGroup, Kind: "ValidatingWebhookConfiguration"},
+	KindMutatingAdmissionPolicies:         {Group: AdmissionGroup, Kind: "MutatingAdmissionPolicy"},
+	KindMutatingAdmissionPolicyBindings:   {Group: AdmissionGroup, Kind: "MutatingAdmissionPolicyBinding"},
+	KindValidatingAdmissionPolicies:       {Group: AdmissionGroup, Kind: "ValidatingAdmissionPolicy"},
+	KindValidatingAdmissionPolicyBindings: {Group: AdmissionGroup, Kind: "ValidatingAdmissionPolicyBinding"},
 
 	KindGatewayClasses:  {Group: GatewayGroup, Kind: "GatewayClass"},
 	KindGateways:        {Group: GatewayGroup, Kind: "Gateway"},

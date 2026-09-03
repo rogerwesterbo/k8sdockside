@@ -9,6 +9,15 @@
 export interface ContextPrefs {
     "alias": string;
     "color": string;
+
+    /**
+     * CollapsedGroups overrides Layout.CollapsedGroups for this context alone.
+     * Nil means "follow the global setting", which is the usual case -- a
+     * cluster only carries its own list once the user folds a group for it
+     * specifically, e.g. because this is the one cluster with the Gateway API
+     * installed.
+     */
+    "collapsedGroups": string[] | null;
 }
 
 /**
@@ -29,6 +38,25 @@ export interface Layout {
      * px
      */
     "sidebarWidth": number;
+
+    /**
+     * Zoom is the webview scale, 1 being normal size. Persisted so the window
+     * comes back the size the user left it readable at.
+     */
+    "zoom": number;
+
+    /**
+     * CollapsedGroups are the sidebar's resource-tree headings the user has
+     * folded away. It is deliberately nullable: nil means they have never
+     * chosen, which is what lets the frontend fold the specialist groups once
+     * on a fresh install, while an empty list is the real choice "show me
+     * everything" and must not be defaulted over. The names are the frontend
+     * catalogue's group labels; the store only remembers what it is handed.
+     * 
+     * No omitempty: it would drop an empty list on write, turning "I expanded
+     * everything" back into "never chosen" on the next read.
+     */
+    "collapsedGroups": string[] | null;
 }
 
 /**

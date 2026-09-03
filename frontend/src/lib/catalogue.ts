@@ -28,6 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
             { kind: 'nodes', label: 'Nodes', icon: 'server' },
             { kind: 'namespaces', label: 'Namespaces', icon: 'layers' },
             { kind: 'events', label: 'Events', icon: 'bell' },
+            { kind: 'leases', label: 'Leases', icon: 'clock' },
         ],
     },
     {
@@ -35,10 +36,14 @@ export const NAV_GROUPS: NavGroup[] = [
         items: [
             { kind: 'pods', label: 'Pods', icon: 'box' },
             { kind: 'deployments', label: 'Deployments', icon: 'rocket' },
+            // Beside Deployments, which is what owns them.
+            { kind: 'replicasets', label: 'Replica Sets', icon: 'copies' },
             { kind: 'statefulsets', label: 'Stateful Sets', icon: 'database' },
             { kind: 'daemonsets', label: 'Daemon Sets', icon: 'repeat' },
+            { kind: 'replicationcontrollers', label: 'Replication Controllers', icon: 'copies' },
             { kind: 'jobs', label: 'Jobs', icon: 'check' },
             { kind: 'cronjobs', label: 'Cron Jobs', icon: 'clock' },
+            { kind: 'horizontalpodautoscalers', label: 'Horizontal Pod Autoscalers', icon: 'scale' },
         ],
     },
     {
@@ -63,6 +68,8 @@ export const NAV_GROUPS: NavGroup[] = [
         items: [
             { kind: 'configmaps', label: 'Config Maps', icon: 'sliders' },
             { kind: 'secrets', label: 'Secrets', icon: 'lock' },
+            { kind: 'resourcequotas', label: 'Resource Quotas', icon: 'gauge' },
+            { kind: 'limitranges', label: 'Limit Ranges', icon: 'sliders' },
         ],
     },
     {
@@ -70,10 +77,48 @@ export const NAV_GROUPS: NavGroup[] = [
         items: [{ kind: 'persistentvolumeclaims', label: 'Persistent Volume Claims', icon: 'drive' }],
     },
     {
+        // What may be evicted, and in what order things get scheduled.
+        label: 'Scheduling',
+        items: [
+            { kind: 'poddisruptionbudgets', label: 'Pod Disruption Budgets', icon: 'shield' },
+            { kind: 'priorityclasses', label: 'Priority Classes', icon: 'priority' },
+            { kind: 'runtimeclasses', label: 'Runtime Classes', icon: 'chip' },
+        ],
+    },
+    {
+        // Everything that intercepts a write on its way into the API server.
+        // The policy kinds are far newer than the webhooks, so on many clusters
+        // these tabs will report that the kind is not served -- which is an
+        // ordinary answer here, not a failure.
+        label: 'Admission',
+        items: [
+            { kind: 'mutatingwebhookconfigurations', label: 'Mutating Webhooks', icon: 'webhook' },
+            { kind: 'validatingwebhookconfigurations', label: 'Validating Webhooks', icon: 'webhook' },
+            { kind: 'mutatingadmissionpolicies', label: 'Mutating Admission Policies', icon: 'policy' },
+            { kind: 'mutatingadmissionpolicybindings', label: 'Mutating Policy Bindings', icon: 'link' },
+            { kind: 'validatingadmissionpolicies', label: 'Validating Admission Policies', icon: 'policy' },
+            { kind: 'validatingadmissionpolicybindings', label: 'Validating Policy Bindings', icon: 'link' },
+        ],
+    },
+    {
         label: 'Definitions',
         items: [{ kind: 'customresourcedefinitions', label: 'Custom Resource Definitions', icon: 'puzzle' }],
     },
 ];
+
+/**
+ * The groups that start folded on a fresh install.
+ *
+ * The full tree is around 1200px tall, half again the height of the sidebar, so
+ * something has to give or a single cluster no longer fits on screen. These are
+ * the specialist ones: a cluster without the Gateway API installed, or without
+ * admission policies, gets nothing from those rows. Unfolding one is a click
+ * and it is remembered, so this only decides the first run.
+ *
+ * The names live here, beside the groups they refer to, rather than in the Go
+ * settings store -- which remembers only the strings it is handed.
+ */
+export const DEFAULT_COLLAPSED_GROUPS = ['Gateway API', 'Scheduling', 'Admission', 'Definitions'];
 
 /**
  * The prefix marking a kind that names a custom resource rather than one of the
@@ -107,9 +152,22 @@ export function customKindFor(definitionName: string): string {
     return CUSTOM_PREFIX + definitionName;
 }
 
+const GROUP_OF = new Map<string, string>(
+    NAV_GROUPS.flatMap((group) => group.items.map((item) => [item.kind, group.label] as const)),
+);
+
 const BY_KIND = new Map<string, NavItem>(
     NAV_GROUPS.flatMap((group) => group.items).map((item) => [item.kind, item]),
 );
+
+/**
+ * The sidebar section a kind is listed under, or null for one that is not in
+ * the tree at all -- a custom resource, which is opened from the definitions
+ * table rather than from a nav entry.
+ */
+export function groupForKind(kind: string): string | null {
+    return GROUP_OF.get(kind) ?? null;
+}
 
 /**
  * The tab title for a kind; falls back to the raw kind so nothing renders blank.
@@ -137,8 +195,13 @@ export function iconFor(kind: string): string {
 /**
  * The singular noun used when describing one row of a kind, e.g. the header of
  * the slide-in detail panel.
+ *
+ * Only a double s takes the "-es" plural here: "Ingresses" and "Classes" lose
+ * two letters, everything else loses one. Matching a single "ses" would be
+ * wrong for any singular already ending in "se" -- it turns "Leases" into
+ * "Leas".
  */
 export function singularFor(kind: string): string {
     const label = labelFor(kind);
-    return label.endsWith('ses') ? label.slice(0, -2) : label.replace(/s$/, '');
+    return label.endsWith('sses') ? label.slice(0, -2) : label.replace(/s$/, '');
 }

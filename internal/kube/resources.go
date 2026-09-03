@@ -91,4 +91,29 @@ const (
 	KindSecrets     = "secrets"
 	KindPVCs        = "persistentvolumeclaims"
 	KindEvents      = "events"
+
+	// Workload kinds beyond the original set.
+	KindReplicaSets            = "replicasets"
+	KindReplicationControllers = "replicationcontrollers"
+	KindHPAs                   = "horizontalpodautoscalers"
+
+	// Namespace-level configuration and coordination.
+	KindResourceQuotas = "resourcequotas"
+	KindLimitRanges    = "limitranges"
+	KindLeases         = "leases"
+
+	// Scheduling and availability policy.
+	KindPDBs            = "poddisruptionbudgets"
+	KindPriorityClasses = "priorityclasses"
+	KindRuntimeClasses  = "runtimeclasses"
+
+	// Admission control. The policy kinds are much newer than the webhook ones
+	// and a cluster may serve neither; that is reported as "does not serve"
+	// rather than as a failure.
+	KindMutatingWebhooks                  = "mutatingwebhookconfigurations"
+	KindValidatingWebhooks                = "validatingwebhookconfigurations"
+	KindMutatingAdmissionPolicies         = "mutatingadmissionpolicies"
+	KindMutatingAdmissionPolicyBindings   = "mutatingadmissionpolicybindings"
+	KindValidatingAdmissionPolicies       = "validatingadmissionpolicies"
+	KindValidatingAdmissionPolicyBindings = "validatingadmissionpolicybindings"
 )

@@ -15,7 +15,7 @@ import {
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
-import { DASHBOARD, labelFor } from '../catalogue';
+import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, groupForKind, labelFor } from '../catalogue';
 import { defaultColorFor } from '../colors';
 
 export type DockSide = 'right' | 'bottom' | 'left';
@@ -79,8 +79,23 @@ function defaultSettings(): Settings {
         excludedFiles: [],
         contexts: {},
         tabOrder: [],
-        layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260 },
+        layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
+}
+
+/** Zoom bounds, matching appconfig.MinZoom/MaxZoom on the Go side. */
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
+const ZOOM_STEP = 0.1;
+
+/** Adds or removes one label, whichever way the toggle should go. */
+function toggled(groups: string[], label: string): string[] {
+    return groups.includes(label) ? groups.filter((g) => g !== label) : [...groups, label];
+}
+
+/** Whether two folding lists say the same thing, regardless of order. */
+function sameGroups(a: string[], b: string[]): boolean {
+    return a.length === b.length && [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
 }
 
 function tabId(contextId: string, kind: string): string {
@@ -154,6 +169,14 @@ class Workspace {
     dock = $derived((this.settings.layout.detailDock || 'right') as DockSide);
     detailSize = $derived(this.settings.layout.detailSize || 520);
     sidebarWidth = $derived(this.settings.layout.sidebarWidth || 260);
+    /**
+     * The folded groups, falling back to the catalogue's defaults only while
+     * the user has never chosen. `?? ` rather than `||` is load-bearing: an
+     * empty list is a real choice and must not be defaulted over.
+     */
+    collapsedGroups = $derived(this.settings.layout.collapsedGroups ?? DEFAULT_COLLAPSED_GROUPS);
+    /** The webview scale, 1 being normal size. */
+    zoom = $derived(this.settings.layout.zoom || 1);
 
     // ----- loading -------------------------------------------------------
 
@@ -294,8 +317,11 @@ class Workspace {
      * debounced, because this is called from a text field on every keystroke.
      */
     setContextPrefs(contextId: string, alias: string, color: string): void {
-        const prefs = { alias, color };
-        if (!alias && !color) {
+        // The folding override is a separate preference stored on the same
+        // record; renaming or recolouring a context must not discard it.
+        const collapsedGroups = this.settings.contexts[contextId]?.collapsedGroups ?? null;
+        const prefs = { alias, color, collapsedGroups };
+        if (!alias && !color && collapsedGroups === null) {
             delete this.settings.contexts[contextId];
         } else {
             this.settings.contexts[contextId] = prefs;
@@ -395,6 +421,7 @@ class Workspace {
         const tab = this.tabs.find((t) => t.id === id);
         if (tab) {
             this.selectContext(tab.contextId);
+            this.showSectionFor(tab);
             // Asked for here rather than in selectContext, which the sidebar
             // also calls: a context clicked in the sidebar is already under the
             // pointer, and scrolling it would move it out from under them.
@@ -406,6 +433,20 @@ class Workspace {
         if (changed) {
             this.closeDetail();
         }
+    }
+
+    /**
+     * Unfolds the section an activated tab's resource is listed under, so that
+     * the tree shows where the tab you are looking at actually lives.
+     *
+     * It does nothing when the section is already open, which matters: writing
+     * unconditionally would give the context its own folding on every tab
+     * click, pinning it against later changes applied to every cluster.
+     */
+    private showSectionFor(tab: Tab): void {
+        const group = groupForKind(tab.kind);
+        if (group === null || !this.isGroupCollapsed(tab.contextId, group)) return;
+        this.toggleGroup(tab.contextId, group);
     }
 
     /** Closes a tab, moving focus to its neighbour so the view is never blank. */
@@ -643,6 +684,107 @@ class Workspace {
 
     setDetailSize(px: number): void {
         this.settings.layout.detailSize = Math.round(px);
+        this.persistLayout();
+    }
+
+    /** The groups folded for one context: its own list, or the shared default. */
+    collapsedGroupsFor(contextId: string): string[] {
+        return this.settings.contexts[contextId]?.collapsedGroups ?? this.collapsedGroups;
+    }
+
+    /** Whether this context has diverged from the global folding. */
+    hasFoldingOverride(contextId: string): boolean {
+        return (this.settings.contexts[contextId]?.collapsedGroups ?? null) !== null;
+    }
+
+    /** Whether one group is folded differently here than everywhere else. */
+    groupDiffersFromGlobal(contextId: string, label: string): boolean {
+        if (!this.hasFoldingOverride(contextId)) return false;
+        return this.isGroupCollapsed(contextId, label) !== this.collapsedGroups.includes(label);
+    }
+
+    /** Whether a sidebar resource group is folded for one context. */
+    isGroupCollapsed(contextId: string, label: string): boolean {
+        return this.collapsedGroupsFor(contextId).includes(label);
+    }
+
+    /**
+     * Folds or unfolds one resource group for one context.
+     *
+     * Scoped to the context because that is what a section being folded means
+     * to the person looking at it -- this cluster serves no Gateway API, so put
+     * those rows away here. `allContexts` is the deliberate bulk version, for
+     * when the answer really is the same everywhere.
+     */
+    toggleGroup(contextId: string, label: string, { allContexts = false } = {}): void {
+        const next = toggled(this.collapsedGroupsFor(contextId), label);
+
+        if (allContexts) {
+            // "Make every cluster look like this": the shared default moves,
+            // and the per-context answers are cleared so none is left quietly
+            // disagreeing with what was just asked for. It also reaches
+            // clusters added later, which nothing per-context can.
+            this.settings.layout.collapsedGroups = next;
+            this.persistLayout();
+            for (const contextId of Object.keys(this.settings.contexts)) {
+                this.setFoldingOverride(contextId, null);
+            }
+            return;
+        }
+
+        // The ordinary click is about the cluster in front of you. It is kept
+        // even when it agrees with the shared default, because this context now
+        // has an answer of its own and a later "apply to every cluster" should
+        // not silently move it back.
+        this.setFoldingOverride(contextId, next);
+    }
+
+    /**
+     * Records (or clears) one context's own folding. Clearing returns it to the
+     * shared default.
+     */
+    private setFoldingOverride(contextId: string, groups: string[] | null): void {
+        const prefs = this.settings.contexts[contextId];
+        const merged = {
+            alias: prefs?.alias ?? '',
+            color: prefs?.color ?? '',
+            collapsedGroups: groups,
+        };
+
+        if (!merged.alias && !merged.color && groups === null) {
+            delete this.settings.contexts[contextId];
+        } else {
+            this.settings.contexts[contextId] = merged;
+        }
+        this.persistContextPrefs(contextId, merged);
+    }
+
+    /** Returns a context to following the shared default folding. */
+    clearFoldingOverride(contextId: string): void {
+        this.setFoldingOverride(contextId, null);
+    }
+
+    zoomIn(): void {
+        this.setZoom(this.zoom + ZOOM_STEP);
+    }
+
+    zoomOut(): void {
+        this.setZoom(this.zoom - ZOOM_STEP);
+    }
+
+    resetZoom(): void {
+        this.setZoom(1);
+    }
+
+    /**
+     * Clamped at both ends. The floor is not arbitrary: the window's title bar
+     * is drawn by the frontend and so shrinks with the zoom, while the macOS
+     * traffic lights over it do not -- far enough down and they no longer fit.
+     */
+    private setZoom(scale: number): void {
+        const next = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale)) * 100) / 100;
+        if (next === this.zoom) return;
+        this.settings.layout.zoom = next;
         this.persistLayout();
     }
 

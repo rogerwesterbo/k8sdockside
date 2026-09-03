@@ -25,9 +25,16 @@ export interface Settings {
     manualFiles: string[];
     manualFolders: string[];
     excludedFiles: string[];
-    contexts: Record<string, { alias: string; color: string }>;
+    contexts: Record<string, { alias: string; color: string; collapsedGroups: string[] | null }>;
     tabOrder: { contextId: string; kind: string }[];
-    layout: { detailDock: string; detailSize: number; sidebarWidth: number };
+    layout: {
+        detailDock: string;
+        detailSize: number;
+        sidebarWidth: number;
+        zoom: number;
+        /** null means the user has never chosen; an empty list means "fold nothing". */
+        collapsedGroups: string[] | null;
+    };
 }
 
 /** One resource in a listing. */
@@ -69,11 +76,22 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
         contexts: Object.fromEntries(
             Object.entries(settings.contexts ?? {}).map(([id, prefs]) => [
                 id,
-                { alias: prefs?.alias ?? '', color: prefs?.color ?? '' },
+                {
+                    alias: prefs?.alias ?? '',
+                    color: prefs?.color ?? '',
+                    // null is "follows the global folding" and must survive.
+                    collapsedGroups: prefs?.collapsedGroups ?? null,
+                },
             ]),
         ),
         tabOrder: (settings.tabOrder ?? []).map((tab) => ({ contextId: tab.contextId, kind: tab.kind })),
-        layout: { ...settings.layout },
+        layout: {
+            ...settings.layout,
+            // Preserved as null rather than defaulted to []: the two mean
+            // different things to the sidebar.
+            collapsedGroups: settings.layout?.collapsedGroups ?? null,
+            zoom: settings.layout?.zoom || 1,
+        },
     };
 }
 
