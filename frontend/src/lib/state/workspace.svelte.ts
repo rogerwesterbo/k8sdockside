@@ -37,6 +37,35 @@ export interface DetailTarget {
     name: string;
 }
 
+/**
+ * Whether a cluster can be reached, as shown by the sidebar indicator.
+ *
+ * `unknown` is the resting state and is not a failure: contexts are only
+ * probed when you touch them, so most of a long list has simply never been
+ * asked. It has to read as "not checked", never as "broken".
+ */
+export type HealthStatus = 'unknown' | 'checking' | 'connected' | 'error';
+
+/** One context's reachability, with the reason when it failed. */
+export interface Health {
+    status: HealthStatus;
+    message: string;
+}
+
+const UNCHECKED: Health = { status: 'unknown', message: '' };
+
+/**
+ * A request to bring one context into view in the sidebar.
+ *
+ * The nonce is the point: asking for the same context twice has to register as
+ * two separate requests, because clicking the tab you are already on is how you
+ * ask "where is this cluster?" and it must answer every time.
+ */
+export interface Reveal {
+    contextId: string;
+    nonce: number;
+}
+
 /** A transient message shown in the status bar. */
 export interface Notice {
     text: string;
@@ -93,6 +122,12 @@ class Workspace {
     detailLoading = $state(false);
     detailError = $state<string | null>(null);
 
+    /** Reachability per context, written by both probes and tab outcomes. */
+    health = $state<Record<string, Health>>({});
+    /** The sidebar's standing request to scroll a context into view. */
+    reveal = $state<Reveal | null>(null);
+    private revealCount = 0;
+
     syncing = $state(false);
     loaded = $state(false);
     notice = $state<Notice | null>(null);
@@ -107,6 +142,14 @@ class Workspace {
     selectedContext = $derived(this.contexts.find((c) => c.id === this.selectedContextId) ?? null);
     /** Files that could not be parsed, surfaced in the sidebar rather than dropped. */
     brokenFiles = $derived(this.files.filter((f) => f.error !== ''));
+    /**
+     * Whether any context on screen is open, which is what decides the
+     * direction of the sidebar's expand/collapse toggle. It is checked against
+     * the live contexts rather than the raw list, so ids left over from a
+     * kubeconfig that has gone do not make the button offer to collapse
+     * something nobody can see.
+     */
+    anyExpanded = $derived(this.contexts.some((c) => this.expanded.includes(c.id)));
 
     dock = $derived((this.settings.layout.detailDock || 'right') as DockSide);
     detailSize = $derived(this.settings.layout.detailSize || 520);
@@ -135,10 +178,12 @@ class Workspace {
         this.syncing = true;
         try {
             this.files = adoptFiles(await KubeconfigService.Sync());
+            this.pruneHealth();
             if (restoreTabs) {
                 this.restoreTabs();
             } else {
                 this.dropTabsForMissingContexts();
+                this.recheckHealth();
                 // Only for a sync the user asked for: a rescan that finds
                 // nothing new looks identical to one that did not run.
                 this.inform(
@@ -277,16 +322,42 @@ class Workspace {
         if (!this.expanded.includes(contextId)) {
             this.expanded = [...this.expanded, contextId];
         }
+        void this.probe(contextId);
     }
 
     toggleExpanded(contextId: string): void {
-        this.expanded = this.expanded.includes(contextId)
-            ? this.expanded.filter((id) => id !== contextId)
-            : [...this.expanded, contextId];
+        const opening = !this.expanded.includes(contextId);
+        this.expanded = opening
+            ? [...this.expanded, contextId]
+            : this.expanded.filter((id) => id !== contextId);
+        // Opening a context is a reason to know whether it answers; collapsing
+        // one is not.
+        if (opening) void this.probe(contextId);
     }
 
     isExpanded(contextId: string): boolean {
         return this.expanded.includes(contextId);
+    }
+
+    /**
+     * Opens every context's resource tree.
+     *
+     * Note what this deliberately does not do: probe. `toggleExpanded` checks a
+     * cluster when you open it, which is affordable one at a time, but building
+     * a client can run an exec credential plugin -- so routing "expand all"
+     * through it would launch a subprocess per context from a single click.
+     * Unfolding the tree is a view operation; it asks no cluster anything.
+     *
+     * Assigning the whole list rather than merging also drops any stale ids
+     * left behind by contexts that have since left the kubeconfig.
+     */
+    expandAll(): void {
+        this.expanded = this.contexts.map((c) => c.id);
+    }
+
+    /** Closes every context's resource tree. */
+    collapseAll(): void {
+        this.expanded = [];
     }
 
     // ----- tabs ----------------------------------------------------------
@@ -324,6 +395,10 @@ class Workspace {
         const tab = this.tabs.find((t) => t.id === id);
         if (tab) {
             this.selectContext(tab.contextId);
+            // Asked for here rather than in selectContext, which the sidebar
+            // also calls: a context clicked in the sidebar is already under the
+            // pointer, and scrolling it would move it out from under them.
+            this.reveal = { contextId: tab.contextId, nonce: ++this.revealCount };
         }
         // Only when the view actually changed: the panel describes an object in
         // the tab we just left, so keeping it open over a different one would
@@ -464,6 +539,71 @@ class Workspace {
         this.selectedContextId = current?.id ?? null;
         if (current) {
             this.selectContext(current.id);
+        }
+    }
+
+    // ----- health --------------------------------------------------------
+
+    /** How a context last responded. Never probed is `unknown`, not an error. */
+    healthOf(contextId: string): Health {
+        return this.health[contextId] ?? UNCHECKED;
+    }
+
+    /**
+     * Records what we now know about a cluster.
+     *
+     * Tabs call this as well as probes, and that is the point: a dashboard that
+     * has just failed to load is better evidence than any ping, and routing
+     * both through one map is what stops the sidebar indicator and the error
+     * page in the tab from disagreeing.
+     */
+    reportHealth(contextId: string, status: HealthStatus, detail = ''): void {
+        this.health[contextId] = { status, message: detail };
+    }
+
+    /**
+     * Checks whether a cluster answers, for the sidebar indicator.
+     *
+     * Probing is lazy and deliberately so: building a client can run an exec
+     * credential plugin, and a kubeconfig with twenty contexts would otherwise
+     * launch twenty subprocesses at startup for clusters the user never asked
+     * about. So a context is probed when it is touched -- selected, expanded or
+     * opened in a tab -- and not again unless something asks it to be.
+     */
+    async probe(contextId: string, { force = false } = {}): Promise<void> {
+        const status = this.healthOf(contextId).status;
+        // A probe already in flight will report for both callers.
+        if (status === 'checking') return;
+        if (!force && status !== 'unknown') return;
+
+        this.reportHealth(contextId, 'checking');
+        try {
+            await ResourceService.Ping(contextId);
+            this.reportHealth(contextId, 'connected');
+        } catch (err) {
+            this.reportHealth(contextId, 'error', message(err));
+        }
+    }
+
+    /** Forgets the status of contexts that are no longer in any kubeconfig. */
+    private pruneHealth(): void {
+        const known = new Set(this.contexts.map((c) => c.id));
+        const kept: Record<string, Health> = {};
+        for (const [id, health] of Object.entries(this.health)) {
+            if (known.has(id)) kept[id] = health;
+        }
+        this.health = kept;
+    }
+
+    /**
+     * Re-probes the contexts already carrying a status, so that the sync button
+     * refreshes what is on screen. Contexts never checked stay unchecked: a
+     * rescan is not a reason to start waking clusters the user has not asked
+     * about.
+     */
+    private recheckHealth(): void {
+        for (const id of Object.keys(this.health)) {
+            void this.probe(id, { force: true });
         }
     }
 

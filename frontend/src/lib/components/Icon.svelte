@@ -47,6 +47,10 @@
         'chevron-right': ['M9.5 6l6 6-6 6'],
         'chevron-down': ['M6 9.5l6 6 6-6'],
         refresh: ['M20.5 12a8.5 8.5 0 1 1-2.6-6.1', 'M20.5 4v5h-5'],
+        // Double chevrons, echoing the single chevron on each context's twisty:
+        // one chevron opens a context, two open the lot.
+        'expand-all': ['M6 5.5l6 6 6-6', 'M6 12.5l6 6 6-6'],
+        'collapse-all': ['M6 11.5l6-6 6 6', 'M6 18.5l6-6 6 6'],
         plus: ['M12 5v14', 'M5 12h14'],
         // A folder with a plus: add every kubeconfig in a directory.
         'folder-plus': [

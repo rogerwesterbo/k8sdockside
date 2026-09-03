@@ -8,6 +8,7 @@
     import { singularFor } from '../catalogue';
     import { alpha } from '../colors';
     import { workspace, type DockSide } from '../state/workspace.svelte';
+    import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
 
     const DOCKS: { side: DockSide; icon: string; label: string }[] = [
@@ -145,7 +146,7 @@
             {#if workspace.detailLoading}
                 <p class="status">Describing {target.name}…</p>
             {:else if workspace.detailError}
-                <p class="status error"><Icon name="alert" size={14} /> {workspace.detailError}</p>
+                <ErrorState message={workspace.detailError} compact />
             {:else}
                 <pre class="selectable">{workspace.detailText}</pre>
             {/if}

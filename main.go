@@ -54,7 +54,9 @@ func main() {
 		MinWidth:  960,
 		MinHeight: 600,
 		Mac: application.MacWindow{
-			InvisibleTitleBarHeight: 50,
+			// Matches the height of the frontend's own top bar, so the traffic
+			// lights sit centred in it rather than over the content below.
+			InvisibleTitleBarHeight: 44,
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},

@@ -11,6 +11,7 @@
     import ResourceTable from './lib/components/ResourceTable.svelte';
     import Sidebar from './lib/components/Sidebar.svelte';
     import TabBar from './lib/components/TabBar.svelte';
+    import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
 
     const MIN_SIDEBAR = 200;
@@ -58,6 +59,8 @@
 </script>
 
 <div class="shell">
+    <TopBar />
+
     <div class="body">
         <Sidebar />
 

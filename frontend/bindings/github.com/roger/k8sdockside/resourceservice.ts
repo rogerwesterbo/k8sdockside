@@ -41,6 +41,16 @@ export function Overview(contextID: string): $CancellablePromise<kube$0.Overview
 }
 
 /**
+ * Ping reports whether a context's cluster can be reached, for the sidebar's
+ * connection indicator. It returns nil when the cluster answered and an error
+ * carrying the reason when it did not; there is no payload because the only
+ * question being asked is whether this works.
+ */
+export function Ping(contextID: string): $CancellablePromise<void> {
+    return $Call.ByID(1821171873, contextID);
+}
+
+/**
  * SetNamespace re-points an open subscription at another namespace. The watch
  * is cluster-wide, so this is a filter change: the new rows arrive as an event
  * without anything being re-fetched.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -400,4 +401,31 @@ func distributionOf(nodes []unstructured.Unstructured) string {
 		return "managed"
 	}
 	return ""
+}
+
+// probeTimeout bounds a reachability check. It is far shorter than callTimeout
+// because a probe backs an indicator, not a view: a cluster that has not
+// answered in a few seconds is one the sidebar should already be calling
+// unreachable, and the user is not waiting on the result to read anything.
+const probeTimeout = 6 * time.Second
+
+// Ping reports whether a context's API server can be reached and will talk to
+// us. It is the check behind the sidebar's connection indicator.
+//
+// GET /version is the cheapest call that proves the whole path rather than just
+// the socket: DNS, the TCP connection, the TLS handshake and the credentials
+// all have to work for it to come back, and each of them fails with a message
+// the UI can tell apart. Note that it deliberately does not go through the
+// cached discovery client, whose whole purpose is to answer without a request.
+//
+// The client is borrowed from the same pool the informers use, so probing a
+// context you then open costs no second connection and no second credential
+// exec -- the ping warms exactly what the tab is about to need.
+func (w *Watcher) Ping(kc Context) error {
+	return w.withClient(kc, func(c *clusterClient) error {
+		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+		defer cancel()
+
+		return c.disco.RESTClient().Get().AbsPath("/version").Do(ctx).Error()
+	})
 }

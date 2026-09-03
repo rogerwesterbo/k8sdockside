@@ -89,6 +89,18 @@ func (s *ResourceService) Overview(contextID string) (kube.Overview, error) {
 	return s.watcher.Overview(ctx)
 }
 
+// Ping reports whether a context's cluster can be reached, for the sidebar's
+// connection indicator. It returns nil when the cluster answered and an error
+// carrying the reason when it did not; there is no payload because the only
+// question being asked is whether this works.
+func (s *ResourceService) Ping(contextID string) error {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return err
+	}
+	return s.watcher.Ping(ctx)
+}
+
 // Describe renders the detail report shown in the slide-in panel.
 func (s *ResourceService) Describe(contextID, kind, namespace, name string) (string, error) {
 	ctx, err := s.resolve(contextID)

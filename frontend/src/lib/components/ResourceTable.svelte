@@ -16,6 +16,7 @@
     import SortableTable from './SortableTable.svelte';
     import { alpha } from '../colors';
     import { workspace } from '../state/workspace.svelte';
+    import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -31,8 +32,11 @@
     let query = $state('');
     let loading = $state(true);
     let error = $state<string | null>(null);
+    /** Bumped by the retry button; the subscribing effect reads it as a dependency. */
+    let attempt = $state(0);
 
     let color = $derived(workspace.colorOf(contextId));
+    let context = $derived(workspace.contexts.find((c) => c.id === contextId) ?? null);
     let selectedRowId = $derived(
         workspace.detailTarget
             ? `${workspace.detailTarget.kind}/${workspace.detailTarget.namespace}/${workspace.detailTarget.name}`
@@ -46,6 +50,7 @@
     // cache, so changing it must not tear the watch down and start again.
     $effect(() => {
         const [id, k] = [contextId, kind];
+        attempt;
         loading = true;
         error = null;
         table = null;
@@ -60,10 +65,14 @@
             (result) => {
                 table = result;
                 loading = false;
+                // Rows arriving is proof the cluster is reachable, so the
+                // sidebar indicator does not need its own request.
+                workspace.reportHealth(id, 'connected');
             },
             (message) => {
                 error = message;
                 loading = false;
+                workspace.reportHealth(id, 'error', message);
             },
         );
         subscription = sub;
@@ -158,9 +167,9 @@
 
     <div class="scroll">
         {#if error}
-            <p class="status error"><Icon name="alert" size={14} /> {error}</p>
+            <ErrorState message={error} {context} onRetry={() => attempt++} />
         {:else if table?.error}
-            <p class="status error"><Icon name="alert" size={14} /> {table.error}</p>
+            <ErrorState message={table.error} {context} onRetry={() => attempt++} />
         {:else if loading && !table}
             <p class="status">Loading {labelFor(kind).toLowerCase()}…</p>
         {:else if table}
@@ -254,10 +263,6 @@
         gap: 8px;
         padding: 22px 16px;
         color: var(--text-dim);
-    }
-
-    .status.error {
-        color: var(--error);
     }
 
 

@@ -6,7 +6,7 @@
     import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
     import { NAV_GROUPS } from '../catalogue';
     import { alpha } from '../colors';
-    import { workspace } from '../state/workspace.svelte';
+    import { workspace, type Health } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -15,7 +15,11 @@
 
     let { context }: Props = $props();
 
+    /** The context's own row, which is what gets scrolled to and flashed. */
+    let head = $state<HTMLElement>();
+
     let color = $derived(workspace.colorOf(context.id));
+    let health = $derived(workspace.healthOf(context.id));
     let expanded = $derived(workspace.isExpanded(context.id));
     let selected = $derived(workspace.selectedContextId === context.id);
     let activeTab = $derived(workspace.activeTab);
@@ -23,10 +27,78 @@
     function isOpen(kind: string): boolean {
         return activeTab?.contextId === context.id && activeTab.kind === kind;
     }
+
+    /** How much room to leave above a revealed row, so it is not jammed to the edge. */
+    const REVEAL_MARGIN = 8;
+
+    /** The nearest ancestor that is actually scrolling, if any. */
+    function scrollParent(el: HTMLElement): HTMLElement | null {
+        for (let node = el.parentElement; node; node = node.parentElement) {
+            const overflow = getComputedStyle(node).overflowY;
+            if ((overflow === 'auto' || overflow === 'scroll') && node.scrollHeight > node.clientHeight) {
+                return node;
+            }
+        }
+        return null;
+    }
+
+    // Bring this context into view when a tab for it is clicked.
+    //
+    // A context is a header with its resource tree hanging below it, and what
+    // the user wants to see is both. `scrollIntoView({block: 'nearest'})` does
+    // the minimum to reveal the *header*, which going downwards means parking
+    // its 30px strip flush on the bottom edge with the whole tree still off
+    // screen -- indistinguishable from not having scrolled at all. Going
+    // upwards it lands at the top and looks fine, which is why this only shows
+    // up switching to a context below the one you are on.
+    //
+    // So: leave it alone when the row is already fully visible, and otherwise
+    // put the row near the top, where its tree has somewhere to be.
+    $effect(() => {
+        const request = workspace.reveal;
+        if (!request || request.contextId !== context.id || !head) return;
+        request.nonce;
+
+        const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const behavior: ScrollBehavior = still ? 'auto' : 'smooth';
+        const scroller = scrollParent(head);
+
+        if (scroller) {
+            const view = scroller.getBoundingClientRect();
+            const box = head.getBoundingClientRect();
+            if (box.top < view.top || box.bottom > view.bottom) {
+                scroller.scrollTo({ top: scroller.scrollTop + (box.top - view.top) - REVEAL_MARGIN, behavior });
+            }
+        } else {
+            // No scrolling ancestor: nothing to move, but still flash.
+            head.scrollIntoView({ block: 'nearest', behavior });
+        }
+
+        // Removed and re-added around a forced reflow, the standard way to
+        // restart an animation that may still be running from a prior reveal.
+        head.classList.remove('flash');
+        void head.offsetWidth;
+        head.classList.add('flash');
+    });
+
+    function statusTitle(state: Health): string {
+        switch (state.status) {
+            case 'connected':
+                return 'Connected';
+            case 'checking':
+                return 'Checking the connection…';
+            case 'error':
+                return `Cannot connect — ${state.message}`;
+            default:
+                // Unchecked contexts show no indicator, so there is nothing to
+                // describe.
+                return '';
+        }
+    }
 </script>
 
 <div class="context" class:selected style:--ctx-color={color} style:--ctx-tint={alpha(color, 0.16)}>
-    <div class="head">
+    <div class="head" bind:this={head}>
         <button
             class="twisty"
             onclick={() => workspace.toggleExpanded(context.id)}
@@ -43,6 +115,26 @@
                 <span class="badge" title="current-context in this kubeconfig">current</span>
             {/if}
         </button>
+
+        <!-- Reachability sits at the far right, opposite the colour swatch, so
+             "which cluster is this" and "can I reach it" never get confused for
+             one another. -->
+        {#if health.status === 'error'}
+            <span class="status broken" title={statusTitle(health)} aria-label={statusTitle(health)}>
+                <Icon name="alert" size={12} />
+            </span>
+        {:else if health.status === 'unknown'}
+            <!-- Nothing drawn until a cluster has actually been checked: a mark
+                 meaning "no news" is noise on a list this long. The slot is
+                 still held open so names do not shift as results arrive. -->
+            <span class="status" aria-hidden="true"></span>
+        {:else}
+            <span
+                class="status dot {health.status}"
+                title={statusTitle(health)}
+                aria-label={statusTitle(health)}
+            ></span>
+        {/if}
     </div>
 
     {#if expanded}
@@ -97,6 +189,31 @@
         background: var(--ctx-color);
     }
 
+    /* The reveal flash. It sits over the row rather than changing its
+       background so that it works the same whether the context is selected or
+       not, and it is the context's own colour so the row that lights up is
+       recognisably the one whose tab was clicked. The global reduced-motion
+       rule already collapses this to nothing. */
+    .head.flash::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: var(--radius-sm);
+        background: var(--ctx-color);
+        opacity: 0;
+        pointer-events: none;
+        animation: reveal-flash 700ms ease-out;
+    }
+
+    @keyframes reveal-flash {
+        from {
+            opacity: 0.4;
+        }
+        to {
+            opacity: 0;
+        }
+    }
+
     .twisty {
         display: grid;
         place-items: center;
@@ -138,6 +255,44 @@
 
     .selected .name {
         color: var(--text);
+    }
+
+    .status {
+        display: grid;
+        place-items: center;
+        width: 16px;
+        flex: 0 0 auto;
+        margin-right: 6px;
+    }
+
+    .status.dot::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+    }
+
+    .status.dot.connected::before {
+        /* A faint halo, so green reads as live rather than as another swatch. */
+        background: var(--ok);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 22%, transparent);
+    }
+
+    .status.dot.checking::before {
+        background: var(--accent);
+        animation: pulse 1.1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+        50% {
+            opacity: 0.25;
+        }
+    }
+
+    /* A triangle rather than a red dot: in a list of twenty clusters a broken
+       one has to be findable by shape, not only by colour. */
+    .status.broken {
+        color: var(--error);
     }
 
     .badge {

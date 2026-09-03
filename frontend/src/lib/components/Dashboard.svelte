@@ -4,7 +4,7 @@
     import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
     import { adoptOverview, type Overview } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
-    import Icon from './Icon.svelte';
+    import ErrorState from './ErrorState.svelte';
     import SortableTable from './SortableTable.svelte';
 
     interface Props {
@@ -16,21 +16,31 @@
     let overview = $state<Overview | null>(null);
     let error = $state<string | null>(null);
     let loading = $state(true);
+    /** Bumped by the retry button; the loading effect reads it as a dependency. */
+    let attempt = $state(0);
 
     let color = $derived(workspace.colorOf(contextId));
+    let context = $derived(workspace.contexts.find((c) => c.id === contextId) ?? null);
 
     $effect(() => {
         const id = contextId;
+        attempt;
         let cancelled = false;
         loading = true;
         error = null;
 
         ResourceService.Overview(id)
             .then((result) => {
-                if (!cancelled) overview = adoptOverview(result);
+                if (cancelled) return;
+                overview = adoptOverview(result);
+                // A dashboard that loaded is better evidence than any ping, so
+                // it settles the sidebar indicator for this context.
+                workspace.reportHealth(id, 'connected');
             })
             .catch((err: unknown) => {
-                if (!cancelled) error = err instanceof Error ? err.message : String(err);
+                if (cancelled) return;
+                error = err instanceof Error ? err.message : String(err);
+                workspace.reportHealth(id, 'error', error);
             })
             .finally(() => {
                 if (!cancelled) loading = false;
@@ -56,7 +66,7 @@
     {#if loading && !overview}
         <p class="status">Loading cluster overview…</p>
     {:else if error}
-        <p class="status error"><Icon name="alert" size={14} /> {error}</p>
+        <ErrorState message={error} {context} onRetry={() => attempt++} />
     {:else if overview}
         <header class="head" style:--ctx-color={color}>
             <h1>{overview.context}</h1>
@@ -127,10 +137,6 @@
         gap: 8px;
         color: var(--text-dim);
         padding: 24px 0;
-    }
-
-    .status.error {
-        color: var(--error);
     }
 
     .status.quiet {

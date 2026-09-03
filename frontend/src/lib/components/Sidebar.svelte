@@ -40,6 +40,25 @@
     <header class="top">
         <span class="heading">Clusters</span>
         <span class="count">{total}</span>
+
+        <!-- One button rather than two: with nothing open it expands, and with
+             anything open it collapses, which covers both jobs without a fifth
+             control crowding the header at narrow sidebar widths. -->
+        {#if total > 0}
+            {@const collapsing = workspace.anyExpanded}
+            <button
+                class="action"
+                onclick={() => (collapsing ? workspace.collapseAll() : workspace.expandAll())}
+                title={collapsing ? 'Collapse all contexts' : 'Expand all contexts'}
+                aria-label={collapsing ? 'Collapse all contexts' : 'Expand all contexts'}
+            >
+                <Icon name={collapsing ? 'collapse-all' : 'expand-all'} size={15} />
+            </button>
+            <!-- The tree control and the kubeconfig-source controls do
+                 different jobs; the rule keeps them from reading as one row. -->
+            <span class="divider"></span>
+        {/if}
+
         <button
             class="action"
             class:spinning={workspace.syncing}
@@ -207,6 +226,14 @@
         border-radius: 8px;
         padding: 1px 6px;
         margin-right: auto;
+    }
+
+    .divider {
+        width: 1px;
+        height: 15px;
+        flex: 0 0 auto;
+        background: var(--border);
+        margin: 0 1px;
     }
 
     .action {
