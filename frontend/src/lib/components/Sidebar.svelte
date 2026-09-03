@@ -64,7 +64,7 @@
             class:spinning={workspace.syncing}
             onclick={() => workspace.sync()}
             disabled={workspace.syncing}
-            title="Rescan ~/.kube, $KUBECONFIG, your added files and watched folders"
+            title="Rescan ~/.kube, $KUBECONFIG, your added files and watched folders, and recheck the clusters already looked at"
             aria-label="Sync kubeconfig files"
         >
             <Icon name="refresh" size={15} />

@@ -4,7 +4,11 @@ import Sidebar from './Sidebar.svelte';
 import { workspace } from '../state/workspace.svelte';
 
 // Scrolling a context into view is DOM behaviour: the store can only say that a
-// reveal was requested, not that anything useful moved. These run against a
+// reveal was requested, not that anything useful moved.
+//
+// These reveal with no kind, which is the fallback the sidebar takes when the
+// tab's own row is not showing -- its section shut, or its API group. Revealing
+// the row itself is covered in RevealItem.browser.test.ts. These run against a
 // real sidebar at a realistic height.
 //
 // The design tokens have to be injected. Without them `height: var(--row-h)` is
@@ -74,10 +78,10 @@ test('a context far down the list starts out of view', () => {
     expect(visible(BOTTOM.id)).toBe(false);
 });
 
-test('switching down to the bottom context brings its tree into view, not just its name', async () => {
-    // The reported case: pods open on the first and last context, viewing the
-    // top one, then clicking the bottom one's tab. Landing the row flush on the
-    // bottom edge is what makes it look like nothing scrolled.
+// Activating a tab now reveals that tab's own row rather than the context
+// header, so these check the row arrives -- the header may well be off screen
+// above it, which is fine and was the point.
+test('switching down to a tab on the bottom context shows that tab\'s row', async () => {
     workspace.openTab(TOP.id, 'pods');
     workspace.openTab(BOTTOM.id, 'pods');
     workspace.activateTab(`${TOP.id}#pods`);
@@ -86,32 +90,23 @@ test('switching down to the bottom context brings its tree into view, not just i
     workspace.activateTab(`${BOTTOM.id}#pods`);
     await settle();
 
-    expect(visible(BOTTOM.id)).toBe(true);
-    expect(roomBelow(BOTTOM.id)).toBeGreaterThan(200);
-});
-
-test('switching up to the top context also leaves its tree visible', async () => {
-    workspace.openTab(TOP.id, 'pods');
-    workspace.openTab(BOTTOM.id, 'pods');
-    workspace.activateTab(`${BOTTOM.id}#pods`);
-    await settle();
-
-    workspace.activateTab(`${TOP.id}#pods`);
-    await settle();
-
-    expect(visible(TOP.id)).toBe(true);
-    expect(roomBelow(TOP.id)).toBeGreaterThan(200);
+    const row = document.querySelector(`.context:last-of-type [data-kind="pods"]`) as HTMLElement;
+    expect(row).toBeTruthy();
+    const view = scroller().getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(view.top - 1);
+    expect(box.bottom).toBeLessThanOrEqual(view.bottom + 1);
 });
 
 test('a context already fully in view is not scrolled away from', async () => {
-    workspace.reveal = { contextId: TOP.id, nonce: 1 };
+    workspace.reveal = { kind: '', contextId: TOP.id, nonce: 1 };
     await settle();
 
     expect(scroller().scrollTop).toBe(0);
 });
 
 test('a reveal flashes the row, so the eye can find it', async () => {
-    workspace.reveal = { contextId: BOTTOM.id, nonce: 1 };
+    workspace.reveal = { kind: '', contextId: BOTTOM.id, nonce: 1 };
 
     await expect.poll(() => row(BOTTOM.id).classList.contains('flash')).toBe(true);
     expect(row(TOP.id).classList.contains('flash')).toBe(false);

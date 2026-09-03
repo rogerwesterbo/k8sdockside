@@ -4,7 +4,8 @@
 -->
 <script lang="ts">
     import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
-    import { NAV_GROUPS } from '../catalogue';
+    import { DASHBOARD_ITEM, DEFINITIONS_GROUP, NAV_GROUPS } from '../catalogue';
+    import { classify } from '../errors';
     import { alpha } from '../colors';
     import { workspace, type Health } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
@@ -15,8 +16,9 @@
 
     let { context }: Props = $props();
 
-    /** The context's own row, which is what gets scrolled to and flashed. */
+    /** The context's own row, and the whole block, for the reveal below. */
     let head = $state<HTMLElement>();
+    let root = $state<HTMLElement>();
 
     let color = $derived(workspace.colorOf(context.id));
     let health = $derived(workspace.healthOf(context.id));
@@ -59,27 +61,43 @@
         if (!request || request.contextId !== context.id || !head) return;
         request.nonce;
 
+        // The tab's own row where it is showing, and the context's row only as
+        // a fallback. With fifty rows under a context, bringing the cluster's
+        // name into view says nothing about where in them the tab lives -- the
+        // sidebar moves, lands on the wrong thing, and reads as a flicker.
+        const target = rowFor(request.kind) ?? head;
+
         const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const behavior: ScrollBehavior = still ? 'auto' : 'smooth';
-        const scroller = scrollParent(head);
+        const scroller = scrollParent(target);
 
         if (scroller) {
             const view = scroller.getBoundingClientRect();
-            const box = head.getBoundingClientRect();
+            const box = target.getBoundingClientRect();
             if (box.top < view.top || box.bottom > view.bottom) {
                 scroller.scrollTo({ top: scroller.scrollTop + (box.top - view.top) - REVEAL_MARGIN, behavior });
             }
         } else {
             // No scrolling ancestor: nothing to move, but still flash.
-            head.scrollIntoView({ block: 'nearest', behavior });
+            target.scrollIntoView({ block: 'nearest', behavior });
         }
 
         // Removed and re-added around a forced reflow, the standard way to
         // restart an animation that may still be running from a prior reveal.
-        head.classList.remove('flash');
-        void head.offsetWidth;
-        head.classList.add('flash');
+        target.classList.remove('flash');
+        void target.offsetWidth;
+        target.classList.add('flash');
     });
+
+    /**
+     * This context's row for one kind, when the tree is showing it. Absent for a
+     * kind whose section is shut, or a custom resource whose API group is -- in
+     * which case the reveal falls back to the context itself.
+     */
+    function rowFor(kind: string): HTMLElement | null {
+        if (!kind || !root) return null;
+        return root.querySelector<HTMLElement>(`[data-kind="${CSS.escape(kind)}"]`);
+    }
 
     // The modifier key is named for the platform, since the whole point of the
     // hint is that someone can act on it.
@@ -90,6 +108,23 @@
         const here = `${action} for this cluster (${ALT}-click for every cluster)`;
         return local ? `${here} \u2014 currently set differently here than elsewhere` : here;
     }
+
+    // The definitions come from the cluster, so they are asked for whenever the
+    // section is actually showing -- not when its heading is clicked.
+    //
+    // Clicking is only one of the ways it comes to be open: it may have been
+    // left open in this context's folding from a previous session, or unfolded
+    // on its own when a tab for one of its kinds was activated. Hanging the
+    // fetch off the click missed all of those, and the section then sat empty
+    // until it was collapsed and opened again. Keyed off the state, every route
+    // in loads it.
+    //
+    // Still lazy: nothing is asked of a cluster whose definitions section is
+    // shut, and loadCustomKinds does nothing once a context has an answer.
+    $effect(() => {
+        if (!expanded || workspace.isGroupCollapsed(context.id, DEFINITIONS_GROUP)) return;
+        void workspace.loadCustomKinds(context.id);
+    });
 
     function statusTitle(state: Health): string {
         switch (state.status) {
@@ -107,7 +142,7 @@
     }
 </script>
 
-<div class="context" class:selected style:--ctx-color={color} style:--ctx-tint={alpha(color, 0.16)}>
+<div class="context" bind:this={root} class:selected style:--ctx-color={color} style:--ctx-tint={alpha(color, 0.16)}>
     <div class="head" bind:this={head}>
         <button
             class="twisty"
@@ -118,13 +153,34 @@
             <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} />
         </button>
 
-        <button class="label" onclick={() => workspace.selectContext(context.id)} title={context.server || context.name}>
+        <button
+            class="label"
+            onclick={() => workspace.activateContext(context.id)}
+            aria-expanded={expanded}
+            title={context.server || context.name}
+        >
             <span class="swatch" style:background={color}></span>
             <span class="name">{workspace.displayName(context)}</span>
             {#if context.current}
                 <span class="badge" title="current-context in this kubeconfig">current</span>
             {/if}
         </button>
+
+        <!-- Only while the context is open: collapsing the sections of a
+             context you cannot see is a control with nothing to act on. -->
+        {#if expanded}
+            {@const shutting = workspace.anyGroupOpen(context.id)}
+            <button
+                class="sections"
+                onclick={() => (shutting
+                    ? workspace.collapseAllGroups(context.id)
+                    : workspace.expandAllGroups(context.id))}
+                title={shutting ? 'Collapse every section here' : 'Expand every section here'}
+                aria-label={shutting ? 'Collapse every section here' : 'Expand every section here'}
+            >
+                <Icon name={shutting ? 'collapse-all' : 'expand-all'} size={13} />
+            </button>
+        {/if}
 
         <!-- Reachability sits at the far right, opposite the colour swatch, so
              "which cluster is this" and "can I reach it" never get confused for
@@ -149,9 +205,23 @@
 
     {#if expanded}
         <div class="tree">
+            <!-- Outside the sections: the overview is what is most often wanted
+                 straight after opening a context, and a section holding one row
+                 is a heading you have to open to reach a single thing. -->
+            <button
+                class="item"
+                data-kind={DASHBOARD_ITEM.kind}
+                class:open={isOpen(DASHBOARD_ITEM.kind)}
+                onclick={() => workspace.openTab(context.id, DASHBOARD_ITEM.kind)}
+            >
+                <Icon name={DASHBOARD_ITEM.icon} size={15} />
+                <span>{DASHBOARD_ITEM.label}</span>
+            </button>
+
             {#each NAV_GROUPS as group (group.label)}
                 {@const folded = workspace.isGroupCollapsed(context.id, group.label)}
                 {@const local = workspace.groupDiffersFromGlobal(context.id, group.label)}
+                <div class="group-row">
                 <button
                     class="group"
                     class:folded
@@ -169,10 +239,36 @@
                     {#if folded}<span class="tally">{group.items.length}</span>{/if}
                 </button>
 
+                <!-- Only the definitions section can go stale: its contents are
+                     the cluster's, not this list's, and they are read once. A
+                     CRD installed since is a deliberate act, so asking again is
+                     offered rather than done by holding a watch open.
+
+                     Nested inside the heading it would fold the section on its
+                     way through, so it sits beside it and stops the click. -->
+                {#if !folded && group.label === DEFINITIONS_GROUP}
+                    {@const reading = workspace.customKindsFor(context.id).status === 'loading'}
+                    <button
+                        class="reload"
+                        class:spinning={reading}
+                        disabled={reading}
+                        onclick={(event) => {
+                            event.stopPropagation();
+                            void workspace.loadCustomKinds(context.id, { force: true });
+                        }}
+                        title="Read this cluster's definitions again"
+                        aria-label="Read this cluster's definitions again"
+                    >
+                        <Icon name="refresh" size={12} />
+                    </button>
+                {/if}
+                </div>
+
                 {#if !folded}
                     {#each group.items as item (item.kind)}
                         <button
                             class="item"
+                            data-kind={item.kind}
                             class:open={isOpen(item.kind)}
                             onclick={() => workspace.openTab(context.id, item.kind)}
                         >
@@ -180,6 +276,55 @@
                             <span>{item.label}</span>
                         </button>
                     {/each}
+
+                    <!-- The definitions section continues into the cluster: the
+                         API groups it serves, each holding its own kinds. -->
+                    {#if group.label === DEFINITIONS_GROUP}
+                        {@const loaded = workspace.customKindsFor(context.id)}
+                        {#if loaded.status === 'loading'}
+                            <p class="note">Looking for definitions…</p>
+                        {:else if loaded.status === 'error'}
+                            <!-- Named rather than generic. "Could not read
+                                 definitions" leaves no permission, no network
+                                 and none installed looking identical, and they
+                                 call for different reactions -- so this uses
+                                 the same reading of the error the error pages
+                                 do, with the wire text on hover. -->
+                            <p class="note failed" title={loaded.message}>
+                                {classify(loaded.message).headline}
+                            </p>
+                        {:else if loaded.status === 'ready' && loaded.groups.length === 0}
+                            <p class="note">No custom resources installed</p>
+                        {:else}
+                            {#each loaded.groups as api (api.group)}
+                                {@const open = workspace.isApiGroupExpanded(context.id, api.group)}
+                                <button
+                                    class="api"
+                                    onclick={() => workspace.toggleApiGroup(context.id, api.group)}
+                                    aria-expanded={open}
+                                    title={api.group}
+                                >
+                                    <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
+                                    <span>{api.group}</span>
+                                    <span class="tally">{api.kinds.length}</span>
+                                </button>
+
+                                {#if open}
+                                    {#each api.kinds as custom (custom.kind)}
+                                        <button
+                                            class="item nested"
+                                            data-kind={custom.kind}
+                                            class:open={isOpen(custom.kind)}
+                                            onclick={() => workspace.openTab(context.id, custom.kind)}
+                                        >
+                                            <Icon name="puzzle" size={14} />
+                                            <span>{custom.label}</span>
+                                        </button>
+                                    {/each}
+                                {/if}
+                            {/each}
+                        {/if}
+                    {/if}
                 {/if}
             {/each}
         </div>
@@ -224,7 +369,7 @@
        not, and it is the context's own colour so the row that lights up is
        recognisably the one whose tab was clicked. The global reduced-motion
        rule already collapses this to nothing. */
-    .head.flash::after {
+    .flash::after {
         content: '';
         position: absolute;
         inset: 0;
@@ -287,6 +432,21 @@
         color: var(--text);
     }
 
+    .sections {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        border-radius: 3px;
+        color: var(--text-faint);
+    }
+
+    .sections:hover {
+        background: var(--bg-active);
+        color: var(--text);
+    }
+
     .status {
         display: grid;
         place-items: center;
@@ -342,6 +502,17 @@
         padding: 2px 0 6px;
     }
 
+    /* The heading and the definitions section's refresh sit on one line. */
+    .group-row {
+        display: flex;
+        align-items: center;
+        margin: 8px 0 2px;
+    }
+
+    .group-row .group {
+        margin: 0;
+    }
+
     .group {
         display: flex;
         align-items: center;
@@ -352,12 +523,16 @@
            where the group's contents begin rather than indenting past them. */
         padding-left: calc(var(--indent) - 15px);
         padding-right: 8px;
-        font-size: 10px;
-        letter-spacing: 0.08em;
+        /* Sized to be read rather than merely noticed: at 10px these were the
+           smallest text in the app while being the thing you navigate by. */
+        font-size: 11.5px;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
-        color: var(--text-faint);
+        font-weight: 600;
+        color: var(--text-dim);
         text-align: left;
         border-radius: var(--radius-sm);
+        min-height: 22px;
     }
 
     .group:hover {
@@ -400,6 +575,8 @@
     .item {
         display: flex;
         align-items: center;
+        /* So the reveal flash can be drawn over it. */
+        position: relative;
         gap: 8px;
         width: 100%;
         height: 26px;
@@ -408,6 +585,82 @@
         color: var(--text-dim);
         border-radius: var(--radius-sm);
         text-align: left;
+    }
+
+    /* One API group inside the definitions section: a heading, but a level in
+       rather than a peer of the section headings, so it is indented and
+       lower-key than they are. */
+    .reload {
+        display: grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+        margin-right: 4px;
+        border-radius: 3px;
+        color: var(--text-faint);
+    }
+
+    .reload:hover:not(:disabled) {
+        background: var(--bg-active);
+        color: var(--text);
+    }
+
+    .reload:disabled {
+        cursor: default;
+    }
+
+    .reload.spinning {
+        animation: spin 900ms linear infinite;
+        color: var(--accent);
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .api {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        width: 100%;
+        min-height: 24px;
+        padding-left: var(--indent);
+        padding-right: 8px;
+        color: var(--text-dim);
+        border-radius: var(--radius-sm);
+        text-align: left;
+        font-family: var(--mono);
+        font-size: 11px;
+    }
+
+    .api:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .api span:first-of-type {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* A definition sits one level in from its API group. */
+    .item.nested {
+        padding-left: calc(var(--indent) + 16px);
+    }
+
+    .note {
+        margin: 2px 0 4px;
+        padding-left: var(--indent);
+        font-size: 11px;
+        color: var(--text-faint);
+    }
+
+    .note.failed {
+        color: var(--error);
     }
 
     .item:hover {

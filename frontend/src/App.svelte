@@ -157,7 +157,8 @@
                             {/if}
                         {/key}
                     {:else}
-                        <div class="welcome">
+                        <div class="welcome-stage">
+                            <div class="welcome">
                             <h1>K8s Dockside</h1>
                             {#if workspace.contexts.length > 0}
                                 <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
@@ -175,6 +176,7 @@
                             {:else}
                                 <p>Looking for kubeconfig files…</p>
                             {/if}
+                            </div>
                         </div>
                     {/if}
                 </div>
@@ -267,7 +269,49 @@
         overflow: hidden;
     }
 
+    /* The logo as a watermark behind the idle screen. It fills the empty
+       content area rather than sitting at a fixed size, so the app looks like
+       itself when nothing is open -- and goes with the panel the moment a tab
+       is, rather than sitting behind a table of pod names. */
+    .welcome-stage {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        overflow-y: auto;
+    }
+
+    /* The image lives on a pseudo-element so it alone can be faded. Setting
+       opacity on the container would take the text down with it, and the text
+       is the part that has to stay readable -- which is the whole difference
+       between a background and a picture.
+
+       `contain`-style sizing keeps the mark whole at any window size, and it is
+       kept out of the way of the pointer so nothing here is selectable. */
+    .welcome-stage::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image: url('/k8s_dockside_harbour_scene_no_text.svg');
+        background-repeat: no-repeat;
+        background-position: center;
+        /* Scaled past the edges rather than fitted, because the artwork is a
+           framed illustration and not a transparent mark. Shown whole it brings
+           two things that do not belong behind this text: the rounded card edge
+           reads as a stray rectangle, and the illustration's own title repeats
+           the heading in front of it. Overscaling crops both away and leaves
+           the harbour scene. */
+        background-size: 124% 158%;
+        background-position: center 32%;
+        opacity: 0.09;
+        pointer-events: none;
+    }
+
     .welcome {
+        /* Above the watermark, not through it. */
+        position: relative;
+        z-index: 1;
         max-width: 520px;
         padding: 64px 32px;
         margin: 0 auto;

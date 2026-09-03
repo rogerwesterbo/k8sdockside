@@ -15,7 +15,7 @@ import {
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
-import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, groupForKind, labelFor } from '../catalogue';
+import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, groupForKind, labelFor } from '../catalogue';
 import { defaultColorFor } from '../colors';
 
 export type DockSide = 'right' | 'bottom' | 'left';
@@ -63,8 +63,29 @@ const UNCHECKED: Health = { status: 'unknown', message: '' };
  */
 export interface Reveal {
     contextId: string;
+    /** The resource kind to show, so the sidebar can scroll to its own row. */
+    kind: string;
     nonce: number;
 }
+
+/**
+ * The custom resources a cluster serves, as the sidebar's definitions section
+ * needs them: loaded when that section is first opened for a context, and kept
+ * for as long as the context is around.
+ */
+export interface CustomApiGroup {
+    group: string;
+    /** Non-null here, unlike the binding: normalised on the way in. */
+    kinds: kube.CustomResourceKind[];
+}
+
+export interface CustomKinds {
+    status: 'idle' | 'loading' | 'ready' | 'error';
+    groups: CustomApiGroup[];
+    message: string;
+}
+
+const NOT_LOADED: CustomKinds = { status: 'idle', groups: [], message: '' };
 
 /** A transient message shown in the status bar. */
 export interface Notice {
@@ -96,6 +117,11 @@ function toggled(groups: string[], label: string): string[] {
 /** Whether two folding lists say the same thing, regardless of order. */
 function sameGroups(a: string[], b: string[]): boolean {
     return a.length === b.length && [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
+}
+
+/** The key an API group's open state is remembered under. */
+function apiGroupKey(contextId: string, group: string): string {
+    return `${contextId}\u0000${group}`;
 }
 
 function tabId(contextId: string, kind: string): string {
@@ -139,6 +165,15 @@ class Workspace {
 
     /** Reachability per context, written by both probes and tab outcomes. */
     health = $state<Record<string, Health>>({});
+    /** Custom resource definitions per context, loaded on demand. */
+    customKinds = $state<Record<string, CustomKinds>>({});
+    /**
+     * Which API groups are open, as `contextId\0group`. Not persisted: it is
+     * where you are looking right now rather than how you like the sidebar, and
+     * it would otherwise grow the settings file a line per group per cluster.
+     */
+    expandedApiGroups = $state<string[]>([]);
+
     /** The sidebar's standing request to scroll a context into view. */
     reveal = $state<Reveal | null>(null);
     private revealCount = 0;
@@ -202,11 +237,13 @@ class Workspace {
         try {
             this.files = adoptFiles(await KubeconfigService.Sync());
             this.pruneHealth();
+            this.pruneCustomKinds();
             if (restoreTabs) {
                 this.restoreTabs();
             } else {
                 this.dropTabsForMissingContexts();
                 this.recheckHealth();
+                this.recheckCustomKinds();
                 // Only for a sync the user asked for: a rescan that finds
                 // nothing new looks identical to one that did not run.
                 this.inform(
@@ -351,6 +388,25 @@ class Workspace {
         void this.probe(contextId);
     }
 
+    /**
+     * What clicking a context's name does: show it, and close it again if it is
+     * the one already showing.
+     *
+     * The second click is the point -- opening a context and then having the
+     * same click do nothing is a dead end. But it only closes the context you
+     * are already on: clicking a *different* one means "show me this instead",
+     * and folding away what you just reached for would be the opposite of that.
+     */
+    activateContext(contextId: string): void {
+        if (this.selectedContextId === contextId && this.isExpanded(contextId)) {
+            // Left selected: its settings panel is about the context, not about
+            // whether its resource tree happens to be open.
+            this.expanded = this.expanded.filter((id) => id !== contextId);
+            return;
+        }
+        this.selectContext(contextId);
+    }
+
     toggleExpanded(contextId: string): void {
         const opening = !this.expanded.includes(contextId);
         this.expanded = opening
@@ -425,7 +481,7 @@ class Workspace {
             // Asked for here rather than in selectContext, which the sidebar
             // also calls: a context clicked in the sidebar is already under the
             // pointer, and scrolling it would move it out from under them.
-            this.reveal = { contextId: tab.contextId, nonce: ++this.revealCount };
+            this.reveal = { contextId: tab.contextId, kind: tab.kind, nonce: ++this.revealCount };
         }
         // Only when the view actually changed: the panel describes an object in
         // the tab we just left, so keeping it open over a different one would
@@ -581,6 +637,76 @@ class Workspace {
         if (current) {
             this.selectContext(current.id);
         }
+    }
+
+    // ----- custom resources ----------------------------------------------
+
+    /** What a context's definitions section should show. */
+    customKindsFor(contextId: string): CustomKinds {
+        return this.customKinds[contextId] ?? NOT_LOADED;
+    }
+
+    /**
+     * Fetches the definitions a cluster serves.
+     *
+     * Called when the definitions section is opened rather than when a context
+     * is, for the same reason probing is lazy: this is a request to a cluster,
+     * and a kubeconfig with twenty contexts should not make twenty of them
+     * because the sidebar was expanded. The answer is kept, so opening and
+     * closing the section costs nothing after the first time.
+     */
+    async loadCustomKinds(contextId: string, { force = false } = {}): Promise<void> {
+        const status = this.customKindsFor(contextId).status;
+        if (status === 'loading') return;
+        if (!force && status !== 'idle') return;
+
+        this.customKinds[contextId] = { status: 'loading', groups: [], message: '' };
+        try {
+            const groups = await ResourceService.CustomResourceKinds(contextId);
+            // Normalised here rather than guarded at every use: the generated
+            // bindings type both the list and each group's kinds as nullable.
+            this.customKinds[contextId] = {
+                status: 'ready',
+                groups: (groups ?? []).map((g) => ({ group: g.group, kinds: g.kinds ?? [] })),
+                message: '',
+            };
+        } catch (err) {
+            this.customKinds[contextId] = { status: 'error', groups: [], message: message(err) };
+        }
+    }
+
+    /** Whether one API group's definitions are showing, for one context. */
+    isApiGroupExpanded(contextId: string, group: string): boolean {
+        return this.expandedApiGroups.includes(apiGroupKey(contextId, group));
+    }
+
+    toggleApiGroup(contextId: string, group: string): void {
+        this.expandedApiGroups = toggled(this.expandedApiGroups, apiGroupKey(contextId, group));
+    }
+
+    /**
+     * Re-reads the definitions of contexts that already had them, so the sync
+     * button is the way back from a cluster that was unreachable when its
+     * section was first opened.
+     *
+     * Without it a failure is permanent: the sidebar asks only while a context
+     * has no answer, and an error counts as one. Contexts nobody has opened the
+     * section for are left alone, which is what keeps this lazy.
+     */
+    private recheckCustomKinds(): void {
+        for (const id of Object.keys(this.customKinds)) {
+            void this.loadCustomKinds(id, { force: true });
+        }
+    }
+
+    /** Forgets the definitions of contexts that are no longer in a kubeconfig. */
+    private pruneCustomKinds(): void {
+        const known = new Set(this.contexts.map((c) => c.id));
+        const kept: Record<string, CustomKinds> = {};
+        for (const [id, loaded] of Object.entries(this.customKinds)) {
+            if (known.has(id)) kept[id] = loaded;
+        }
+        this.customKinds = kept;
     }
 
     // ----- health --------------------------------------------------------
@@ -757,6 +883,22 @@ class Workspace {
             this.settings.contexts[contextId] = merged;
         }
         this.persistContextPrefs(contextId, merged);
+    }
+
+    /** Whether any of a context's sections is open, and so worth collapsing. */
+    anyGroupOpen(contextId: string): boolean {
+        const folded = this.collapsedGroupsFor(contextId);
+        return NAV_GROUPS.some((group) => !folded.includes(group.label));
+    }
+
+    /** Shuts every section for one context. */
+    collapseAllGroups(contextId: string): void {
+        this.setFoldingOverride(contextId, NAV_GROUPS.map((group) => group.label));
+    }
+
+    /** Opens every section for one context. */
+    expandAllGroups(contextId: string): void {
+        this.setFoldingOverride(contextId, []);
     }
 
     /** Returns a context to following the shared default folding. */

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { NAV_GROUPS, groupForKind, iconFor, labelFor, singularFor } from './catalogue';
+import { DASHBOARD, DASHBOARD_ITEM, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, groupForKind, iconFor, labelFor, singularFor } from './catalogue';
 import { PATHS } from './components/Icon.svelte';
 
 const ITEMS = NAV_GROUPS.flatMap((group) => group.items);
@@ -72,8 +72,10 @@ describe('groupForKind', () => {
         expect(groupForKind('priorityclasses')).toBe('Scheduling');
     });
 
-    test('the dashboard belongs to Overview', () => {
-        expect(groupForKind('dashboard')).toBe('Overview');
+    // The dashboard is not in a section any more: it sits at the top of the
+    // tree on its own, so there is never a section to unfold to reach it.
+    test('the dashboard belongs to no section', () => {
+        expect(groupForKind(DASHBOARD)).toBeNull();
     });
 
     // Custom resources are opened from the definitions table and have no nav
@@ -92,5 +94,33 @@ describe('groupForKind', () => {
                 expect(groupForKind(item.kind)).toBe(group.label);
             }
         }
+    });
+});
+
+describe('the dashboard entry', () => {
+    test('is offered on its own rather than inside a section', () => {
+        expect(DASHBOARD_ITEM.kind).toBe(DASHBOARD);
+        expect(NAV_GROUPS.flatMap((g) => g.items).map((i) => i.kind)).not.toContain(DASHBOARD);
+    });
+
+    test('still resolves its label and icon like any other kind', () => {
+        expect(labelFor(DASHBOARD)).toBe('Dashboard');
+        expect(iconFor(DASHBOARD)).toBe('dashboard');
+    });
+
+    test('there is no Overview section left', () => {
+        expect(NAV_GROUPS.map((g) => g.label)).not.toContain('Overview');
+    });
+});
+
+describe('the default folding', () => {
+    // Every section starts shut. Expanding a context then shows the dashboard
+    // and a short list of headings rather than fifty rows.
+    test('folds every section', () => {
+        expect([...DEFAULT_COLLAPSED_GROUPS].sort()).toEqual(NAV_GROUPS.map((g) => g.label).sort());
+    });
+
+    test('follows the sections rather than a list kept in step by hand', () => {
+        expect(DEFAULT_COLLAPSED_GROUPS).toHaveLength(NAV_GROUPS.length);
     });
 });

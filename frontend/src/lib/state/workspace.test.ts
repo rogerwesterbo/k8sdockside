@@ -11,6 +11,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
     ResourceService: {
         Describe: vi.fn().mockResolvedValue(''),
         Ping: vi.fn().mockResolvedValue(undefined),
+        CustomResourceKinds: vi.fn().mockResolvedValue([]),
     },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
@@ -21,7 +22,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 }));
 
 const { workspace } = await import('./workspace.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { ResourceService, KubeconfigService } = await import('../../../bindings/github.com/roger/k8sdockside');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const STAGING = '/home/u/.kube/staging::admin@staging';
@@ -496,12 +497,14 @@ describe('the default folding', () => {
         expect(workspace.isGroupCollapsed(PROD, 'Scheduling')).toBe(true);
     });
 
-    test('the everyday groups start open', () => {
+    // Everything starts folded now: expanding a context shows the dashboard and
+    // a list of headings, and you open the one you are after.
+    test('every section starts folded, not just the specialist ones', () => {
         workspace.settings.layout.collapsedGroups = null;
 
-        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(false);
-        expect(workspace.isGroupCollapsed(PROD, 'Cluster')).toBe(false);
-        expect(workspace.isGroupCollapsed(PROD, 'Config')).toBe(false);
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Cluster')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Config')).toBe(true);
     });
 
     // The distinction the store goes to trouble to preserve: an empty list is a
@@ -716,13 +719,233 @@ describe('showing the section an activated tab lives in', () => {
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
 
-    test('the dashboard unfolds Overview when it has been put away', () => {
+    // The dashboard sits outside the sections, so activating its tab has
+    // nothing to unfold -- and must not invent a folding for the context.
+    test('the dashboard needs no section opened for it', () => {
         workspace.openTab(PROD, 'dashboard');
         workspace.openTab(PROD, 'pods');
-        workspace.toggleGroup(PROD, 'Overview');
 
         workspace.activateTab(`${PROD}#dashboard`);
 
-        expect(workspace.isGroupCollapsed(PROD, 'Overview')).toBe(false);
+        expect(workspace.hasFoldingOverride(PROD)).toBe(false);
+    });
+});
+
+describe('folding every section of one context at once', () => {
+    beforeEach(() => {
+        workspace.settings.layout.collapsedGroups = [];
+        workspace.settings.contexts = {};
+    });
+
+    test('collapsing shuts every section for that context', () => {
+        workspace.collapseAllGroups(PROD);
+
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(true);
+        expect(workspace.isGroupCollapsed(PROD, 'Network')).toBe(true);
+        expect(workspace.anyGroupOpen(PROD)).toBe(false);
+    });
+
+    test('expanding opens every section for that context', () => {
+        workspace.collapseAllGroups(PROD);
+
+        workspace.expandAllGroups(PROD);
+
+        expect(workspace.isGroupCollapsed(PROD, 'Workloads')).toBe(false);
+        expect(workspace.anyGroupOpen(PROD)).toBe(true);
+    });
+
+    test('it is one context at a time, like folding a single section', () => {
+        workspace.collapseAllGroups(PROD);
+
+        expect(workspace.isGroupCollapsed(STAGING, 'Workloads')).toBe(false);
+    });
+
+    test('anyGroupOpen reports whether there is anything to collapse', () => {
+        workspace.collapseAllGroups(PROD);
+        expect(workspace.anyGroupOpen(PROD)).toBe(false);
+
+        workspace.toggleGroup(PROD, 'Network');
+        expect(workspace.anyGroupOpen(PROD)).toBe(true);
+    });
+});
+
+describe('the custom resource definitions a cluster serves', () => {
+    const GROUPS = [
+        { group: 'cert-manager.io', kinds: [
+            { kind: 'crd:certificates.cert-manager.io', label: 'Certificate', group: 'cert-manager.io', plural: 'certificates', scoped: true },
+        ] },
+        { group: 'vitistack.io', kinds: [
+            { kind: 'crd:machines.vitistack.io', label: 'Machine', group: 'vitistack.io', plural: 'machines', scoped: true },
+        ] },
+    ];
+
+    beforeEach(() => {
+        workspace.customKinds = {};
+        vi.mocked(ResourceService.CustomResourceKinds).mockReset().mockResolvedValue(GROUPS as never);
+    });
+
+    test('a context nobody has opened the section for has asked for nothing', () => {
+        expect(workspace.customKindsFor(PROD).status).toBe('idle');
+        expect(ResourceService.CustomResourceKinds).not.toHaveBeenCalled();
+    });
+
+    test('loading reports progress and then the groups', async () => {
+        const loading = workspace.loadCustomKinds(PROD);
+        expect(workspace.customKindsFor(PROD).status).toBe('loading');
+
+        await loading;
+
+        expect(workspace.customKindsFor(PROD).status).toBe('ready');
+        expect(workspace.customKindsFor(PROD).groups.map((g) => g.group)).toEqual([
+            'cert-manager.io',
+            'vitistack.io',
+        ]);
+    });
+
+    test('a failure is kept so the section can explain itself', async () => {
+        vi.mocked(ResourceService.CustomResourceKinds).mockRejectedValueOnce(new Error('forbidden'));
+
+        await workspace.loadCustomKinds(PROD);
+
+        expect(workspace.customKindsFor(PROD).status).toBe('error');
+        expect(workspace.customKindsFor(PROD).message).toBe('forbidden');
+    });
+
+    // Opening and closing the section repeatedly must not re-ask the cluster.
+    test('a context already loaded is not asked again', async () => {
+        await workspace.loadCustomKinds(PROD);
+        await workspace.loadCustomKinds(PROD);
+
+        expect(ResourceService.CustomResourceKinds).toHaveBeenCalledTimes(1);
+    });
+
+    test('a forced reload asks again, so a newly installed operator shows up', async () => {
+        await workspace.loadCustomKinds(PROD);
+        await workspace.loadCustomKinds(PROD, { force: true });
+
+        expect(ResourceService.CustomResourceKinds).toHaveBeenCalledTimes(2);
+    });
+
+    test('each context is loaded separately', async () => {
+        await workspace.loadCustomKinds(PROD);
+
+        expect(workspace.customKindsFor(STAGING).status).toBe('idle');
+    });
+
+    // Without this a failure is permanent: the section keys off state, and an
+    // errored context is not idle, so nothing would ask again.
+    test('a sync re-reads the definitions of contexts that had them', async () => {
+        vi.mocked(ResourceService.CustomResourceKinds).mockRejectedValueOnce(new Error('unreachable'));
+        await workspace.loadCustomKinds(PROD);
+        expect(workspace.customKindsFor(PROD).status).toBe('error');
+
+        vi.mocked(KubeconfigService.Sync).mockResolvedValueOnce([
+            { path: '/c', source: 'manual', error: '', contexts: [{ id: PROD, name: 'p', cluster: 'c', user: 'u', namespace: '', server: '', file: '/c', current: false }] },
+        ] as never);
+        await workspace.sync();
+        await vi.waitFor(() => expect(workspace.customKindsFor(PROD).status).toBe('ready'));
+    });
+
+    test('a sync does not start reading for contexts nobody asked about', async () => {
+        vi.mocked(KubeconfigService.Sync).mockResolvedValueOnce([
+            { path: '/c', source: 'manual', error: '', contexts: [{ id: STAGING, name: 's', cluster: 'c', user: 'u', namespace: '', server: '', file: '/c', current: false }] },
+        ] as never);
+
+        await workspace.sync();
+
+        expect(ResourceService.CustomResourceKinds).not.toHaveBeenCalled();
+    });
+
+    test('a context that leaves the kubeconfig loses what was loaded for it', async () => {
+        await workspace.loadCustomKinds(PROD);
+        expect(workspace.customKindsFor(PROD).status).toBe('ready');
+
+        await workspace.sync();
+
+        expect(workspace.customKindsFor(PROD).status).toBe('idle');
+    });
+});
+
+describe('expanding an API group inside the definitions section', () => {
+    beforeEach(() => {
+        workspace.expandedApiGroups = [];
+    });
+
+    test('groups start closed', () => {
+        expect(workspace.isApiGroupExpanded(PROD, 'vitistack.io')).toBe(false);
+    });
+
+    test('opening one leaves the others closed', () => {
+        workspace.toggleApiGroup(PROD, 'vitistack.io');
+
+        expect(workspace.isApiGroupExpanded(PROD, 'vitistack.io')).toBe(true);
+        expect(workspace.isApiGroupExpanded(PROD, 'cert-manager.io')).toBe(false);
+    });
+
+    test('the same group in another context is its own', () => {
+        workspace.toggleApiGroup(PROD, 'vitistack.io');
+
+        expect(workspace.isApiGroupExpanded(STAGING, 'vitistack.io')).toBe(false);
+    });
+
+    test('toggling again closes it', () => {
+        workspace.toggleApiGroup(PROD, 'vitistack.io');
+        workspace.toggleApiGroup(PROD, 'vitistack.io');
+
+        expect(workspace.isApiGroupExpanded(PROD, 'vitistack.io')).toBe(false);
+    });
+});
+
+describe('clicking a context name', () => {
+    beforeEach(() => {
+        workspace.expanded = [];
+        workspace.selectedContextId = null;
+    });
+
+    test('opens a closed context and selects it', () => {
+        workspace.activateContext(PROD);
+
+        expect(workspace.isExpanded(PROD)).toBe(true);
+        expect(workspace.selectedContextId).toBe(PROD);
+    });
+
+    // The complaint this fixes: a second click did nothing at all.
+    test('clicking the one already open closes it again', () => {
+        workspace.activateContext(PROD);
+
+        workspace.activateContext(PROD);
+
+        expect(workspace.isExpanded(PROD)).toBe(false);
+    });
+
+    test('closing it does not deselect it, so its settings stay put', () => {
+        workspace.activateContext(PROD);
+
+        workspace.activateContext(PROD);
+
+        expect(workspace.selectedContextId).toBe(PROD);
+    });
+
+    test('it opens again on the next click', () => {
+        workspace.activateContext(PROD);
+        workspace.activateContext(PROD);
+
+        workspace.activateContext(PROD);
+
+        expect(workspace.isExpanded(PROD)).toBe(true);
+    });
+
+    // Clicking a different context means "show me this one", never "fold it":
+    // folding what you just reached for would be the opposite of the intent.
+    test('switching to another open context selects it rather than closing it', () => {
+        workspace.activateContext(PROD);
+        workspace.activateContext(STAGING);
+        expect(workspace.isExpanded(STAGING)).toBe(true);
+
+        // PROD is still open but no longer selected; clicking it should select.
+        workspace.activateContext(PROD);
+
+        expect(workspace.isExpanded(PROD)).toBe(true);
+        expect(workspace.selectedContextId).toBe(PROD);
     });
 });

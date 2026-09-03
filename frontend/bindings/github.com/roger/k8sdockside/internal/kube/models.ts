@@ -34,6 +34,37 @@ export interface Context {
 }
 
 /**
+ * CustomResourceGroup is one API group and the kinds defined under it.
+ */
+export interface CustomResourceGroup {
+    "group": string;
+    "kinds": CustomResourceKind[] | null;
+}
+
+/**
+ * CustomResourceKind describes one CRD well enough for the frontend to open a
+ * tab on it without asking the backend what it is called.
+ */
+export interface CustomResourceKind {
+    /**
+     * the "crd:" string a tab is opened with
+     */
+    "kind": string;
+
+    /**
+     * the CRD's own plural display name
+     */
+    "label": string;
+    "group": string;
+    "plural": string;
+
+    /**
+     * namespaced rather than cluster-wide
+     */
+    "scoped": boolean;
+}
+
+/**
  * File is a kubeconfig file on disk together with the contexts parsed out of
  * it. A file that failed to parse is still returned, with Error set, so the
  * sidebar can show it as broken rather than silently dropping it.

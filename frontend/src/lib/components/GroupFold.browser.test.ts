@@ -1,7 +1,10 @@
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import ContextTree from './ContextTree.svelte';
 import { NAV_GROUPS } from '../catalogue';
+
+/** Every row the tree shows: the sections' items plus the pinned dashboard. */
+const ALL_ITEMS = NAV_GROUPS.flatMap((g) => g.items).length + 1;
 import { workspace } from '../state/workspace.svelte';
 
 const TOKENS = `:root{--bg:#10151c;--bg-sidebar:#151b24;--bg-raised:#212b38;--border:#28323f;
@@ -47,16 +50,29 @@ test('the default folding hides a large part of the tree', async () => {
     expect(height()).toBeLessThan(openHeight * 0.75);
 });
 
-test('the everyday sections are still open by default', async () => {
+// Every section starts shut, so opening a context shows the dashboard and a
+// list of headings rather than fifty rows. The dashboard is the exception, and
+// the reason it was taken out of a section of its own.
+test('by default a context shows only the dashboard and the headings', async () => {
     workspace.settings.layout.collapsedGroups = null;
     workspace.settings.contexts = {};
     render(ContextTree, { props: { context: CTX } });
     await settle();
 
     const shown = [...document.querySelectorAll('.tree .item')].map((el) => el.textContent?.trim());
-    for (const everyday of ['Pods', 'Deployments', 'Nodes', 'Services', 'Config Maps', 'Dashboard']) {
-        expect(shown).toContain(everyday);
-    }
+    expect(shown).toEqual(['Dashboard']);
+    expect(document.querySelectorAll('button.group')).toHaveLength(NAV_GROUPS.length);
+});
+
+test('the dashboard cannot be folded away', async () => {
+    workspace.settings.layout.collapsedGroups = null;
+    workspace.settings.contexts = {};
+    render(ContextTree, { props: { context: CTX } });
+    await settle();
+
+    // No heading owns it, so there is nothing that could hide it.
+    const headings = [...document.querySelectorAll('button.group')].map((b) => b.textContent);
+    expect(headings.some((h) => h?.includes('Overview'))).toBe(false);
 });
 
 test('unfolding everything gives back every item', async () => {
@@ -65,7 +81,7 @@ test('unfolding everything gives back every item', async () => {
     render(ContextTree, { props: { context: CTX } });
     await settle();
 
-    expect(items()).toBe(NAV_GROUPS.flatMap((g) => g.items).length);
+    expect(items()).toBe(ALL_ITEMS);
 });
 
 test('a folded group hides its items but keeps its heading', async () => {
@@ -75,7 +91,7 @@ test('a folded group hides its items but keeps its heading', async () => {
     await settle();
 
     const workloads = NAV_GROUPS.find((g) => g.label === 'Workloads')!;
-    expect(items()).toBe(NAV_GROUPS.flatMap((g) => g.items).length - workloads.items.length);
+    expect(items()).toBe(ALL_ITEMS - workloads.items.length);
     expect(document.body.textContent).toContain('Workloads');
 });
 
@@ -156,3 +172,73 @@ test('alt-clicking applies the change to every cluster', async () => {
     expect(workspace.hasFoldingOverride(CTX.id)).toBe(false);
 });
 
+
+test('the sections toggle opens and shuts every section of one context', async () => {
+    workspace.settings.layout.collapsedGroups = null;
+    workspace.settings.contexts = {};
+    render(ContextTree, { props: { context: CTX } });
+    await settle();
+    expect(items()).toBe(1);
+
+    const toggle = document.querySelector('button.sections') as HTMLElement;
+    expect(toggle).toBeTruthy();
+    toggle.click();
+    await settle();
+    expect(items()).toBe(ALL_ITEMS);
+
+    (document.querySelector('button.sections') as HTMLElement).click();
+    await settle();
+    expect(items()).toBe(1);
+});
+
+test('the sections toggle is absent while the context is closed', async () => {
+    workspace.expanded = [];
+    render(ContextTree, { props: { context: CTX } });
+    await settle();
+
+    expect(document.querySelector('button.sections')).toBeNull();
+});
+
+describe('clicking the context name', () => {
+    const name = () => document.querySelector('.head .label') as HTMLElement;
+    const treeShowing = () => document.querySelector('.tree') !== null;
+
+    beforeEach(async () => {
+        document.body.innerHTML = '';
+        workspace.expanded = [];
+        workspace.selectedContextId = null;
+        workspace.settings.contexts = {};
+        workspace.settings.layout.collapsedGroups = null;
+        render(ContextTree, { props: { context: CTX } });
+        await settle();
+    });
+
+    test('opens the context', async () => {
+        expect(treeShowing()).toBe(false);
+
+        name().click();
+        await settle();
+
+        expect(treeShowing()).toBe(true);
+    });
+
+    test('a second click closes it again rather than doing nothing', async () => {
+        name().click();
+        await settle();
+
+        name().click();
+        await settle();
+
+        expect(treeShowing()).toBe(false);
+    });
+
+    test('the twisty still works on its own', async () => {
+        (document.querySelector('.head .twisty') as HTMLElement).click();
+        await settle();
+        expect(treeShowing()).toBe(true);
+
+        (document.querySelector('.head .twisty') as HTMLElement).click();
+        await settle();
+        expect(treeShowing()).toBe(false);
+    });
+});

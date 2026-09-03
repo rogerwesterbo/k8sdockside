@@ -115,6 +115,16 @@ func (s *ResourceService) HelmReleases(contextID, namespace string) (kube.Table,
 	return s.watcher.HelmReleases(ctx, namespace)
 }
 
+// CustomResourceKinds lists what a cluster defines, grouped by API group, for
+// the definitions section of the sidebar.
+func (s *ResourceService) CustomResourceKinds(contextID string) ([]kube.CustomResourceGroup, error) {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return []kube.CustomResourceGroup{}, err
+	}
+	return s.watcher.CustomResourceKinds(ctx)
+}
+
 // Describe renders the detail report shown in the slide-in panel.
 func (s *ResourceService) Describe(contextID, kind, namespace, name string) (string, error) {
 	ctx, err := s.resolve(contextID)

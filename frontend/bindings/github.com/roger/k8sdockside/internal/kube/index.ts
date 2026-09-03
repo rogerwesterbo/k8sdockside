@@ -4,6 +4,8 @@
 export type {
     Cell,
     Context,
+    CustomResourceGroup,
+    CustomResourceKind,
     File,
     Gauge,
     Overview,

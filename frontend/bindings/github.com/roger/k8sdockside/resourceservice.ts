@@ -20,6 +20,14 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as kube$0 from "./internal/kube/models.js";
 
 /**
+ * CustomResourceKinds lists what a cluster defines, grouped by API group, for
+ * the definitions section of the sidebar.
+ */
+export function CustomResourceKinds(contextID: string): $CancellablePromise<kube$0.CustomResourceGroup[] | null> {
+    return $Call.ByID(1195675545, contextID);
+}
+
+/**
  * Describe renders the detail report shown in the slide-in panel.
  */
 export function Describe(contextID: string, kind: string, $namespace: string, name: string): $CancellablePromise<string> {

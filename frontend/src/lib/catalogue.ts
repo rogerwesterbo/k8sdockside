@@ -12,6 +12,12 @@ export const DASHBOARD = 'dashboard';
  */
 export const HELM_RELEASES = 'helmreleases';
 
+/**
+ * The section whose children are fetched from the cluster: the API groups it
+ * serves, and the definitions under each.
+ */
+export const DEFINITIONS_GROUP = 'Custom Resource Definitions';
+
 export interface NavItem {
     /** Resource kind passed to the backend, or DASHBOARD for the overview. */
     kind: string;
@@ -24,11 +30,17 @@ export interface NavGroup {
     items: NavItem[];
 }
 
+/**
+ * The dashboard, which sits at the top of a context's tree on its own rather
+ * than inside a section.
+ *
+ * A section of one is a heading you have to open to reach a single row, and the
+ * cluster overview is the thing most often wanted straight after expanding a
+ * context -- so it is always there, and never folded away.
+ */
+export const DASHBOARD_ITEM: NavItem = { kind: DASHBOARD, label: 'Dashboard', icon: 'dashboard' };
+
 export const NAV_GROUPS: NavGroup[] = [
-    {
-        label: 'Overview',
-        items: [{ kind: DASHBOARD, label: 'Dashboard', icon: 'dashboard' }],
-    },
     {
         label: 'Cluster',
         items: [
@@ -135,24 +147,23 @@ export const NAV_GROUPS: NavGroup[] = [
         ],
     },
     {
-        label: 'Definitions',
-        items: [{ kind: 'customresourcedefinitions', label: 'Custom Resource Definitions', icon: 'puzzle' }],
+        // The one section whose contents come from the cluster rather than from
+        // this list: below "All definitions" the sidebar shows the API groups
+        // the cluster serves and the kinds under each. See ContextTree.
+        label: 'Custom Resource Definitions',
+        items: [{ kind: 'customresourcedefinitions', label: 'All definitions', icon: 'puzzle' }],
     },
 ];
 
 /**
- * The groups that start folded on a fresh install.
+ * The sections that start folded on a fresh install: all of them.
  *
- * The full tree is around 1200px tall, half again the height of the sidebar, so
- * something has to give or a single cluster no longer fits on screen. These are
- * the specialist ones: a cluster without the Gateway API installed, or without
- * admission policies, gets nothing from those rows. Unfolding one is a click
- * and it is remembered, so this only decides the first run.
- *
- * The names live here, beside the groups they refer to, rather than in the Go
- * settings store -- which remembers only the strings it is handed.
+ * Expanding a context then shows the dashboard and a dozen headings rather than
+ * fifty rows, and you open the one you want. Derived from the sections
+ * themselves rather than listed, so a section added later is folded too instead
+ * of quietly appearing open.
  */
-export const DEFAULT_COLLAPSED_GROUPS = ['Gateway API', 'Scheduling', 'Admission', 'Access', 'Definitions'];
+export const DEFAULT_COLLAPSED_GROUPS = NAV_GROUPS.map((group) => group.label);
 
 /**
  * The prefix marking a kind that names a custom resource rather than one of the
@@ -186,12 +197,14 @@ export function customKindFor(definitionName: string): string {
     return CUSTOM_PREFIX + definitionName;
 }
 
+// The dashboard is deliberately absent: it belongs to no section, so there is
+// never one to unfold in order to reach it.
 const GROUP_OF = new Map<string, string>(
     NAV_GROUPS.flatMap((group) => group.items.map((item) => [item.kind, group.label] as const)),
 );
 
 const BY_KIND = new Map<string, NavItem>(
-    NAV_GROUPS.flatMap((group) => group.items).map((item) => [item.kind, item]),
+    [DASHBOARD_ITEM, ...NAV_GROUPS.flatMap((group) => group.items)].map((item) => [item.kind, item]),
 );
 
 /**
