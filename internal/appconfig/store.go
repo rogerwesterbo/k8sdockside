@@ -1,8 +1,9 @@
 // Package appconfig persists the user's own choices -- which kubeconfig files
 // they added, what they renamed each context to, the colour they gave it, and
 // where they docked the detail panel. None of this can be derived from the
-// kubeconfig files themselves, so it lives in its own file under the user
-// config directory.
+// kubeconfig files themselves, so it lives in its own file under the user's
+// config directory -- ~/.config/k8sdockside, alongside the other Kubernetes
+// tooling, rather than wherever the platform would hide application state.
 package appconfig
 
 import (
@@ -116,13 +117,22 @@ func Open() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	legacy, err := legacyPath()
+	if err != nil {
+		return nil, err
+	}
+	// A failed migration is fatal rather than ignored: carrying on would open
+	// an empty file at the new path and present the user with a store that has
+	// lost every alias, colour and tab they had.
+	if err := migrate(legacy, path); err != nil {
+		return nil, fmt.Errorf("migrating settings from %s: %w", legacy, err)
+	}
 	return openAt(path)
 }
 
 // openAt is Open against a named file. It exists so the tests can run against a
-// temporary directory: os.UserConfigDir ignores XDG_CONFIG_HOME on macOS and
-// Windows, so a test that sets that variable and calls Open reads and writes
-// the developer's own settings file instead of a sandbox.
+// temporary directory without going near the real settings file, and so that
+// the loading rules can be exercised without also exercising the migration.
 func openAt(path string) (*Store, error) {
 	s := &Store{path: path, data: Defaults()}
 
@@ -378,12 +388,4 @@ func clone(s Settings) Settings {
 		out.Contexts[k] = v
 	}
 	return out
-}
-
-func defaultPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("locating user config directory: %w", err)
-	}
-	return filepath.Join(dir, "k8sdockside", "settings.json"), nil
 }

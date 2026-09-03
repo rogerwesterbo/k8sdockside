@@ -9,8 +9,8 @@ import (
 )
 
 // tempSettings is a throwaway settings file for one test. Tests must never
-// touch the real one: os.UserConfigDir ignores XDG_CONFIG_HOME on macOS and
-// Windows, so setting that variable is not enough to sandbox them.
+// touch the real one. Tests that need Open itself, rather than openAt, sandbox
+// it by pointing HOME at a temporary directory -- see sandboxHome.
 func tempSettings(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "settings.json")

@@ -237,9 +237,10 @@ func TestDiscoverStillReportsAnUnreadableDefaultConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("KUBECONFIG", "")
 
-	// A default config that exists but is not a kubeconfig is the user's
-	// problem to see, unlike one that is simply absent.
-	writeFile(t, filepath.Join(home, ".kube"), "config", "just: some yaml\n")
+	// A default config that exists and holds real content, but is not a
+	// kubeconfig, is the user's problem to see -- unlike one that is simply
+	// absent or has nothing in it.
+	writeFile(t, filepath.Join(home, ".kube"), "config", "apiVersion: v1\nkind: Secret\ndata: {}\n")
 
 	files := Discover(Sources{})
 	if len(files) != 1 {
@@ -343,5 +344,63 @@ func TestAFileNamedDirectlyKeepsItsSourceOverAWatchedFolder(t *testing.T) {
 	}
 	if files[0].Source != SourceManual {
 		t.Errorf("source = %q, want %q", files[0].Source, SourceManual)
+	}
+}
+
+// noContexts is a valid kubeconfig that simply has nothing in it yet -- what
+// `kubectl config` leaves behind, and what a fresh machine often has.
+const noContexts = `apiVersion: v1
+kind: Config
+clusters: []
+contexts: []
+users: []
+`
+
+func TestDiscoverIgnoresADefaultConfigWithNothingInIt(t *testing.T) {
+	// The shapes a ~/.kube/config with no clusters in it actually takes: never
+	// written to, written by a tool that only stamped the header, and emptied
+	// out by hand. None is a fault -- we look at that path whether or not the
+	// user asked us to, so having nothing to show there is the ordinary case,
+	// and the sidebar needs no files at all to offer its "add a kubeconfig"
+	// empty state instead of a red error.
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"zero bytes", ""},
+		{"header only", "apiVersion: v1\nkind: Config\n"},
+		{"empty lists", noContexts},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("KUBECONFIG", "")
+
+			writeFile(t, filepath.Join(home, ".kube"), "config", tc.content)
+
+			files := Discover(Sources{})
+			if len(files) != 0 {
+				t.Fatalf("got %d files, want none: %+v", len(files), files)
+			}
+		})
+	}
+}
+
+func TestDiscoverStillReportsAnEmptyFileTheUserAdded(t *testing.T) {
+	home := t.TempDir()
+	elsewhere := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("KUBECONFIG", "")
+
+	// The user pointed at this one, so its being empty is worth saying --
+	// otherwise adding a file appears to do nothing at all.
+	added := writeFile(t, elsewhere, "mine.config", noContexts)
+
+	files := Discover(Sources{Files: []string{added}})
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1: %+v", len(files), files)
+	}
+	if files[0].Error == "" {
+		t.Error("an empty file the user added should say why nothing appeared")
 	}
 }

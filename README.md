@@ -138,8 +138,13 @@ frontend/src/
   lib/components/            sidebar, tab bar, tables, detail panel
 ```
 
-Your settings live in `~/.config/k8sdockside/settings.json` (the path is shown
-in the status bar).
+Your settings live in `$XDG_CONFIG_HOME/k8sdockside/settings.json`, falling
+back to `~/.config/k8sdockside/settings.json`, on both macOS and Linux; Windows
+uses `%AppData%`. The path is shown in the status bar.
+
+Releases up to and including the ones that used `os.UserConfigDir` wrote to
+`~/Library/Application Support/k8sdockside/` on macOS. That file is moved to
+the new location automatically on first launch, unless one is already there.
 
 ### A note on the generated bindings
 

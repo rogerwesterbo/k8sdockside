@@ -87,6 +87,11 @@ func ContextID(path, name string) string {
 	return path + "::" + name
 }
 
+// vacant is why a file yielded no contexts: true when there was nothing there
+// to begin with, false when there was something we could not use. It is a named
+// type rather than a bare bool so the two call sites cannot be read backwards.
+type vacant bool
+
 // ParseFile reads one kubeconfig and flattens its contexts. A read or parse
 // failure is reported in the returned File rather than as an error, because the
 // caller is building a list and one bad file should not sink the rest.
@@ -95,16 +100,19 @@ func ParseFile(path, source string) File {
 	return f
 }
 
-// parseFile is ParseFile plus whether the failure was simply that nothing is at
-// that path. Discover treats an absent file differently from one it found but
-// could not read, and asking here avoids a second stat to tell them apart.
-func parseFile(path, source string) (File, bool) {
+// parseFile is ParseFile plus whether the file had nothing to say: either
+// there is nothing at that path, or there is a file but it defines no contexts
+// (including a zero-byte one, which parses cleanly to exactly that). Both mean
+// "no clusters here", which is not a failure worth reporting for a path we
+// offered unasked -- unlike a file that holds real content we could not make
+// sense of. Discover needs the two apart, and asking here avoids a second stat.
+func parseFile(path, source string) (File, vacant) {
 	f := File{Path: path, Source: source, Contexts: []Context{}}
 
 	info, err := os.Stat(path)
 	if err != nil {
 		f.Error = err.Error()
-		return f, errors.Is(err, fs.ErrNotExist)
+		return f, vacant(errors.Is(err, fs.ErrNotExist))
 	}
 	if info.IsDir() {
 		f.Error = "not a file"
@@ -138,9 +146,12 @@ func parseFile(path, source string) (File, bool) {
 		f.Error = "not a kubeconfig (kind: " + raw.Kind + ")"
 		return f, false
 	}
+	// Reported for a file the user named, so that adding an empty kubeconfig
+	// does not look like it silently did nothing; dropped for ~/.kube/config,
+	// which we look at whether or not they asked us to.
 	if len(raw.Contexts) == 0 {
 		f.Error = "no contexts defined"
-		return f, false
+		return f, true
 	}
 
 	servers := make(map[string]string, len(raw.Clusters))
@@ -246,15 +257,18 @@ func Discover(sources Sources) []File {
 			continue
 		}
 
-		parsed, missing := parseFile(resolved, c.source)
+		parsed, nothingThere := parseFile(resolved, c.source)
 		// A glob hit that turns out not to be a kubeconfig is not an error the
-		// user needs to see -- they never asked for that file. Nor is an absent
-		// ~/.kube/config: plenty of people keep every cluster in $KUBECONFIG or
-		// in files they add by hand, and we offer that path unasked. Paths the
-		// user named (or that $KUBECONFIG names) are reported even when broken,
-		// as is a default config that exists but cannot be read.
+		// user needs to see -- they never asked for that file. Nor is a
+		// ~/.kube/config that is absent or empty: plenty of people keep every
+		// cluster in $KUBECONFIG or in files they add by hand, and we offer
+		// that path unasked, so having nothing to show there is the ordinary
+		// case rather than a fault. Greeting a new user with a red error over
+		// a file they never chose is the worst version of this. Paths the user
+		// named (or that $KUBECONFIG names) are reported even when broken, as
+		// is a default config that holds content we could not read.
 		if parsed.Error != "" && (c.source == SourceScan || c.source == SourceFolder ||
-			(c.source == SourceDefault && missing)) {
+			(c.source == SourceDefault && nothingThere)) {
 			continue
 		}
 		files = append(files, parsed)
