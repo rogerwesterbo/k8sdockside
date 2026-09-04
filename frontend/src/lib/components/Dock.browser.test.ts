@@ -129,3 +129,46 @@ test('an unsaved document is marked on its tab', async () => {
 
     await expect.element(page.getByRole('button', { name: /unsaved changes/ })).toBeVisible();
 });
+
+// Down here activation is a toggle: clicking the tab you are on folds the dock
+// and gives the room back. The menu opened on a tab by activating it first, so
+// asking the active tab for its menu folded the dock out from under the menu.
+test('right-clicking the tab you are on opens the menu and leaves the dock open', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
+
+    rightClick(await page.getByRole('tab', { name: /web/ }).element());
+
+    expect(workspace.dockOpen).toBe(true);
+    await expect.element(page.getByRole('menuitem', { name: 'Close', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
+});
+
+// The keyboard way in has the same shape and had the same fault.
+test('the menu key on the tab you are on leaves the dock open too', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
+
+    (await page.getByRole('tab', { name: /web/ }).element()).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true, cancelable: true }),
+    );
+
+    expect(workspace.dockOpen).toBe(true);
+    await expect.element(page.getByRole('menuitem', { name: 'Close', exact: true })).toBeVisible();
+});
+
+// Activating first is still right when it is a different tab: closing a
+// document you cannot see is how the wrong one gets closed.
+test('right-clicking another tab brings it forward before the menu opens', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    workspace.openEditor(object(PROD, 'api'));
+    await expect.element(page.getByRole('textbox', { name: 'api as YAML' })).toBeVisible();
+
+    rightClick(await page.getByRole('tab', { name: /web/ }).element());
+
+    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
+    await expect.element(page.getByRole('menuitem', { name: 'Close', exact: true })).toBeVisible();
+});

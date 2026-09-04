@@ -195,48 +195,118 @@
     /** The tab the context menu was opened on, and where to draw it. */
     interface OpenMenu {
         tab: StripTab;
+        /** The tab's own box, which the menu hangs off. */
+        anchor: { left: number; top: number; bottom: number };
         x: number;
         y: number;
     }
+
+    /** The breathing room kept between the menu and the window's edges. */
+    const MENU_GAP = 8;
 
     let openMenuAt = $state<OpenMenu | null>(null);
     let menuEl = $state<HTMLElement | null>(null);
 
     /**
-     * Opens the menu on a tab, activating it first: acting on a tab whose
-     * contents you cannot see is how the wrong one gets closed.
+     * Brings a tab forward so the menu is never opened on one you cannot see:
+     * acting on hidden contents is how the wrong document gets closed.
+     *
+     * Only when it is not already the one showing. Asking for a menu is not a
+     * click on the tab, and for the dock a click on the active tab is a toggle
+     * that folds the whole thing away -- which is not what a right-click meant.
      */
+    function revealForMenu(tab: StripTab): void {
+        if (activeId !== tab.id) onactivate(tab.id);
+    }
+
+    /**
+     * The scale the app is drawn at, measured off an element inside it.
+     *
+     * Zoom is CSS `zoom` on the app's own element, and a position:fixed box
+     * inside a zoomed one resolves against the window in that zoomed space. A
+     * menu placed at a viewport coordinate therefore lands at coordinate ×
+     * zoom: exact at the top-left corner and further out the further down the
+     * window you go. Everything below works in the app's own coordinates and
+     * divides what it measures of the window by this.
+     */
+    function appScale(el: HTMLElement): number {
+        const width = el.offsetWidth;
+        return width > 0 ? el.getBoundingClientRect().width / width : 1;
+    }
+
+    /**
+     * Hangs the menu off the tab it was asked for.
+     *
+     * Off the tab rather than at the pointer so that both strips read the same.
+     * The dock sits at the foot of the window, where a menu dropping from the
+     * pointer belongs to nothing and covers the document it is about, while the
+     * identical placement in the strip along the top reads as part of the tab.
+     * Which side of the tab it ends up on is settled once it has a size.
+     */
+    function anchorMenu(el: HTMLElement, tab: StripTab): void {
+        const scale = appScale(el);
+        const box = el.getBoundingClientRect();
+        const anchor = { left: box.left / scale, top: box.top / scale, bottom: box.bottom / scale };
+        openMenuAt = { tab, anchor, x: anchor.left, y: anchor.bottom };
+    }
+
+    /** Opens the menu on a tab, bringing it forward first if it is not. */
     function openMenu(event: MouseEvent, tab: StripTab): void {
         if (!menu) return;
         event.preventDefault();
         // The window handler below dismisses on any right-click; without this
         // the same event would close the menu we are opening.
         event.stopPropagation();
-        onactivate(tab.id);
-        openMenuAt = { tab, x: event.clientX, y: event.clientY };
+        revealForMenu(tab);
+        anchorMenu(event.currentTarget as HTMLElement, tab);
     }
 
     /** Shift+F10 and the Menu key open it from the keyboard, at the tab itself. */
     function openMenuFromKeyboard(event: KeyboardEvent, tab: StripTab): void {
         if (!menu) return;
-        const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-        onactivate(tab.id);
-        openMenuAt = { tab, x: box.left, y: box.bottom };
+        revealForMenu(tab);
+        anchorMenu(event.currentTarget as HTMLElement, tab);
     }
 
     function closeMenu(): void {
         openMenuAt = null;
     }
 
-    // Keep the menu inside the window: a right-click near the right edge would
-    // otherwise draw it off-screen where it cannot be read or dismissed.
+    /**
+     * Settles which side of the tab the menu rests on, once it has a size.
+     *
+     * The rule already says which end of the window the strip is at, and the
+     * menu opens away from that end: down from a strip along the top, up from
+     * the dock at the foot. It is the same relationship both times -- a menu
+     * resting on its tab, growing into the room there is -- which is what makes
+     * the dock's read as part of its tab rather than as something dropped over
+     * the document it is about.
+     *
+     * Whether it fits only decides the fallback. Sideways it is merely nudged:
+     * a tab near the right edge would otherwise take its menu off-screen, where
+     * it can be neither read nor dismissed.
+     */
     $effect(() => {
-        if (!openMenuAt || !menuEl) return;
+        const at = openMenuAt;
+        if (!at || !menuEl) return;
+
+        const scale = appScale(menuEl);
         const box = menuEl.getBoundingClientRect();
-        const overflowX = box.right - window.innerWidth + 8;
-        const overflowY = box.bottom - window.innerHeight + 8;
-        if (overflowX > 0) openMenuAt.x -= overflowX;
-        if (overflowY > 0) openMenuAt.y -= overflowY;
+        const height = box.height / scale;
+        const width = box.width / scale;
+        const bottomEdge = window.innerHeight / scale - MENU_GAP;
+        const rightEdge = window.innerWidth / scale - MENU_GAP;
+
+        const fits = (top: number): boolean => top >= MENU_GAP && top + height <= bottomEdge;
+        const away = rule === 'above' ? at.anchor.top - height : at.anchor.bottom;
+        const back = rule === 'above' ? at.anchor.bottom : at.anchor.top - height;
+
+        const y = fits(away) ? away : fits(back) ? back : away;
+        const x = Math.max(MENU_GAP, Math.min(at.anchor.left, rightEdge - width));
+
+        // Guarded so that settling on a position does not re-trigger this.
+        if (at.x !== x) at.x = x;
+        if (at.y !== y) at.y = y;
     });
 
     // Focus the first item so the menu is usable without the mouse that opened it.

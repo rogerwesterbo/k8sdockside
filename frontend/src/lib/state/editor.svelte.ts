@@ -8,9 +8,12 @@
 //
 // Nothing here knows about the workspace store. A document needs the four
 // fields that name an object and nothing else, which is what keeps this
-// testable without a window, a tab strip or a cluster.
+// testable without a window, a tab strip or a cluster. The change signal is no
+// exception: it is a leaf that names objects the same way, and saying an object
+// changed is not the same as knowing who is looking at it.
 
 import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
+import { changes } from './changes.svelte';
 
 /** What an editor is open on: enough to read one object and write it back. */
 export interface EditTarget {
@@ -145,6 +148,10 @@ class Editors {
      * defaulting and admission control did to it on the way in. Keeping the
      * sent text would leave the next save arguing with a version of the object
      * that no longer exists.
+     *
+     * A save is also the one moment this app makes the same object wrong
+     * wherever else it is on screen, so it says the object changed. On success
+     * only: a refused save left the cluster holding what it already held.
      */
     async save(id: string, target: EditTarget): Promise<boolean> {
         const doc = this.docs[id];
@@ -164,6 +171,7 @@ class Editors {
             doc.original = saved;
             doc.check = VALID;
             doc.saved = true;
+            changes.changed(target);
             return true;
         } catch (err) {
             doc.error = message(err);

@@ -15,6 +15,7 @@ import {
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
+import { changes } from './changes.svelte';
 import { editors } from './editor.svelte';
 import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, SETTINGS, groupForKind, labelFor } from '../catalogue';
 import { defaultColorFor } from '../colors';
@@ -261,6 +262,18 @@ class Workspace {
     detailText = $state('');
     detailLoading = $state(false);
     detailError = $state<string | null>(null);
+    /**
+     * The object's revision the report on screen was read at. The panel
+     * compares it against the object's revision now: when they differ, the
+     * object has been written since and the report is out of date.
+     */
+    detailRevision = $state(0);
+    /**
+     * Which describe the panel is waiting for. Two can be in flight at once --
+     * a save starts one while an open one is still out -- and closing the panel
+     * must leave neither able to land.
+     */
+    private detailLoad = 0;
 
     /** Reachability per context, written by both probes and tab outcomes. */
     health = $state<Record<string, Health>>({});
@@ -1195,27 +1208,62 @@ class Workspace {
     /** Slides in the describe panel for one object. */
     async openDetail(target: DetailTarget): Promise<void> {
         this.detailTarget = target;
+        this.detailRevision = changes.revision(target);
         this.detailLoading = true;
         this.detailError = null;
+        await this.describeInto(target);
+    }
+
+    /**
+     * Re-reads what the panel is describing, after the object has been written.
+     *
+     * It does not go through openDetail because it must not raise
+     * detailLoading: the report on screen is a moment out of date, which is
+     * better than blanking the panel to "Describing…" on every save.
+     */
+    async refreshDetail(): Promise<void> {
+        const target = this.detailTarget;
+        if (!target) return;
+        this.detailRevision = changes.revision(target);
+        await this.describeInto(target);
+    }
+
+    /**
+     * Reads one object's describe report into the panel.
+     *
+     * Every read takes a number and only the newest may land, so that a slow
+     * one answering late cannot put the panel back to what it said before -- or
+     * fill in a panel the user has since closed.
+     */
+    private async describeInto(target: DetailTarget): Promise<void> {
+        const attempt = ++this.detailLoad;
         try {
-            this.detailText = await ResourceService.Describe(
+            const text = await ResourceService.Describe(
                 target.contextId,
                 target.kind,
                 target.namespace,
                 target.name,
             );
+            if (this.detailLoad !== attempt) return;
+            this.detailText = text;
+            this.detailError = null;
         } catch (err) {
+            if (this.detailLoad !== attempt) return;
             this.detailText = '';
             this.detailError = message(err);
         } finally {
-            this.detailLoading = false;
+            if (this.detailLoad === attempt) this.detailLoading = false;
         }
     }
 
     closeDetail(): void {
+        // Takes the number with it, so whatever is in flight has already lost.
+        this.detailLoad++;
         this.detailTarget = null;
         this.detailText = '';
         this.detailError = null;
+        this.detailRevision = 0;
+        this.detailLoading = false;
     }
 
     /**

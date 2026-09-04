@@ -25,6 +25,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 }));
 
 const { workspace, isSettingsTab } = await import('./workspace.svelte');
+const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
 const { ResourceService, KubeconfigService, SettingsService } = await import(
     '../../../bindings/github.com/roger/k8sdockside',
@@ -1426,5 +1427,110 @@ describe('saving settings', () => {
             vi.mocked(SettingsService.SetTabOrder).mockReset().mockResolvedValue({} as never);
             vi.mocked(SettingsService.SetDock).mockReset().mockResolvedValue({} as never);
         }
+    });
+});
+
+describe('the detail panel', () => {
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    /** A describe that only answers when the returned function is called. */
+    function heldDescribe(): (text: string) => void {
+        let answer: (text: string) => void = () => {};
+        vi.mocked(ResourceService.Describe).mockReturnValueOnce(
+            new Promise<string>((resolve) => {
+                answer = resolve;
+            }) as never,
+        );
+        return answer!;
+    }
+
+    beforeEach(() => {
+        workspace.closeDetail();
+        vi.mocked(ResourceService.Describe).mockReset().mockResolvedValue('Name: web\nStatus: Running');
+    });
+
+    test('re-reading swaps the report for what the cluster has now', async () => {
+        await workspace.openDetail(WEB);
+        vi.mocked(ResourceService.Describe).mockResolvedValue('Name: web\nStatus: Pending');
+
+        await workspace.refreshDetail();
+
+        expect(workspace.detailText).toBe('Name: web\nStatus: Pending');
+    });
+
+    // Blanking to "Describing…" every time the object is saved makes the panel
+    // flicker for as long as the cluster takes to answer. The report it already
+    // has is a moment out of date, which is better than nothing at all.
+    test('re-reading keeps the old report on screen until the new one lands', async () => {
+        await workspace.openDetail(WEB);
+        const answer = heldDescribe();
+
+        const done = workspace.refreshDetail();
+
+        expect(workspace.detailLoading).toBe(false);
+        expect(workspace.detailText).toBe('Name: web\nStatus: Running');
+
+        answer('Name: web\nStatus: Pending');
+        await done;
+        expect(workspace.detailText).toBe('Name: web\nStatus: Pending');
+    });
+
+    test('re-reading a closed panel touches no cluster', async () => {
+        await workspace.refreshDetail();
+
+        expect(ResourceService.Describe).not.toHaveBeenCalled();
+    });
+
+    // Two reads can be in flight at once now that a save can start one: the
+    // slower must not be allowed to put the panel back to what it said before.
+    test('a slow read overtaken by a newer one does not win', async () => {
+        await workspace.openDetail(WEB);
+        const slow = heldDescribe();
+
+        const first = workspace.refreshDetail();
+        vi.mocked(ResourceService.Describe).mockResolvedValue('Name: web\nStatus: Pending');
+        await workspace.refreshDetail();
+        slow('Name: web\nStatus: Running');
+        await first;
+
+        expect(workspace.detailText).toBe('Name: web\nStatus: Pending');
+    });
+
+    test('a read still in flight does not reopen a closed panel', async () => {
+        const answer = heldDescribe();
+        const opening = workspace.openDetail(WEB);
+
+        workspace.closeDetail();
+        answer('Name: web\nStatus: Running');
+        await opening;
+
+        expect(workspace.detailTarget).toBeNull();
+        expect(workspace.detailText).toBe('');
+    });
+
+    // What the panel's report was read at. The panel compares it against the
+    // object's revision to notice that a save has made it stale.
+    test('opening it records the revision its report was read at', async () => {
+        changes.changed(WEB);
+        await workspace.openDetail(WEB);
+
+        expect(workspace.detailRevision).toBe(changes.revision(WEB));
+    });
+
+    test('a save leaves the panel behind the object', async () => {
+        await workspace.openDetail(WEB);
+
+        changes.changed(WEB);
+
+        expect(workspace.detailRevision).not.toBe(changes.revision(WEB));
+    });
+
+    test('re-reading catches it up', async () => {
+        await workspace.openDetail(WEB);
+        changes.changed(WEB);
+
+        await workspace.refreshDetail();
+
+        expect(workspace.detailRevision).toBe(changes.revision(WEB));
     });
 });

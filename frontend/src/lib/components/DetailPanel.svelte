@@ -7,6 +7,7 @@
     import { fly } from 'svelte/transition';
     import { HELM_RELEASES, singularFor } from '../catalogue';
     import { alpha } from '../colors';
+    import { changes } from '../state/changes.svelte';
     import { workspace, type DockSide } from '../state/workspace.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
@@ -29,6 +30,21 @@
      * which is Helm's job and not this panel's.
      */
     let editable = $derived(target !== null && target.kind !== HELM_RELEASES);
+
+    /**
+     * Keeps the report level with the object.
+     *
+     * The object can be written from somewhere else while this panel is open --
+     * the editor in the dock is the usual place, and it is often open on
+     * exactly what is being described here. Reading the object's revision is
+     * the subscription; when it has moved past the one the report was read at,
+     * the panel reads again.
+     */
+    $effect(() => {
+        if (target && changes.revision(target) !== workspace.detailRevision) {
+            void workspace.refreshDetail();
+        }
+    });
 
     let panel = $state<HTMLElement | null>(null);
     let resizing = $state(false);

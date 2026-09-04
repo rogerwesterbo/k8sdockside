@@ -12,6 +12,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 }));
 
 const { editors } = await import('./editor.svelte');
+const { changes } = await import('./changes.svelte');
 const { ResourceService } = await import('../../../bindings/github.com/roger/k8sdockside');
 
 const TAB = 'edit:cfg::prod#pods#default#web';
@@ -192,6 +193,31 @@ describe('saving', () => {
     test('a document that never loaded is not saved', async () => {
         expect(await editors.save(TAB, TARGET)).toBe(false);
         expect(ResourceService.ApplyYAML).not.toHaveBeenCalled();
+    });
+
+    // The object may be on screen elsewhere -- the describe panel most of all
+    // -- and what is there is now what the cluster had a moment ago. Saying so
+    // here rather than in the editor component means every future write path
+    // gets it without having to remember.
+    test('a successful save says the object changed', async () => {
+        await editors.load(TAB, TARGET);
+        editors.edit(TAB, 'edited: yes\n');
+        const before = changes.revision(TARGET);
+
+        await editors.save(TAB, TARGET);
+
+        expect(changes.revision(TARGET)).toBe(before + 1);
+    });
+
+    test('a refused save says nothing: the cluster still has what it had', async () => {
+        vi.mocked(ResourceService.ApplyYAML).mockRejectedValue(new Error('admission webhook denied'));
+        await editors.load(TAB, TARGET);
+        editors.edit(TAB, 'edited: yes\n');
+        const before = changes.revision(TARGET);
+
+        await editors.save(TAB, TARGET);
+
+        expect(changes.revision(TARGET)).toBe(before);
     });
 });
 
