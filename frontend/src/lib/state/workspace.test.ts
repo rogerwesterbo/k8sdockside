@@ -13,6 +13,11 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         Ping: vi.fn().mockResolvedValue(undefined),
         CustomResourceKinds: vi.fn().mockResolvedValue([]),
     },
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),

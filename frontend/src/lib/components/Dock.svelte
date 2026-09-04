@@ -17,6 +17,7 @@
     import { editors } from '../state/editor.svelte';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
+    import LogView from './LogView.svelte';
     import TabStrip, { type StripTab } from './TabStrip.svelte';
     import YamlEditor from './YamlEditor.svelte';
 
@@ -42,10 +43,12 @@
                 id: tab.id,
                 title: tab.title,
                 subtitle: contextName(tab.contextId),
-                icon: 'edit',
+                icon: tab.view === 'logs' ? 'rows' : 'edit',
                 color: workspace.colorOf(tab.contextId),
                 hint: `${singularFor(tab.kind)} ${tab.name}${tab.namespace ? ` in ${tab.namespace}` : ''} — ${contextName(tab.contextId)}`,
-                modified: editors.isDirty(tab.id),
+                // Only an editor has unsaved work; closing a log view loses
+                // nothing that was not already in the cluster.
+                modified: tab.view === 'edit' && editors.isDirty(tab.id),
             }),
         ),
     );
@@ -132,7 +135,11 @@
     {#if open && active}
         <div class="body">
             {#key active.id}
-                <YamlEditor tab={active} />
+                {#if active.view === 'logs'}
+                    <LogView tab={active} />
+                {:else}
+                    <YamlEditor tab={active} />
+                {/if}
             {/key}
         </div>
     {/if}

@@ -7,8 +7,10 @@
     import { fly } from 'svelte/transition';
     import { singularFor } from '../catalogue';
     import { alpha } from '../colors';
+    import { actions } from '../state/actions.svelte';
     import { changes } from '../state/changes.svelte';
     import { workspace, type DockSide } from '../state/workspace.svelte';
+    import ContainerPills from './ContainerPills.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
     import ObjectActions from './ObjectActions.svelte';
@@ -38,6 +40,12 @@
             void workspace.refreshDetail();
         }
     });
+
+    /**
+     * The object's containers, read by the action bar below and shown again
+     * here. Empty for everything that is not a pod.
+     */
+    let containers = $derived(target ? actions.stateOf(target).containers : []);
 
     let panel = $state<HTMLElement | null>(null);
     let resizing = $state(false);
@@ -135,6 +143,13 @@
                 <h2 class="selectable">{target.name}</h2>
                 {#if target.namespace}
                     <span class="ns">in {target.namespace}</span>
+                {/if}
+                {#if containers.length > 0}
+                    <!-- The same squares the table draws, so a pod reads the
+                         same wherever you meet it. -->
+                    <span class="containers">
+                        <ContainerPills pills={containers} />
+                    </span>
                 {/if}
             </div>
 
@@ -275,6 +290,11 @@
     .ns {
         font-size: 11px;
         color: var(--text-dim);
+    }
+
+    .containers {
+        display: block;
+        margin-top: 5px;
     }
 
     .controls {

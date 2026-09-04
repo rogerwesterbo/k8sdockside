@@ -40,6 +40,10 @@ type ObjectState struct {
 	// Cordoned is a node's spec.unschedulable, which decides whether its button
 	// offers to cordon or to uncordon.
 	Cordoned bool `json:"cordoned"`
+	// Containers is a pod's containers as the same squares the table draws.
+	// The panel shows the row again and uses it as the log view's picker, so
+	// the call it already makes carries them rather than making a second.
+	Containers []Pill `json:"containers"`
 }
 
 // stateOf reads an object for the few facts the action bar needs.
@@ -57,6 +61,9 @@ func stateOf(u *unstructured.Unstructured) ObjectState {
 	if cordoned, _, err := unstructured.NestedBool(u.Object, "spec", "unschedulable"); err == nil {
 		out.Cordoned = cordoned
 	}
+	// Empty for everything that is not a pod: a Deployment's containers live
+	// under spec.template, which this deliberately does not reach into.
+	out.Containers = podContainers(u).Pills
 	return out
 }
 

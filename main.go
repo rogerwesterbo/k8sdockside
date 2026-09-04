@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main starts the app: it opens the settings file, wires up the four services
+// main starts the app: it opens the settings file, wires up the five services
 // the frontend calls, and shows the main window.
 func main() {
 	// The settings store holds the user's kubeconfig paths, context aliases and
@@ -41,6 +41,7 @@ func main() {
 			application.NewService(NewSettingsService(settings)),
 			application.NewService(resources),
 			application.NewService(NewActionService(configs, resources.watcher)),
+			application.NewService(NewLogService(configs, resources.watcher)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

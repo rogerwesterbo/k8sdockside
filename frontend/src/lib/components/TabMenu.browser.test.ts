@@ -18,6 +18,11 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         ApplyYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
     },
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),

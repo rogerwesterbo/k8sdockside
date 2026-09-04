@@ -11,6 +11,11 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         ApplyYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
     },
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
@@ -171,4 +176,33 @@ test('right-clicking another tab brings it forward before the menu opens', async
 
     await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
     await expect.element(page.getByRole('menuitem', { name: 'Close', exact: true })).toBeVisible();
+});
+
+// The dock has two views now, and the tab says which it is. Without this the
+// log view is a component nothing renders.
+test('a logs tab shows the log view rather than the editor', async () => {
+    render(Dock);
+
+    workspace.openLogs(object(PROD, 'web'));
+
+    await expect.element(page.getByRole('log', { name: 'Log output' })).toBeVisible();
+    expect(page.getByRole('textbox', { name: 'web as YAML' }).elements()).toHaveLength(0);
+});
+
+test('an edit tab still shows the editor', async () => {
+    render(Dock);
+
+    workspace.openEditor(object(PROD, 'web'));
+
+    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
+});
+
+// Both views onto one object, side by side in the strip.
+test('the two views on one object are two tabs', async () => {
+    render(Dock);
+
+    workspace.openEditor(object(PROD, 'web'));
+    workspace.openLogs(object(PROD, 'web'));
+
+    await expect.poll(() => page.getByRole('tab').elements()).toHaveLength(2);
 });

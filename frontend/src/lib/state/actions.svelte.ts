@@ -19,6 +19,8 @@ export interface ObjectState {
     scalable: boolean;
     replicas: number;
     cordoned: boolean;
+    /** A pod's containers, as the same squares the table draws. */
+    containers: kube.Pill[];
 }
 
 /** A pod a drain would not move, and why. */
@@ -39,7 +41,7 @@ export interface DrainState {
     done: boolean;
 }
 
-const UNKNOWN: ObjectState = { scalable: false, replicas: 0, cordoned: false };
+const UNKNOWN: ObjectState = { scalable: false, replicas: 0, cordoned: false, containers: [] };
 
 function key(ref: ObjectRef): string {
     return `${ref.contextId}#${ref.kind}#${ref.namespace}#${ref.name}`;
@@ -102,6 +104,8 @@ class Actions {
                 scalable: state.scalable,
                 replicas: state.replicas,
                 cordoned: state.cordoned,
+                // Null rather than empty is what Go sends for a kind with none.
+                containers: state.containers ?? [],
             };
         } catch {
             // Deliberately silent -- see above.

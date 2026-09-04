@@ -13,6 +13,7 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "node:drain": kube$0.DrainProgress;
+            "pod:logs": kube$0.LogBatch;
             "resource:snapshot": kube$0.Snapshot;
         }
     }

@@ -6,6 +6,11 @@ const Unsubscribe = vi.fn();
 
 vi.mock('@wailsio/runtime', () => ({ Events: { On: vi.fn() } }));
 vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
+    },
     ResourceService: { HelmReleases, Subscribe, Unsubscribe, SetNamespace: vi.fn() },
 }));
 

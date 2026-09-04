@@ -1,10 +1,23 @@
 package kube
 
+// Pill is one small rectangle drawn in place of text: a pod's container, with
+// its state carried by colour so a screen of pods can be scanned rather than
+// read. Label and Detail are what a tooltip and a screen reader get.
+type Pill struct {
+	Label  string `json:"label"`
+	Tone   string `json:"tone"`
+	Detail string `json:"detail"`
+}
+
 // Cell is one table cell. Tone lets the frontend colour a value without having
 // to know what the value means: "ok", "warn", "error", "info" or "" for plain.
 type Cell struct {
 	Text string `json:"text"`
 	Tone string `json:"tone"`
+	// Pills, where a cell is drawn as rectangles rather than written out. Empty
+	// for every kind but one, and an empty one renders as Text exactly as
+	// before.
+	Pills []Pill `json:"pills"`
 	// Sort is compared in place of Text where the two do not share an order.
 	// An age reads "3d" but belongs in seconds; a volume reads "500Mi" but
 	// belongs in bytes. Sorting the text would put "5m" before "2h" before

@@ -190,6 +190,10 @@ var builtinColumns = map[string][]column{
 	KindPods: {
 		nameColumn,
 		{Name: "Ready", From: podReady},
+		// Beside the ratio rather than instead of it: the rectangles say which
+		// container is unhappy, the ratio says how many at a glance, and the
+		// two are read for different reasons.
+		{Name: "Containers", From: podContainers},
 		{Name: "Status", From: podStatus},
 		{Name: "Restarts", From: podRestarts},
 		{Name: "Node", Path: ".spec.nodeName"},

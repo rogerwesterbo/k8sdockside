@@ -13,6 +13,7 @@
     import { type Row, type Table } from '../state/adopt';
     import { subscribe, type Subscription } from '../state/subscriptions';
     import { customKindFor, labelFor } from '../catalogue';
+    import ContainerPills from './ContainerPills.svelte';
     import SortableTable from './SortableTable.svelte';
     import { alpha } from '../colors';
     import { workspace } from '../state/workspace.svelte';
@@ -131,15 +132,20 @@
     }
 </script>
 
-<!-- A CustomResourceDefinition's name opens a tab of its objects; every other
-     cell is plain text. -->
-{#snippet drillCell(row: Row, index: number)}
-    {#if index === 0}
+<!-- Most cells are their text. Two are not: a CustomResourceDefinition's name
+     opens a tab of its objects, and a cell carrying containers is drawn as
+     rectangles. The rectangles stay pictures here -- a press anywhere in the
+     row, this column included, selects the row. -->
+{#snippet bodyCell(row: Row, index: number)}
+    {@const value = row.cells[index]}
+    {#if drillable && index === 0}
         <button class="drill" onclick={(event) => openInstances(row, event)} title="List the {row.name} in this cluster">
             {row.cells[0]?.text}
         </button>
+    {:else if value?.pills?.length}
+        <ContainerPills pills={value.pills} />
     {:else}
-        {row.cells[index]?.text}
+        {value?.text ?? ''}
     {/if}
 {/snippet}
 
@@ -179,7 +185,7 @@
                 {selectedRowId}
                 onselect={select}
                 empty={query.trim() ? `Nothing matches “${query}”.` : `No ${labelFor(kind).toLowerCase()} here.`}
-                cell={drillable ? drillCell : undefined}
+                cell={bodyCell}
             />
         {/if}
     </div>

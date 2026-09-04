@@ -19,6 +19,11 @@ vi.mock('@wailsio/runtime', () => ({
     },
 }));
 vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
+    },
     ActionService: { ObjectState, Delete, Scale, Restart, Cordon, Drain, CancelDrain },
 }));
 
@@ -28,7 +33,7 @@ const { changes } = await import('./changes.svelte');
 const NODE = { contextId: 'cfg::prod', kind: 'nodes', namespace: '', name: 'wrkr01' };
 const DEPLOYMENT = { contextId: 'cfg::prod', kind: 'deployments', namespace: 'default', name: 'web' };
 
-const IDLE = { scalable: false, replicas: 0, cordoned: false };
+const IDLE = { scalable: false, replicas: 0, cordoned: false, containers: [] };
 
 /** One drain report, as the backend sends it. */
 function report(over: Record<string, unknown> = {}) {
@@ -65,7 +70,7 @@ describe('what the bar knows about an object', () => {
     });
 
     test('loading reads the object and holds what it said', async () => {
-        ObjectState.mockResolvedValue({ scalable: true, replicas: 3, cordoned: false });
+        ObjectState.mockResolvedValue({ scalable: true, replicas: 3, cordoned: false, containers: [] });
 
         await actions.load(DEPLOYMENT);
 

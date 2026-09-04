@@ -8,7 +8,7 @@ function ids(kind: string): ActionId[] {
 }
 
 describe('what every object can do', () => {
-    test.each(['pods', 'configmaps', 'secrets', 'clusterroles', 'persistentvolumes'])(
+    test.each(['configmaps', 'secrets', 'clusterroles', 'persistentvolumes'])(
         '%s can be edited and deleted',
         (kind) => {
             expect(ids(kind)).toEqual(['edit', 'delete']);
@@ -34,24 +34,42 @@ describe('what every object can do', () => {
 });
 
 describe('what particular kinds can do', () => {
+    test('a pod offers its logs', () => {
+        expect(ids('pods')).toEqual(['edit', 'logs', 'delete']);
+    });
+
+    // A workload's logs are every container of every pod its selector finds,
+    // which is the view worth having while a rollout is happening.
+    test.each(['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs'])(
+        'a %s offers its logs too',
+        (kind) => {
+            expect(ids(kind)).toContain('logs');
+        },
+    );
+
+    // Nothing here has containers, so there is nothing to follow.
+    test.each(['configmaps', 'nodes', 'services', 'secrets'])('a %s offers no logs', (kind) => {
+        expect(ids(kind)).not.toContain('logs');
+    });
+
     test('a node can be cordoned and drained', () => {
         expect(ids('nodes')).toEqual(['edit', 'cordon', 'drain', 'delete']);
     });
 
     test.each(['deployments', 'statefulsets'])('a %s can be scaled and restarted', (kind) => {
-        expect(ids(kind)).toEqual(['edit', 'scale', 'restart', 'delete']);
+        expect(ids(kind)).toEqual(['edit', 'logs', 'scale', 'restart', 'delete']);
     });
 
     // A DaemonSet runs one pod per node, so there is no replica count to set --
     // but it does roll.
     test('a daemonset restarts but does not scale', () => {
-        expect(ids('daemonsets')).toEqual(['edit', 'restart', 'delete']);
+        expect(ids('daemonsets')).toEqual(['edit', 'logs', 'restart', 'delete']);
     });
 
     // A ReplicaSet has a replica count, but rolling one means nothing: the
     // Deployment above it owns the template that a restart would stamp.
     test('a replicaset scales but does not restart', () => {
-        expect(ids('replicasets')).toEqual(['edit', 'scale', 'delete']);
+        expect(ids('replicasets')).toEqual(['edit', 'logs', 'scale', 'delete']);
     });
 });
 

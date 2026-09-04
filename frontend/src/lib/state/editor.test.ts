@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 // checking what has been typed, and writing it back -- so the bindings are
 // stubbed. What is under test is what happens to a document in between.
 vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
+    },
     ResourceService: {
         ResourceYAML: vi.fn().mockResolvedValue(''),
         ApplyYAML: vi.fn().mockResolvedValue(''),

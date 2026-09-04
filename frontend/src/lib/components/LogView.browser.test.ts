@@ -1,0 +1,211 @@
+import { beforeEach, expect, test, vi } from 'vitest';
+import { page } from 'vitest/browser';
+import { render } from 'vitest-browser-svelte';
+import LogView from './LogView.svelte';
+
+const events = vi.hoisted(() => ({ handler: (_e: { data: unknown }) => {} }));
+vi.mock('@wailsio/runtime', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@wailsio/runtime')>();
+    return {
+        ...actual,
+        Events: {
+            On: vi.fn((name: string, handler: (event: { data: unknown }) => void) => {
+                if (name === 'pod:logs') events.handler = handler;
+            }),
+        },
+    };
+});
+vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+    KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
+    ResourceService: { Describe: vi.fn().mockResolvedValue('') },
+    ActionService: {
+        ObjectState: vi.fn().mockResolvedValue({
+            scalable: false,
+            replicas: 0,
+            cordoned: false,
+            containers: [],
+        }),
+    },
+    LogService: {
+        Containers: vi.fn(),
+        Open: vi.fn(),
+        Close: vi.fn(),
+    },
+    SettingsService: {
+        Get: vi.fn().mockResolvedValue({}),
+        ConfigPath: vi.fn().mockResolvedValue(''),
+        SetContextPrefs: vi.fn().mockResolvedValue({}),
+        SetTabOrder: vi.fn().mockResolvedValue({}),
+        SetDock: vi.fn().mockResolvedValue({}),
+        SetLayout: vi.fn().mockResolvedValue({}),
+        SetPreferences: vi.fn().mockResolvedValue({}),
+    },
+}));
+
+const { logs } = await import('../state/logs.svelte');
+const { LogService } = await import('../../../bindings/github.com/roger/k8sdockside');
+
+const PROD = '/home/u/.kube/prod::admin@prod';
+
+const TAB = {
+    id: 'logs:prod#pods#default#web',
+    view: 'logs' as const,
+    contextId: PROD,
+    kind: 'pods',
+    namespace: 'default',
+    name: 'web',
+    title: 'web',
+};
+
+const ONE_POD = [
+    { pod: 'web', container: 'app', init: false },
+    { pod: 'web', container: 'sidecar', init: false },
+];
+
+const settle = () => new Promise((r) => setTimeout(r, 80));
+
+/** Delivers a batch of lines as the backend sends them. */
+function deliver(lines: { pod: string; container: string; text: string }[], done = false) {
+    events.handler({ data: { streamId: 'logs-1', lines, error: '', done } });
+}
+
+beforeEach(() => {
+    logs.forget(TAB.id);
+    vi.mocked(LogService.Containers).mockReset().mockResolvedValue(ONE_POD);
+    vi.mocked(LogService.Open).mockReset().mockResolvedValue('logs-1');
+    vi.mocked(LogService.Close).mockReset();
+});
+
+test('opening follows every container and says which they are', async () => {
+    render(LogView, { tab: TAB });
+
+    await expect.element(page.getByRole('button', { name: 'app' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'sidecar' })).toBeVisible();
+    await vi.waitFor(() =>
+        expect(LogService.Open).toHaveBeenCalledWith(PROD, 'pods', 'default', 'web', [], true),
+    );
+});
+
+test('lines arrive and are shown', async () => {
+    render(LogView, { tab: TAB });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+
+    deliver([{ pod: 'web', container: 'app', text: 'listening on :8080' }]);
+
+    await expect.element(page.getByText('listening on :8080')).toBeVisible();
+});
+
+// One pod's name on every line would be the same word repeated down the view,
+// taking room from the log itself.
+test('a single pod does not label every line with its own name', async () => {
+    render(LogView, { tab: TAB });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+
+    deliver([{ pod: 'web', container: 'app', text: 'hello' }]);
+    await expect.element(page.getByText('hello')).toBeVisible();
+
+    // Scoped to the log itself: "app" is also the name of a picker button up
+    // in the toolbar, which is not what this is about.
+    const log = document.querySelector('[role="log"]')!;
+    const labels = [...log.querySelectorAll('.line span')].map((el) => el.textContent?.trim());
+    // The container is still named -- two of them are merged into this view.
+    expect(labels).toContain('app');
+    expect(labels).not.toContain('web');
+});
+
+// A deployment's view merges several pods, and then which pod a line came from
+// is the thing you are reading it for.
+test('several pods label their lines', async () => {
+    vi.mocked(LogService.Containers).mockResolvedValue([
+        { pod: 'web-a', container: 'app', init: false },
+        { pod: 'web-b', container: 'app', init: false },
+    ]);
+    render(LogView, { tab: { ...TAB, kind: 'deployments' } });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+
+    deliver([{ pod: 'web-a', container: 'app', text: 'from a' }]);
+
+    await expect.element(page.getByText('web-a')).toBeVisible();
+});
+
+test('turning a container off follows only what is left', async () => {
+    render(LogView, { tab: TAB });
+    await expect.element(page.getByRole('button', { name: 'sidecar' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'sidecar' }).click();
+
+    await vi.waitFor(() =>
+        expect(LogService.Open).toHaveBeenLastCalledWith(PROD, 'pods', 'default', 'web', ['app'], true),
+    );
+});
+
+// Following nothing is an empty view with no way back to a full one.
+test('the last container cannot be turned off', async () => {
+    vi.mocked(LogService.Containers).mockResolvedValue([ONE_POD[0]]);
+    render(LogView, { tab: TAB });
+    await expect.element(page.getByRole('button', { name: 'app' })).toBeVisible();
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalledTimes(1));
+
+    await page.getByRole('button', { name: 'app' }).click();
+    await settle();
+
+    expect(LogService.Open).toHaveBeenCalledTimes(1);
+});
+
+test('following can be turned off', async () => {
+    render(LogView, { tab: TAB });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+
+    await page.getByRole('button', { name: 'Follow' }).click();
+
+    await vi.waitFor(() =>
+        expect(LogService.Open).toHaveBeenLastCalledWith(PROD, 'pods', 'default', 'web', [], false),
+    );
+});
+
+test('the filter hides the lines that do not match', async () => {
+    render(LogView, { tab: TAB });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+    deliver([
+        { pod: 'web', container: 'app', text: 'GET /health 200' },
+        { pod: 'web', container: 'app', text: 'GET /orders 500' },
+    ]);
+    await expect.element(page.getByText('GET /health 200')).toBeVisible();
+
+    await page.getByRole('textbox', { name: 'Filter lines' }).fill('500');
+
+    await expect.element(page.getByText('GET /orders 500')).toBeVisible();
+    await expect.poll(() => page.getByText('GET /health 200').elements()).toHaveLength(0);
+});
+
+test('clearing empties the view', async () => {
+    render(LogView, { tab: TAB });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+    deliver([{ pod: 'web', container: 'app', text: 'gone soon' }]);
+    await expect.element(page.getByText('gone soon')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Clear' }).click();
+
+    await expect.poll(() => page.getByText('gone soon').elements()).toHaveLength(0);
+});
+
+test('a view that will not open says why rather than sitting empty', async () => {
+    vi.mocked(LogService.Containers).mockRejectedValue(new Error('pods "web" is forbidden'));
+
+    render(LogView, { tab: TAB });
+
+    await expect.element(page.getByText(/forbidden/)).toBeVisible();
+});
+
+// Dropping lines silently would make the view look like it starts where the
+// container started.
+test('a truncated view says so', async () => {
+    render(LogView, { tab: TAB });
+    await vi.waitFor(() => expect(LogService.Open).toHaveBeenCalled());
+
+    deliver(
+        Array.from({ length: 5100 }, (_, i) => ({ pod: 'web', container: 'app', text: `line ${i}` })),
+    );
+
+    await expect.element(page.getByText(/Earlier lines have been dropped/)).toBeVisible();
+});

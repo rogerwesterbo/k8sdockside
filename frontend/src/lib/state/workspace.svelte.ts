@@ -17,6 +17,7 @@ import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
 import { changes } from './changes.svelte';
 import { editors } from './editor.svelte';
+import { logs } from './logs.svelte';
 import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, SETTINGS, groupForKind, labelFor } from '../catalogue';
 import { defaultColorFor } from '../colors';
 
@@ -40,11 +41,11 @@ export interface DetailTarget {
 }
 
 /**
- * What a dock tab shows. There is one view today; it is named rather than
- * assumed so that the strip, the store and the settings file do not all have to
- * change to gain a second.
+ * What a dock tab shows: an object as YAML, or its logs. Naming the view rather
+ * than assuming it is what let the second one arrive without the strip, the
+ * store or the settings file changing shape.
  */
-export type DockView = 'edit';
+export type DockView = 'edit' | 'logs';
 
 /**
  * One tab in the bottom dock.
@@ -907,12 +908,27 @@ class Workspace {
 
     /** Opens the YAML editor for one object, or focuses it if it is open. */
     openEditor(target: DetailTarget): void {
-        const id = dockTabId('edit', target);
+        this.openDockTab('edit', target);
+    }
+
+    /** Opens the log view for one object, or focuses it if it is open. */
+    openLogs(target: DetailTarget): void {
+        this.openDockTab('logs', target);
+    }
+
+    /**
+     * Opens one view onto an object in the dock, or focuses it if it is there.
+     *
+     * The view is part of a tab's id, so an object's YAML and its logs are two
+     * tabs rather than one that changes what it shows.
+     */
+    private openDockTab(view: DockView, target: DetailTarget): void {
+        const id = dockTabId(view, target);
 
         if (!this.dockTabs.some((t) => t.id === id)) {
             const tab: DockTab = {
                 id,
-                view: 'edit',
+                view,
                 contextId: target.contextId,
                 kind: target.kind,
                 namespace: target.namespace,
@@ -982,7 +998,13 @@ class Workspace {
         if (survivors.length === this.dockTabs.length) return;
 
         for (const tab of this.dockTabs) {
-            if (!keep(tab)) editors.forget(tab.id);
+            if (keep(tab)) continue;
+            // Whichever view it was, its state goes with it: a reopened tab
+            // must not come back holding an edit made against a version of the
+            // object the cluster has moved past, or scrollback from a stream
+            // that closed hours ago.
+            if (tab.view === 'logs') logs.forget(tab.id);
+            else editors.forget(tab.id);
         }
 
         const stillActive = survivors.some((t) => t.id === this.activeDockTabId);

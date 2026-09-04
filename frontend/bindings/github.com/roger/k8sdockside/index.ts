@@ -3,11 +3,13 @@
 
 import * as ActionService from "./actionservice.js";
 import * as KubeconfigService from "./kubeconfigservice.js";
+import * as LogService from "./logservice.js";
 import * as ResourceService from "./resourceservice.js";
 import * as SettingsService from "./settingsservice.js";
 export {
     ActionService,
     KubeconfigService,
+    LogService,
     ResourceService,
     SettingsService
 };

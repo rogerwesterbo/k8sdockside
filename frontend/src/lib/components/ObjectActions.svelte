@@ -64,6 +64,10 @@
             workspace.openEditor(object);
             return;
         }
+        if (action.id === 'logs') {
+            workspace.openLogs(object);
+            return;
+        }
         if (action.form === 'immediate') {
             void perform(action.id);
             return;

@@ -126,3 +126,40 @@ func TestReplicaCountIsNarrowedRatherThanWrapped(t *testing.T) {
 		})
 	}
 }
+
+// The panel shows the same row of squares the table does, and uses them as the
+// log view's container picker -- so the one call it already makes carries them.
+func TestStateOfCarriesAPodsContainers(t *testing.T) {
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"kind": "Pod",
+		"spec": map[string]any{"containers": []any{
+			map[string]any{"name": "app"},
+			map[string]any{"name": "sidecar"},
+		}},
+		"status": map[string]any{"containerStatuses": []any{
+			map[string]any{"name": "app", "ready": true, "state": map[string]any{"running": map[string]any{}}},
+			map[string]any{"name": "sidecar", "ready": true, "state": map[string]any{"running": map[string]any{}}},
+		}},
+	}}
+
+	got := stateOf(pod)
+
+	if len(got.Containers) != 2 {
+		t.Fatalf("carried %d containers, want 2", len(got.Containers))
+	}
+	if got.Containers[0].Tone != "ok" {
+		t.Errorf("container tone = %q, want ok", got.Containers[0].Tone)
+	}
+}
+
+// Everything that is not a pod has none, and must not pretend otherwise.
+func TestStateOfCarriesNoContainersForOtherKinds(t *testing.T) {
+	node := &unstructured.Unstructured{Object: map[string]any{
+		"kind": "Node",
+		"spec": map[string]any{"unschedulable": true},
+	}}
+
+	if got := stateOf(node); len(got.Containers) != 0 {
+		t.Errorf("a Node carried %d containers", len(got.Containers))
+	}
+}

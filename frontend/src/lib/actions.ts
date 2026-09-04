@@ -7,7 +7,7 @@
 
 import { DASHBOARD, HELM_RELEASES, SETTINGS } from './catalogue';
 
-export type ActionId = 'edit' | 'scale' | 'restart' | 'cordon' | 'drain' | 'delete';
+export type ActionId = 'edit' | 'logs' | 'scale' | 'restart' | 'cordon' | 'drain' | 'delete';
 
 /**
  * How choosing an action behaves.
@@ -27,6 +27,7 @@ export interface Action {
 }
 
 const EDIT: Action = { id: 'edit', label: 'Edit', icon: 'edit', form: 'immediate' };
+const LOGS: Action = { id: 'logs', label: 'Logs', icon: 'rows', form: 'immediate' };
 const SCALE: Action = { id: 'scale', label: 'Scale', icon: 'scale', form: 'number' };
 const RESTART: Action = { id: 'restart', label: 'Restart', icon: 'repeat', form: 'immediate' };
 /** Its label follows the node: a cordoned one offers to be uncordoned instead. */
@@ -34,6 +35,22 @@ const CORDON: Action = { id: 'cordon', label: 'Cordon', icon: 'shield', form: 'i
 // Draining moves every workload off a node. Routine, and never a single click.
 const DRAIN: Action = { id: 'drain', label: 'Drain', icon: 'server', form: 'confirm' };
 const DELETE: Action = { id: 'delete', label: 'Delete', icon: 'trash', form: 'confirm', tone: 'danger' };
+
+/**
+ * The kinds that have logs: a pod, and the workloads whose own pods can be
+ * found from a selector. Everything else either runs no containers or has no
+ * way to say which pods are its.
+ */
+const LOGGABLE = [
+    'pods',
+    'deployments',
+    'statefulsets',
+    'daemonsets',
+    'replicasets',
+    'replicationcontrollers',
+    'jobs',
+    'cronjobs',
+];
 
 /** The kinds that carry a replica count, which is what Scale sets. */
 const SCALABLE = ['deployments', 'statefulsets', 'replicasets', 'replicationcontrollers'];
@@ -59,6 +76,7 @@ export function actionsFor(kind: string): Action[] {
     if (NOT_AN_OBJECT.includes(kind)) return [];
 
     const out: Action[] = [EDIT];
+    if (LOGGABLE.includes(kind)) out.push(LOGS);
     if (SCALABLE.includes(kind)) out.push(SCALE);
     if (ROLLABLE.includes(kind)) out.push(RESTART);
     if (kind === 'nodes') out.push(CORDON, DRAIN);

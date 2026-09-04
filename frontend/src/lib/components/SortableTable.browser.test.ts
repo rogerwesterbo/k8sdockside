@@ -9,7 +9,7 @@ function row(id: string, ...cells: ([string] | [string, string])[]): Row {
         id,
         name: id,
         namespace: '',
-        cells: cells.map(([text, sort]) => ({ text, tone: '', sort: sort ?? '' })),
+        cells: cells.map(([text, sort]) => ({ text, tone: '', sort: sort ?? '', pills: null })),
     };
 }
 

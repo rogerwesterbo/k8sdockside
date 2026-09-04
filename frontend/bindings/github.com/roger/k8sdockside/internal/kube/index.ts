@@ -3,14 +3,18 @@
 
 export type {
     Cell,
+    ContainerRef,
     Context,
     CustomResourceGroup,
     CustomResourceKind,
     DrainProgress,
     File,
     Gauge,
+    LogBatch,
+    LogLine,
     ObjectState,
     Overview,
+    Pill,
     PodRef,
     Refusal,
     Row,

@@ -10,12 +10,32 @@ export interface Cell {
     "tone": string;
 
     /**
+     * Pills, where a cell is drawn as rectangles rather than written out. Empty
+     * for every kind but one, and an empty one renders as Text exactly as
+     * before.
+     */
+    "pills": Pill[] | null;
+
+    /**
      * Sort is compared in place of Text where the two do not share an order.
      * An age reads "3d" but belongs in seconds; a volume reads "500Mi" but
      * belongs in bytes. Sorting the text would put "5m" before "2h" before
      * "3d". Empty means Text is already in the right order.
      */
     "sort": string;
+}
+
+/**
+ * ContainerRef names one stream: a container, in a pod.
+ */
+export interface ContainerRef {
+    "pod": string;
+    "container": string;
+
+    /**
+     * Init marks a container that runs to completion before the others start.
+     */
+    "init": boolean;
 }
 
 /**
@@ -105,6 +125,27 @@ export interface Gauge {
 }
 
 /**
+ * LogBatch is what crosses to the frontend: the lines that gathered since the
+ * last one, or the news that a stream has ended.
+ */
+export interface LogBatch {
+    "streamId": string;
+    "lines": LogLine[] | null;
+    "error": string;
+    "done": boolean;
+}
+
+/**
+ * LogLine is one line, tagged with where it came from -- which is the whole
+ * point of a merged view.
+ */
+export interface LogLine {
+    "pod": string;
+    "container": string;
+    "text": string;
+}
+
+/**
  * ObjectState is what the action bar needs to know about an object beyond its
  * name: which of its buttons apply, and what they should start from.
  */
@@ -121,6 +162,13 @@ export interface ObjectState {
      * offers to cordon or to uncordon.
      */
     "cordoned": boolean;
+
+    /**
+     * Containers is a pod's containers as the same squares the table draws.
+     * The panel shows the row again and uses it as the log view's picker, so
+     * the call it already makes carries them rather than making a second.
+     */
+    "containers": Pill[] | null;
 }
 
 /**
@@ -144,6 +192,17 @@ export interface Overview {
      */
     "events": Table;
     "error": string;
+}
+
+/**
+ * Pill is one small rectangle drawn in place of text: a pod's container, with
+ * its state carried by colour so a screen of pods can be scanned rather than
+ * read. Label and Detail are what a tooltip and a screen reader get.
+ */
+export interface Pill {
+    "label": string;
+    "tone": string;
+    "detail": string;
 }
 
 /**

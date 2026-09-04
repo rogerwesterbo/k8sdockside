@@ -26,13 +26,18 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
     },
     ActionService: {
-        ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false }),
+        ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] }),
         Delete: vi.fn().mockResolvedValue(undefined),
         Scale: vi.fn().mockResolvedValue(undefined),
         Restart: vi.fn().mockResolvedValue(undefined),
         Cordon: vi.fn().mockResolvedValue(undefined),
         Drain: vi.fn().mockResolvedValue('drain-1'),
         CancelDrain: vi.fn(),
+    },
+    LogService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue('logs-1'),
+        Close: vi.fn(),
     },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
@@ -60,11 +65,7 @@ beforeEach(() => {
     for (const ref of [POD, NODE, DEPLOYMENT]) actions.forget(ref);
     workspace.closeDetail();
     workspace.notice = null;
-    vi.mocked(ActionService.ObjectState).mockReset().mockResolvedValue({
-        scalable: false,
-        replicas: 0,
-        cordoned: false,
-    });
+    vi.mocked(ActionService.ObjectState).mockReset().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] });
     vi.mocked(ActionService.Delete).mockReset().mockResolvedValue(undefined);
     vi.mocked(ActionService.Scale).mockReset().mockResolvedValue(undefined);
     vi.mocked(ActionService.Cordon).mockReset().mockResolvedValue(undefined);
@@ -90,11 +91,7 @@ test('a node offers what only a node can do', async () => {
 // The one button whose label is the cluster's answer rather than ours: offering
 // to cordon a node that is already cordoned is a button that does nothing.
 test('a cordoned node offers to be uncordoned instead', async () => {
-    vi.mocked(ActionService.ObjectState).mockResolvedValue({
-        scalable: false,
-        replicas: 0,
-        cordoned: true,
-    });
+    vi.mocked(ActionService.ObjectState).mockResolvedValue({ scalable: false, replicas: 0, cordoned: true, containers: [] });
 
     render(ObjectActions, { object: NODE });
 
@@ -179,11 +176,7 @@ test('a refused delete says why and leaves the object alone', async () => {
 });
 
 test('scale opens a field holding the count the workload is at', async () => {
-    vi.mocked(ActionService.ObjectState).mockResolvedValue({
-        scalable: true,
-        replicas: 3,
-        cordoned: false,
-    });
+    vi.mocked(ActionService.ObjectState).mockResolvedValue({ scalable: true, replicas: 3, cordoned: false, containers: [] });
     render(ObjectActions, { object: DEPLOYMENT });
     await expect.element(page.getByRole('button', { name: 'Scale' })).toBeVisible();
 
@@ -193,11 +186,7 @@ test('scale opens a field holding the count the workload is at', async () => {
 });
 
 test('scaling sends the number that was typed', async () => {
-    vi.mocked(ActionService.ObjectState).mockResolvedValue({
-        scalable: true,
-        replicas: 3,
-        cordoned: false,
-    });
+    vi.mocked(ActionService.ObjectState).mockResolvedValue({ scalable: true, replicas: 3, cordoned: false, containers: [] });
     render(ObjectActions, { object: DEPLOYMENT });
     await page.getByRole('button', { name: 'Scale' }).click();
 
@@ -278,4 +267,25 @@ test('a Helm release gets no bar at all', async () => {
     await settle();
 
     expect(page.getByRole('button').elements()).toHaveLength(0);
+});
+
+// The way in to the logs. Without this the log view is code nothing reaches.
+test('a pod offers its logs, and pressing it opens them in the dock', async () => {
+    render(ObjectActions, { object: POD });
+
+    await page.getByRole('button', { name: 'Logs' }).click();
+
+    expect(workspace.dockTabs.map((t) => t.view)).toEqual(['logs']);
+    expect(workspace.dockTabs[0].name).toBe('web');
+    expect(workspace.dockOpen).toBe(true);
+});
+
+// Two views onto one object, not one tab that changes what it shows.
+test('logs and the editor are two dock tabs on the same object', async () => {
+    render(ObjectActions, { object: POD });
+
+    await page.getByRole('button', { name: 'Logs' }).click();
+    await page.getByRole('button', { name: 'Edit' }).click();
+
+    expect(workspace.dockTabs.map((t) => t.view).sort()).toEqual(['edit', 'logs']);
 });
