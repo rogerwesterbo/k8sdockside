@@ -7,7 +7,8 @@
 package appconfig
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -301,6 +302,28 @@ func (s *Store) SetTabOrder(order []TabRef) (Settings, error) {
 	return s.update(func(d *Settings) { d.TabOrder = slices.Clone(order) })
 }
 
+// settingsFormat pins the file format to what encoding/json v1 wrote, so moving
+// to v2 does not rewrite every existing settings file. Two of these are load
+// bearing rather than cosmetic:
+//
+//   - Deterministic keeps the contexts map in a stable key order. v2 otherwise
+//     follows Go's randomised map iteration, which would reshuffle the file on
+//     every save and make it useless to diff or eyeball.
+//   - FormatNilSliceAsNull keeps nil distinct from empty, which Layout and
+//     ContextPrefs both depend on -- see CollapsedGroups. v2 would write [] for
+//     a nil slice, turning "never chosen" into the explicit choice "show me
+//     everything" the first time a fresh install saved anything.
+//
+// EscapeForHTML and FormatNilMapAsNull only keep the bytes identical to what
+// earlier releases produced; nothing reads the file that would care either way.
+var settingsFormat = json.JoinOptions(
+	jsontext.WithIndent("  "),
+	jsontext.EscapeForHTML(true),
+	json.Deterministic(true),
+	json.FormatNilSliceAsNull(true),
+	json.FormatNilMapAsNull(true),
+)
+
 // flush writes the settings via a temp file and a rename, so an interrupted
 // write cannot leave a half-written config behind. The caller holds the lock.
 func (s *Store) flush() error {
@@ -309,7 +332,7 @@ func (s *Store) flush() error {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
-	raw, err := json.MarshalIndent(s.data, "", "  ")
+	raw, err := json.Marshal(s.data, settingsFormat)
 	if err != nil {
 		return err
 	}

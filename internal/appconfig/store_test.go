@@ -1,7 +1,7 @@
 package appconfig
 
 import (
-	"encoding/json"
+	json "encoding/json/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -387,5 +387,76 @@ func TestAnUnusableZoomFallsBackToNormalSize(t *testing.T) {
 	// at all and unmarshal to exactly that.
 	if store.Get().Layout.Zoom != 1 {
 		t.Errorf("zoom = %v, want 1", store.Get().Layout.Zoom)
+	}
+}
+
+// The store writes with encoding/json/v2, which formats a nil slice as [] and
+// iterates maps in a random order unless told otherwise. Both defaults would be
+// quietly wrong here, and neither shows up in the round-trip tests above --
+// hence these two. See settingsFormat.
+
+// Saving anything at all rewrites the whole file, including the fields the user
+// has not touched. Folding they have never chosen has to still be unchosen
+// afterwards, or the frontend stops applying its one-time default the moment
+// the user does something unrelated like adding a kubeconfig.
+func TestNeverChosenFoldingSurvivesAnUnrelatedSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Get().Layout.CollapsedGroups != nil {
+		t.Fatal("a fresh store should start with no folding choice")
+	}
+	// Something unrelated, which flushes the file.
+	if _, err := store.AddManualFile("/tmp/some.config"); err != nil {
+		t.Fatalf("AddManualFile: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"collapsedGroups": null`) {
+		t.Errorf("an unchosen folding was not written as null:\n%s", raw)
+	}
+
+	reopened, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Get().Layout.CollapsedGroups; got != nil {
+		t.Errorf("collapsed groups = %v, want nil -- the one-time default is now lost", got)
+	}
+}
+
+// Contexts live in a map, and a map written in iteration order would reshuffle
+// the file on every save: useless to diff, and noisy for anyone who keeps their
+// settings in version control.
+func TestTheFileKeepsAStableContextOrder(t *testing.T) {
+	write := func(t *testing.T) string {
+		t.Helper()
+		store, err := openAt(filepath.Join(t.TempDir(), "settings.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{"z::admin", "a::admin", "m::admin", "b::admin", "y::admin"} {
+			if _, err := store.SetContextPrefs(id, ContextPrefs{Alias: id}); err != nil {
+				t.Fatalf("SetContextPrefs(%q): %v", id, err)
+			}
+		}
+		raw, err := os.ReadFile(store.Path())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+
+	first := write(t)
+	for i := range 8 {
+		if got := write(t); got != first {
+			t.Fatalf("run %d wrote a different file:\n--- first ---\n%s\n--- got ---\n%s", i+1, first, got)
+		}
 	}
 }

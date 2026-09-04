@@ -54,7 +54,16 @@ dev_mode:
   executes:
     - cmd: wails3 build DEV=true
       type: blocking
-    - cmd: wails3 task common:dev:frontend
+    # The vite dev server, started directly rather than via common:dev:frontend.
+    # That task depends on install:frontend:deps, and Task keys its up-to-date
+    # fingerprint by full task name -- the blocking build above already installed
+    # under darwin:common:install:frontend:deps:npm, so invoking it again under
+    # common: misses the cache and re-runs npm install every time. That put a
+    # 45s+ install ahead of vite while the primary task below was already
+    # polling :9245, which it only does for a few seconds before giving up with
+    # "unable to connect to frontend server". Deps are guaranteed present here:
+    # the build above is blocking and installs them.
+    - cmd: wails3 task common:frontend:dev:npm
       type: background
     - cmd: wails3 task run
       type: primary
