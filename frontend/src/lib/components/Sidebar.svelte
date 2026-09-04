@@ -108,7 +108,13 @@
 
     <div class="scroll">
         {#each files as file (file.path)}
-            <div class="file">
+            <!-- Grouped by file, or one flat list of contexts. A file that
+                 could not be parsed is always headed, whatever the setting:
+                 it has no contexts to show in its place, so hiding its name
+                 would remove it from the sidebar without saying so. -->
+            {@const headed = workspace.showKubeconfigNames || file.error !== ''}
+            <div class="file" class:flat={!headed}>
+                {#if headed}
                 <div class="file-head" title={file.path}>
                     <Icon name="file" size={12} />
                     <span class="file-name">{basename(file.path)}</span>
@@ -120,9 +126,10 @@
                             : 'Hide this file. Discovery would find it again, so it is remembered as hidden.'}
                         aria-label="Remove {basename(file.path)}"
                     >
-                        <Icon name="close" size={12} />
+                            <Icon name="close" size={12} />
                     </button>
                 </div>
+                {/if}
 
                 {#if file.error}
                     <p class="file-error"><Icon name="alert" size={12} />{file.error}</p>
@@ -307,6 +314,12 @@
 
     .file + .file {
         margin-top: 10px;
+    }
+
+    /* Without its heading a file is not a group any more, so the gap that
+       separated it from the one above would read as a stray blank line. */
+    .file.flat + .file.flat {
+        margin-top: 0;
     }
 
     .file-head {

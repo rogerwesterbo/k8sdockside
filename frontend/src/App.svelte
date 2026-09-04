@@ -57,7 +57,6 @@
     $effect(() => {
         const root = document.documentElement;
         root.dataset.theme = workspace.resolvedTheme;
-        root.style.setProperty('--root-font-size', `${workspace.fontSize}px`);
         const compact = workspace.density === 'compact';
         root.style.setProperty('--row-h', compact ? '24px' : '30px');
         root.style.setProperty('--cell-pad-y', compact ? '3px' : '6px');

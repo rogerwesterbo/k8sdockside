@@ -74,9 +74,6 @@ type Preferences struct {
 	// Density is comfortable or compact, and drives the table row height.
 	// Empty means comfortable.
 	Density string `json:"density"`
-	// FontSize is the root font size in px. 0 means the built-in default,
-	// which is what a file written before this field existed will read as.
-	FontSize int `json:"fontSize"`
 	// RestoreTabs reopens last session's tabs at launch.
 	//
 	// Nullable for the same reason Layout.CollapsedGroups is, and it matters
@@ -89,6 +86,17 @@ type Preferences struct {
 	// watched folder. No pointer needed: false is what the app does today, so
 	// an older file reading as false is already correct.
 	ConfirmSourceRemoval bool `json:"confirmSourceRemoval"`
+	// ShowKubeconfigNames groups the sidebar's contexts under the file they
+	// came from, headed by its name. Off by default -- most people keep every
+	// context in one ~/.kube/config, where the heading only repeats itself --
+	// leaving the contexts as one flat list. A file that could not be parsed is
+	// named either way, because it has no contexts to show in its place and
+	// would otherwise vanish from the sidebar silently.
+	//
+	// A plain bool, unlike RestoreTabs: here the default and Go's zero value
+	// are the same, so a settings file written before this field existed reads
+	// as "hidden", which is exactly right.
+	ShowKubeconfigNames bool `json:"showKubeconfigNames"`
 }
 
 // Settings is the whole persisted file.
@@ -119,7 +127,7 @@ func Defaults() Settings {
 		Contexts:      map[string]ContextPrefs{},
 		TabOrder:      []TabRef{},
 		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
-		Preferences:   Preferences{Theme: ThemeSystem, Density: DensityComfortable, FontSize: DefaultFontSize},
+		Preferences:   Preferences{Theme: ThemeSystem, Density: DensityComfortable},
 	}
 }
 
@@ -143,16 +151,6 @@ const (
 
 	DensityComfortable = "comfortable"
 	DensityCompact     = "compact"
-)
-
-// The root font size may be set between these, in px. The floor is where the
-// sidebar's context names stop being readable; above the ceiling a table row
-// no longer fits its own height. DefaultFontSize matches the value in the
-// frontend's style.css.
-const (
-	MinFontSize     = 11
-	MaxFontSize     = 18
-	DefaultFontSize = 13
 )
 
 // Store is the settings file plus the lock guarding it. Wails calls service
@@ -476,11 +474,6 @@ func normalise(s Settings) Settings {
 	case DensityComfortable, DensityCompact:
 	default:
 		s.Preferences.Density = p.Density
-	}
-	// Catches both a file written before this field existed, which reads as 0,
-	// and a hand-edited one asking for something unreadable.
-	if s.Preferences.FontSize < MinFontSize || s.Preferences.FontSize > MaxFontSize {
-		s.Preferences.FontSize = p.FontSize
 	}
 	// RestoreTabs is deliberately not defaulted: nil is a value in its own
 	// right here, meaning "never chosen", and the frontend resolves it to true.

@@ -25,7 +25,12 @@ button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:p
 input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:5px 8px}`;
 
 const FILE = '/home/u/.kube/many.config';
-const CONTEXTS = Array.from({ length: 24 }, (_, i) => ({
+// Enough contexts that the list overflows on its own, whatever else the
+// sidebar is or is not drawing. At 24 it only just did, and the margin was the
+// file heading above them -- so hiding kubeconfig names by default was enough
+// to make the list fit, and every assertion here about something being out of
+// view quietly stopped meaning anything.
+const CONTEXTS = Array.from({ length: 40 }, (_, i) => ({
     id: `${FILE}::ctx-${i}`, name: `admin@cluster-${i}`, cluster: `cluster-${i}`,
     user: 'admin', namespace: '', server: '', file: FILE, current: false,
 }));

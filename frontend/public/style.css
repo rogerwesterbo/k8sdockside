@@ -7,20 +7,42 @@
     --bg-sidebar: #151b24;
     --bg-panel: #19202a;
     --bg-raised: #212b38;
-    --bg-hover: rgba(255, 255, 255, 0.055);
-    --bg-active: rgba(255, 255, 255, 0.09);
+    --bg-hover: rgba(255, 255, 255, 0.08);
+    --bg-active: rgba(255, 255, 255, 0.13);
 
-    --border: #28323f;
-    --border-soft: rgba(255, 255, 255, 0.07);
+    /* Borders carry no text, so WCAG's 4.5 does not apply to them -- but at
+       the old #28323f they sat at 1.1--1.4 against the surfaces either side,
+       which is close enough to invisible that panels ran into one another. */
+    --border: #46536a;
+    /* Deliberately much fainter than --border, and tuned down by eye rather
+       than to a contrast target. This one separates rows inside a list --
+       table rows, settings rows -- where a line per item adds up, and the job
+       is to group the rows without the grid competing with what is in it.
+       --border is the structural edge around a panel, where being seen is the
+       whole point; the two are not the same setting and should not be merged. */
+    --border-soft: rgba(255, 255, 255, 0.05);
 
-    --text: #dee5ee;
-    --text-dim: #8d9aaa;
-    --text-faint: #616e7d;
+    /*
+       Text contrast, measured against all four surfaces above.
+
+       --text-faint was the problem: at #616e7d it scored 2.75 on --bg-raised,
+       failing every WCAG threshold, and it is the token carrying most of the
+       small print -- hints, counts, section headings, file paths -- much of it
+       at 10--11px. The values below clear AA (4.5) on every surface, the worst
+       case being --text-faint on --bg-raised at 4.57.
+
+       --accent is deliberately unchanged. It is used as a background as often
+       as a colour, and lightening it for text would take white-on-accent from
+       3.42 down to 2.67 and shift every context-coloured tab with it.
+    */
+    --text: #e8eef7;
+    --text-dim: #a9b6c6;
+    --text-faint: #8593a3;
 
     --accent: #4a86ff;
-    --ok: #4cc38a;
-    --warn: #e0a458;
-    --error: #e5646d;
+    --ok: #5fd39b;
+    --warn: #efb567;
+    --error: #f4787f;
 
     --radius: 6px;
     --radius-sm: 4px;
@@ -34,9 +56,7 @@
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
     font-family: var(--font);
-    /* Set from the font size preference by the shell, with 13px as the value
-       before the settings have loaded and if one is ever missing. */
-    font-size: var(--root-font-size, 13px);
+    font-size: 13px;
     color-scheme: dark;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

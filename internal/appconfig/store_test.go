@@ -472,9 +472,9 @@ func TestPreferencesRoundTrip(t *testing.T) {
 	if _, err := store.SetPreferences(Preferences{
 		Theme:                ThemeLight,
 		Density:              DensityCompact,
-		FontSize:             15,
 		RestoreTabs:          &off,
 		ConfirmSourceRemoval: true,
+		ShowKubeconfigNames:  true,
 	}); err != nil {
 		t.Fatalf("SetPreferences: %v", err)
 	}
@@ -484,14 +484,17 @@ func TestPreferencesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := reopened.Get().Preferences
-	if got.Theme != ThemeLight || got.Density != DensityCompact || got.FontSize != 15 {
-		t.Errorf("preferences = %+v, want light/compact/15", got)
+	if got.Theme != ThemeLight || got.Density != DensityCompact {
+		t.Errorf("preferences = %+v, want light and compact", got)
 	}
 	if !got.ConfirmSourceRemoval {
 		t.Error("ConfirmSourceRemoval did not survive the reopen")
 	}
 	if got.RestoreTabs == nil || *got.RestoreTabs {
 		t.Error("an explicit 'do not restore tabs' came back as nil or true")
+	}
+	if !got.ShowKubeconfigNames {
+		t.Error("an explicit 'show kubeconfig names' did not survive the reopen")
 	}
 }
 
@@ -508,16 +511,24 @@ func TestRestoreTabsIsNilUntilTheUserChooses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.Get().Preferences.RestoreTabs != nil {
+	prefs := store.Get().Preferences
+	if prefs.RestoreTabs != nil {
 		t.Error("RestoreTabs should stay nil until chosen, so the frontend can default it to true")
+	}
+	// ShowKubeconfigNames needs no such treatment: its default is "hidden",
+	// which is Go's zero value, so an older file reads correctly on its own.
+	if prefs.ShowKubeconfigNames {
+		t.Error("kubeconfig names should be hidden until the user asks for them")
 	}
 }
 
 func TestUnknownPreferenceValuesFallBackToTheDefaults(t *testing.T) {
 	path := tempSettings(t)
 
-	// Hand-edited: a theme that does not exist, a density that does not exist,
-	// and a font size nothing could be read at.
+	// Hand-edited: a theme that does not exist and a density that does not
+	// exist. fontSize is deliberately still here -- it was a real field once,
+	// and a settings file written by that version must not fail to parse now
+	// that it is gone.
 	body := `{"contexts":{},"preferences":{"theme":"solarized","density":"roomy","fontSize":400}}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -534,9 +545,6 @@ func TestUnknownPreferenceValuesFallBackToTheDefaults(t *testing.T) {
 	if got.Density != DensityComfortable {
 		t.Errorf("density = %q, want %q", got.Density, DensityComfortable)
 	}
-	if got.FontSize != DefaultFontSize {
-		t.Errorf("font size = %d, want %d", got.FontSize, DefaultFontSize)
-	}
 }
 
 // Get hands out copies. A pointer field would otherwise let a caller reach
@@ -548,7 +556,6 @@ func TestPreferencesCopyThePointerField(t *testing.T) {
 	if _, err := store.SetPreferences(Preferences{
 		Theme:       ThemeDark,
 		Density:     DensityComfortable,
-		FontSize:    DefaultFontSize,
 		RestoreTabs: &on,
 	}); err != nil {
 		t.Fatalf("SetPreferences: %v", err)
@@ -561,8 +568,8 @@ func TestPreferencesCopyThePointerField(t *testing.T) {
 	}
 
 	// Nor may a pointer handed back be written through.
-	handed := store.Get().Preferences.RestoreTabs
-	*handed = false
+	handed := store.Get().Preferences
+	*handed.RestoreTabs = false
 	if got := store.Get().Preferences.RestoreTabs; got == nil || !*got {
 		t.Error("writing through a returned pointer changed what the store holds")
 	}

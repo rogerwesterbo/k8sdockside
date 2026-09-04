@@ -5,11 +5,11 @@ version: '3'
 
 # This information is used to generate the build assets.
 info:
-  companyName: "My Company" # The name of the company
-  productName: "My Product" # The name of the application
-  productIdentifier: "com.mycompany.myproduct" # The unique product identifier
+  companyName: "Hemmelig" # The name of the company
+  productName: "K8s Dockside" # The name of the application
+  productIdentifier: "io.hemmelig.k8sdockside" # The unique product identifier
   description: "A program that does X" # The application description
-  copyright: "(c) 2025, My Company" # Copyright text
+  copyright: "(c) 2025, Hemmelig" # Copyright text
   comments: "Some Product Comments" # Comments
   version: "0.0.1" # The application version
   # cfBundleIconName: "appicon" # The macOS icon name in Assets.car icon bundles (optional)
@@ -20,7 +20,7 @@ info:
 # Note: Keys under `ios` OVERRIDE values under `info` when set.
 # ios:
 #   # The iOS bundle identifier used in the generated Xcode project (CFBundleIdentifier)
-#   bundleID: "com.mycompany.myproduct"
+#   bundleID: "io.hemmelig.k8sdockside"
 #   # The display name shown under the app icon (CFBundleDisplayName/CFBundleName)
 #   displayName: "My Product"
 #   # The app version to embed in Info.plist (CFBundleShortVersionString/CFBundleVersion)
@@ -85,4 +85,4 @@ fileAssociations:
 
 # Other data
 other:
-  - name: My Other Data
+  - name: Cool kubernetes client

@@ -103,9 +103,9 @@ function defaultSettings(): Settings {
         preferences: {
             theme: 'system',
             density: 'comfortable',
-            fontSize: 13,
             restoreTabs: true,
             confirmSourceRemoval: false,
+            showKubeconfigNames: false,
         },
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
@@ -124,9 +124,6 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.1;
 
-/** Root font size bounds, matching appconfig.MinFontSize/MaxFontSize. */
-const MIN_FONT_SIZE = 11;
-const MAX_FONT_SIZE = 18;
 
 /** Adds or removes one label, whichever way the toggle should go. */
 function toggled(groups: string[], label: string): string[] {
@@ -253,6 +250,10 @@ class Workspace {
     collapsedGroups = $derived(this.settings.layout.collapsedGroups ?? DEFAULT_COLLAPSED_GROUPS);
     /** The webview scale, 1 being normal size. */
     zoom = $derived(this.settings.layout.zoom || 1);
+    /** The range the scale may be set to, for the settings view's slider. */
+    readonly minZoom = MIN_ZOOM;
+    readonly maxZoom = MAX_ZOOM;
+    readonly zoomStep = ZOOM_STEP;
 
     /** What the user chose: system, light or dark. */
     theme = $derived(this.settings.preferences.theme);
@@ -265,9 +266,10 @@ class Workspace {
         this.theme === 'system' ? (this.systemPrefersDark ? 'dark' : 'light') : this.theme,
     );
     density = $derived(this.settings.preferences.density);
-    fontSize = $derived(this.settings.preferences.fontSize || 13);
     restoreTabsOnLaunch = $derived(this.settings.preferences.restoreTabs);
     confirmSourceRemoval = $derived(this.settings.preferences.confirmSourceRemoval);
+    /** Whether the sidebar groups contexts under the kubeconfig they came from. */
+    showKubeconfigNames = $derived(this.settings.preferences.showKubeconfigNames);
 
     // ----- loading -------------------------------------------------------
 
@@ -1036,11 +1038,14 @@ class Workspace {
     }
 
     /**
+     * Sets the scale directly, for the settings view's slider. The steppers go
+     * through zoomIn/zoomOut instead.
+     *
      * Clamped at both ends. The floor is not arbitrary: the window's title bar
      * is drawn by the frontend and so shrinks with the zoom, while the macOS
      * traffic lights over it do not -- far enough down and they no longer fit.
      */
-    private setZoom(scale: number): void {
+    setZoom(scale: number): void {
         const next = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale)) * 100) / 100;
         if (next === this.zoom) return;
         this.settings.layout.zoom = next;
@@ -1081,16 +1086,16 @@ class Workspace {
         this.updatePreferences({ density });
     }
 
-    setFontSize(px: number): void {
-        this.updatePreferences({ fontSize: Math.round(Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, px))) });
-    }
-
     setRestoreTabs(restoreTabs: boolean): void {
         this.updatePreferences({ restoreTabs });
     }
 
     setConfirmSourceRemoval(confirmSourceRemoval: boolean): void {
         this.updatePreferences({ confirmSourceRemoval });
+    }
+
+    setShowKubeconfigNames(showKubeconfigNames: boolean): void {
+        this.updatePreferences({ showKubeconfigNames });
     }
 
     /**

@@ -12,9 +12,6 @@
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 
-/** The root font size, matching appconfig.DefaultFontSize and style.css. */
-const DEFAULT_FONT_SIZE = 13;
-
 /** A kubeconfig file and the contexts parsed out of it. */
 export interface ConfigFile {
     path: string;
@@ -39,9 +36,9 @@ export interface Settings {
     preferences: {
         theme: 'system' | 'light' | 'dark';
         density: 'comfortable' | 'compact';
-        fontSize: number;
         restoreTabs: boolean;
         confirmSourceRemoval: boolean;
+        showKubeconfigNames: boolean;
     };
     layout: {
         detailDock: string;
@@ -106,11 +103,13 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // service call that failed before it reached the store.
             theme: (settings.preferences?.theme || 'system') as 'system' | 'light' | 'dark',
             density: (settings.preferences?.density || 'comfortable') as 'comfortable' | 'compact',
-            fontSize: settings.preferences?.fontSize || DEFAULT_FONT_SIZE,
             // null is "never chosen", and the default is on. `??` rather than
             // `||`: an explicit false is a choice and must survive.
             restoreTabs: settings.preferences?.restoreTabs ?? true,
             confirmSourceRemoval: settings.preferences?.confirmSourceRemoval ?? false,
+            // Off by default: most people keep every context in one
+            // ~/.kube/config, where a heading per file only repeats itself.
+            showKubeconfigNames: settings.preferences?.showKubeconfigNames ?? false,
         },
         layout: {
             ...settings.layout,

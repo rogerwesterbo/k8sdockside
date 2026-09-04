@@ -35,7 +35,14 @@ go.work.sum
 .task
 bin
 frontend/dist
-frontend/node_modules
+# Unanchored, so a node_modules created anywhere is ignored -- not only the
+# real one at frontend/. A mistyped tool invocation (a --root resolved against
+# the wrong directory, say) drops a dependency cache wherever it was run, and
+# the anchored form left that as 18MB of untracked files asking to be committed.
+node_modules/
+
+# Vite's dependency-optimisation cache, for the same reason.
+.vite/
 # vitest browser-mode leftovers from a failed assertion
 frontend/.vitest-attachments
 frontend/src/**/__screenshots__

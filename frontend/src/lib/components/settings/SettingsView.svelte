@@ -5,10 +5,30 @@
   the four sections have nothing to do with each other, and a scroll would put
   the About text between the user and the sources list they came for.
 
-  Which section is showing is component state, not persisted. Where you were in
-  settings is not a preference -- it is where you were a moment ago, and coming
-  back to the top is what you would expect after closing the tab.
+  The section you are on survives leaving the tab and coming back. It has to be
+  module state rather than component state: the shell wraps the active view in
+  {#key activeTab.id}, so switching to a cluster tab destroys this component
+  entirely and returning builds a new one, which would otherwise land back on
+  the first section every time.
+
+  It is deliberately not persisted to disk. Which page of settings you had open
+  is where you were a moment ago, not a preference worth surviving a restart.
 -->
+<script lang="ts" module>
+    const SECTIONS = [
+        { id: 'appearance', label: 'Appearance', icon: 'sun' },
+        { id: 'behaviour', label: 'Behaviour', icon: 'sliders' },
+        { id: 'sources', label: 'Kubeconfig sources', icon: 'folder' },
+        { id: 'about', label: 'About', icon: 'info' },
+    ] as const;
+
+    type SectionId = (typeof SECTIONS)[number]['id'];
+
+    // Module scope, so it outlives any one instance of the component. Set from
+    // the rail below; read when a new instance mounts.
+    let remembered = $state<SectionId>('appearance');
+</script>
+
 <script lang="ts">
     import Icon from '../Icon.svelte';
     import AboutSection from './AboutSection.svelte';
@@ -16,16 +36,12 @@
     import BehaviourSection from './BehaviourSection.svelte';
     import SourcesSection from './SourcesSection.svelte';
 
-    const SECTIONS = [
-        { id: 'sources', label: 'Kubeconfig sources', icon: 'folder' },
-        { id: 'appearance', label: 'Appearance', icon: 'sun' },
-        { id: 'behaviour', label: 'Behaviour', icon: 'sliders' },
-        { id: 'about', label: 'About', icon: 'info' },
-    ] as const;
+    let active = $state<SectionId>(remembered);
 
-    type SectionId = (typeof SECTIONS)[number]['id'];
-
-    let active = $state<SectionId>('sources');
+    function show(id: SectionId): void {
+        active = id;
+        remembered = id;
+    }
 
     // Up and down move between sections, as in any list of tabs. Left and right
     // are deliberately not bound: they are how the tab strip is navigated, and
@@ -37,7 +53,7 @@
         event.preventDefault();
         const at = SECTIONS.findIndex((s) => s.id === active);
         const next = SECTIONS[(at + step + SECTIONS.length) % SECTIONS.length];
-        active = next.id;
+        show(next.id);
         document.getElementById(`settings-nav-${next.id}`)?.focus();
     }
 </script>
@@ -55,7 +71,7 @@
                 aria-selected={active === section.id}
                 aria-controls="settings-panel-{section.id}"
                 tabindex={active === section.id ? 0 : -1}
-                onclick={() => (active = section.id)}
+                onclick={() => show(section.id)}
             >
                 <Icon name={section.icon} size={15} />
                 <span>{section.label}</span>
@@ -70,12 +86,12 @@
         aria-labelledby="settings-nav-{active}"
         tabindex="-1"
     >
-        {#if active === 'sources'}
-            <SourcesSection />
-        {:else if active === 'appearance'}
+        {#if active === 'appearance'}
             <AppearanceSection />
         {:else if active === 'behaviour'}
             <BehaviourSection />
+        {:else if active === 'sources'}
+            <SourcesSection />
         {:else}
             <AboutSection />
         {/if}

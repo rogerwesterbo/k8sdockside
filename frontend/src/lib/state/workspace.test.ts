@@ -674,6 +674,19 @@ describe('zoom', () => {
         for (let i = 0; i < 40; i++) workspace.zoomIn();
         expect(workspace.zoom).toBeLessThanOrEqual(2);
     });
+
+    test('setting the scale directly is clamped the same way', () => {
+        // The settings view's slider and presets go through this, so it must
+        // not be a way around the bounds the steppers respect.
+        workspace.setZoom(9);
+        expect(workspace.zoom).toBe(workspace.maxZoom);
+
+        workspace.setZoom(0.01);
+        expect(workspace.zoom).toBe(workspace.minZoom);
+
+        workspace.setZoom(1.25);
+        expect(workspace.zoom).toBe(1.25);
+    });
 });
 
 describe('showing the section an activated tab lives in', () => {
@@ -1049,9 +1062,9 @@ describe('preferences', () => {
         workspace.settings.preferences = {
             theme: 'system',
             density: 'comfortable',
-            fontSize: 13,
             restoreTabs: true,
             confirmSourceRemoval: false,
+            showKubeconfigNames: false,
         };
     });
 
@@ -1078,14 +1091,6 @@ describe('preferences', () => {
         workspace.systemPrefersDark = true;
 
         expect(workspace.resolvedTheme).toBe('light');
-    });
-
-    test('the font size is clamped to what stays readable', () => {
-        workspace.setFontSize(2);
-        expect(workspace.fontSize).toBe(11);
-
-        workspace.setFontSize(400);
-        expect(workspace.fontSize).toBe(18);
     });
 
     test('turning tab restore off is a choice that sticks', () => {
