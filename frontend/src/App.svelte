@@ -274,7 +274,11 @@
     main {
         display: flex;
         flex-direction: column;
-        flex: 1 1 auto;
+        /* Basis 0 rather than auto: what is in the view must not decide how
+           much of the window the view asks for. With `auto` the basis is the
+           content's own width, so one wide table made the whole row overflow
+           and the sidebar paid for it. */
+        flex: 1 1 0;
         min-width: 0;
         min-height: 0;
     }

@@ -201,19 +201,32 @@
         flex: 0 0 auto;
     }
 
+    /* The width the user dragged to, but never more than leaves the view it
+       belongs to something to be. A panel restored from a session on a wider
+       screen would otherwise take almost the whole window, and the table it is
+       describing would be a column of ellipses. Expressed against the stage
+       rather than the window, so it holds as the window is resized and needs
+       nothing in script to keep it true.
+
+       Never below MIN_SIZE, though: in a window too narrow to give both of
+       them room, a panel capped to nothing would disappear rather than be
+       small, and the object you asked about would simply not be there. */
     .panel.right {
         width: var(--size);
+        max-width: max(260px, calc(100% - 320px));
         border-left: 1px solid var(--border);
     }
 
     .panel.left {
         width: var(--size);
+        max-width: max(260px, calc(100% - 320px));
         border-right: 1px solid var(--border);
         order: -1;
     }
 
     .panel.bottom {
         height: var(--size);
+        max-height: max(260px, calc(100% - 160px));
         border-top: 1px solid var(--border);
     }
 

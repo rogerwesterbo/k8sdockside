@@ -215,6 +215,12 @@
     .sidebar {
         display: flex;
         flex-direction: column;
+        /* Its width is a decision, not a suggestion. Without this it is a
+           shrinkable flex item, and anything wide to its right -- a describe
+           panel dragged out, a table of many columns -- takes the row over its
+           width and the context list is what gives, down to a strip of colour
+           with dragging it wider undone as soon as you let go. */
+        flex: 0 0 auto;
         min-width: 0;
         height: 100%;
         /* With minimums on the rows inside, the column can be asked for more
