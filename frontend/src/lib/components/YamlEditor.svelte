@@ -1,21 +1,24 @@
 <!--
   The YAML editor: one object, as the cluster has it, editable and saved back.
 
-  It is a textarea with a gutter beside it rather than a code editor component,
-  and that is a deliberate limit. What this has to do is show a document, count
-  its lines, say where it stopped being YAML and send it back -- none of which
-  needs a syntax highlighter, and all of which a textarea does natively,
-  including selection, undo, find-as-you-type and the platform's own key
-  bindings.
+  CodeMirror rather than a textarea. A textarea holds one flat string, which
+  makes two things impossible rather than merely absent: finding text with the
+  matches marked, and folding a block away. Both are what you want in a document
+  that is mostly nesting you are not reading. What the swap costs is a
+  dependency; what it buys is search, folding, YAML highlighting and indent
+  handling that someone else maintains.
 
   The document itself lives in the editors store, not here: this component is
   destroyed and rebuilt every time you switch dock tabs, and a half-finished
   edit must not go with it.
 -->
 <script lang="ts">
-    import { tick } from 'svelte';
+    import { EditorView } from '@codemirror/view';
+    import { untrack } from 'svelte';
     import { singularFor } from '../catalogue';
     import { alpha } from '../colors';
+    import { extensions, numbering, setBadLine } from '../editor/setup';
+    import { lineNumbers } from '@codemirror/view';
     import { editors } from '../state/editor.svelte';
     import { workspace, type DockTab } from '../state/workspace.svelte';
     import ErrorState from './ErrorState.svelte';
@@ -31,15 +34,15 @@
     let dirty = $derived(editors.isDirty(tab.id));
     let color = $derived(workspace.colorOf(tab.contextId));
     let context = $derived(workspace.contexts.find((c) => c.id === tab.contextId) ?? null);
-    /** The line numbers the gutter draws, one per line of the document. */
-    let lineNumbers = $derived.by(() => {
-        const count = doc.text.split('\n').length;
-        return Array.from({ length: count }, (_, i) => i + 1);
-    });
     let canSave = $derived(doc.status === 'ready' && dirty && doc.check.valid && !doc.saving);
 
-    let textarea = $state<HTMLTextAreaElement | null>(null);
-    let gutter = $state<HTMLElement | null>(null);
+    let host = $state<HTMLElement | null>(null);
+    let view: EditorView | null = null;
+    /**
+     * True while the store's text is being written into the editor, so the
+     * update listener does not send it straight back and start a loop.
+     */
+    let applying = false;
 
     // Reads the object the first time this tab is opened. A document already in
     // the store is left exactly as it was, which is what makes switching away
@@ -48,14 +51,58 @@
         void editors.load(tab.id, tab);
     });
 
-    /** Keeps the gutter level with the text it numbers. */
-    function syncGutter(): void {
-        if (gutter && textarea) gutter.scrollTop = textarea.scrollTop;
-    }
+    // Builds the editor once, on the element it lives in. Its starting text is
+    // read untracked: this must not rebuild on every keystroke.
+    $effect(() => {
+        const parent = host;
+        if (!parent) return;
 
-    function onInput(event: Event): void {
-        editors.edit(tab.id, (event.currentTarget as HTMLTextAreaElement).value);
-    }
+        view = new EditorView({
+            parent,
+            doc: untrack(() => editors.doc(tab.id).text),
+            extensions: [
+                ...extensions({
+                    numbers: untrack(() => workspace.showLineNumbers),
+                    label: `${tab.name} as YAML`,
+                    onSave: () => void save(),
+                }),
+                EditorView.updateListener.of((update) => {
+                    if (update.docChanged && !applying) {
+                        editors.edit(tab.id, update.state.doc.toString());
+                    }
+                }),
+            ],
+        });
+
+        return () => {
+            view?.destroy();
+            view = null;
+        };
+    });
+
+    // The store's text, written in when it changes for a reason other than
+    // typing: the first read, a reload, and what the API server gave back after
+    // a save. Compared first, so an echo of the user's own keystroke is a
+    // no-op rather than a cursor thrown back to the start.
+    $effect(() => {
+        const text = doc.text;
+        if (!view || view.state.doc.toString() === text) return;
+        applying = true;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+        applying = false;
+    });
+
+    // The line the parser stopped at, handed to the editor to mark.
+    $effect(() => {
+        const line = doc.check.valid ? 0 : doc.check.line;
+        view?.dispatch({ effects: setBadLine.of(line) });
+    });
+
+    // Line numbering follows the setting without the editor being rebuilt.
+    $effect(() => {
+        const on = workspace.showLineNumbers;
+        view?.dispatch({ effects: numbering.reconfigure(on ? lineNumbers() : []) });
+    });
 
     async function save(): Promise<void> {
         if (!canSave) return;
@@ -70,38 +117,6 @@
             return;
         }
         void editors.load(tab.id, tab, { force: true });
-    }
-
-    async function onKeyDown(event: KeyboardEvent): Promise<void> {
-        const el = event.currentTarget as HTMLTextAreaElement;
-
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-            event.preventDefault();
-            await save();
-            return;
-        }
-
-        // Escape leaves the editor rather than reaching the window, where it
-        // would close the describe panel instead -- and it is the way out for
-        // anyone navigating by keyboard, since Tab is taken below.
-        if (event.key === 'Escape') {
-            event.stopPropagation();
-            el.blur();
-            return;
-        }
-
-        // Tab indents. In a YAML editor that is the whole job of the key, and
-        // two spaces is what the documents this opens are written in.
-        if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) {
-            event.preventDefault();
-            const { selectionStart: start, selectionEnd: end, value } = el;
-            editors.edit(tab.id, `${value.slice(0, start)}  ${value.slice(end)}`);
-            // The value goes through the store, so the caret can only be put
-            // back once Svelte has written it out again.
-            await tick();
-            el.selectionStart = start + 2;
-            el.selectionEnd = start + 2;
-        }
     }
 </script>
 
@@ -160,30 +175,9 @@
     {:else if doc.status === 'error'}
         <ErrorState message={doc.error} {context} onRetry={() => editors.load(tab.id, tab, { force: true })} compact />
     {:else}
-        <div class="pane">
-            {#if workspace.showLineNumbers}
-                <!-- Not a list to a screen reader: these are the same lines the
-                     textarea already carries, counted for the eye alone. -->
-                <div class="gutter" bind:this={gutter} aria-hidden="true">
-                    {#each lineNumbers as n (n)}
-                        <span class:bad={doc.check.line === n}>{n}</span>
-                    {/each}
-                </div>
-            {/if}
-
-            <textarea
-                bind:this={textarea}
-                value={doc.text}
-                oninput={onInput}
-                onkeydown={onKeyDown}
-                onscroll={syncGutter}
-                spellcheck="false"
-                autocapitalize="off"
-                autocomplete="off"
-                wrap="off"
-                aria-label="{tab.name} as YAML"
-            ></textarea>
-        </div>
+        <!-- CodeMirror mounts itself in here. ⌘F searches, the fold arrows in
+             the gutter collapse a block, and both are its own. -->
+        <div class="pane" bind:this={host}></div>
     {/if}
 </div>
 
@@ -332,59 +326,12 @@
         color: var(--text-dim);
     }
 
+    /* CodeMirror styles itself through the theme in ../editor/setup.ts, in
+       the app's own tokens. All this has to do is give it a box to fill. */
     .pane {
-        display: flex;
         flex: 1 1 auto;
         min-height: 0;
         min-width: 0;
-        /* Every line-dependent measurement below has to agree between the
-           gutter and the textarea, so they are declared once here and
-           inherited by both. */
-        font-family: var(--mono);
-        font-size: 12px;
-        line-height: 1.55;
-    }
-
-    .gutter {
-        display: flex;
-        flex-direction: column;
-        flex: 0 0 auto;
-        padding: 10px 8px 10px 12px;
-        text-align: right;
-        color: var(--text-faint);
-        background: var(--bg);
-        border-right: 1px solid var(--border-soft);
         overflow: hidden;
-        user-select: none;
-        font-variant-numeric: tabular-nums;
-    }
-
-    .gutter span {
-        /* Fixed rather than inherited from line-height alone: a browser that
-           rounds the two differently would drift a pixel a line, and by line
-           three hundred the numbers would name the wrong rows. */
-        height: calc(12px * 1.55);
-        flex: 0 0 auto;
-    }
-
-    .gutter span.bad {
-        color: var(--error);
-        font-weight: 600;
-    }
-
-    textarea {
-        flex: 1 1 auto;
-        min-width: 0;
-        padding: 10px 14px;
-        border: 0;
-        outline: none;
-        resize: none;
-        background: transparent;
-        color: var(--text);
-        font: inherit;
-        line-height: inherit;
-        tab-size: 2;
-        white-space: pre;
-        overflow: auto;
     }
 </style>

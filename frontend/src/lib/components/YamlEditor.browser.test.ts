@@ -1,6 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { EditorView } from '@codemirror/view';
+
 import YamlEditor from './YamlEditor.svelte';
 
 // Declared through vi.hoisted because the mock factory below is lifted above
@@ -35,6 +37,33 @@ const { workspace } = await import('../state/workspace.svelte');
 const { editors } = await import('../state/editor.svelte');
 const { ResourceService } = await import('../../../bindings/github.com/roger/k8sdockside');
 
+/**
+ * The editor is CodeMirror now, so its text is not an input's value. The view
+ * is reached the way CodeMirror itself offers -- findFromDOM -- rather than
+ * through a seam put in the component for tests.
+ */
+function editor(): EditorView {
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    if (!view) throw new Error('no editor is mounted');
+    return view;
+}
+
+/** What the editor is showing. */
+function text(): string {
+    return editor().state.doc.toString();
+}
+
+/** Types over the whole document, the way a user replacing it all would. */
+function replaceAll(next: string): void {
+    const view = editor();
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+}
+
+/** Waits for the editor to be showing something. */
+async function ready(): Promise<void> {
+    await vi.waitFor(() => expect(document.querySelector('.cm-content')).toBeTruthy());
+}
+
 const PROD = '/home/u/.kube/prod::admin@prod';
 
 /** One editor tab, as the dock hands it to the component. */
@@ -48,9 +77,22 @@ const TAB = {
     title: 'web',
 };
 
-/** The gutter's numbers, or an empty list when it is not drawn. */
+/**
+ * The elements a gutter actually draws.
+ *
+ * CodeMirror puts a hidden spacer first in every gutter, sized to the widest
+ * entry so the column does not jump about. It carries a real number and a real
+ * fold arrow, so anything reading the gutter has to skip it.
+ */
+function drawn(selector: string): HTMLElement[] {
+    return [...document.querySelectorAll<HTMLElement>(selector)].filter(
+        (el) => el.style.visibility !== 'hidden',
+    );
+}
+
+/** The line numbers CodeMirror is drawing, or none when they are turned off. */
 function gutter(): string[] {
-    return [...document.querySelectorAll('.gutter span')].map((el) => el.textContent ?? '');
+    return drawn('.cm-lineNumbers .cm-gutterElement').map((el) => el.textContent?.trim() ?? '');
 }
 
 beforeEach(() => {
@@ -66,13 +108,15 @@ beforeEach(() => {
 test('opens on the object as the cluster has it', async () => {
     render(YamlEditor, { tab: TAB });
 
-    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toHaveValue(LIVE);
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
     expect(ResourceService.ResourceYAML).toHaveBeenCalledWith(PROD, 'pods', 'default', 'web');
 });
 
 test('numbers every line, and stops when the setting is turned off', async () => {
     render(YamlEditor, { tab: TAB });
-    await expect.element(page.getByRole('textbox')).toHaveValue(LIVE);
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
 
     // Four lines of YAML and the empty one after the trailing newline.
     expect(gutter()).toEqual(['1', '2', '3', '4', '5']);
@@ -83,11 +127,13 @@ test('numbers every line, and stops when the setting is turned off', async () =>
 
 test('there is nothing to save until something is typed', async () => {
     render(YamlEditor, { tab: TAB });
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
     const save = page.getByRole('button', { name: 'Save' });
 
     await expect.element(save).toBeDisabled();
 
-    await page.getByRole('textbox').fill('apiVersion: v1\nkind: Pod\n');
+    replaceAll('apiVersion: v1\nkind: Pod\n');
     await expect.element(save).toBeEnabled();
 });
 
@@ -98,27 +144,29 @@ test('broken YAML says where it broke and holds the save back', async () => {
         line: 2,
     });
     render(YamlEditor, { tab: TAB });
-    await expect.element(page.getByRole('textbox')).toHaveValue(LIVE);
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
 
-    await page.getByRole('textbox').fill('a: b\nc: d: e\n');
+    replaceAll('a: b\nc: d: e\n');
 
     await expect.element(page.getByText(/Line 2:/)).toBeVisible();
     await expect.element(page.getByRole('button', { name: 'Save' })).toBeDisabled();
-    // The line is marked in the gutter as well, so the message has somewhere
-    // to point rather than only naming a number.
-    await expect.poll(() => document.querySelector('.gutter span.bad')?.textContent).toBe('2');
+    // The line itself is marked, so the message has somewhere to point rather
+    // than only naming a number.
+    await expect.poll(() => document.querySelectorAll('.cm-badLine').length).toBe(1);
 });
 
 test('saving sends what is in the editor and takes back what was stored', async () => {
     const stored = `${LIVE}  resourceVersion: "4822"\n`;
     vi.mocked(ResourceService.ApplyYAML).mockResolvedValue(stored);
     render(YamlEditor, { tab: TAB });
-    await expect.element(page.getByRole('textbox')).toHaveValue(LIVE);
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
 
-    await page.getByRole('textbox').fill('apiVersion: v1\nkind: Pod\n');
+    replaceAll('apiVersion: v1\nkind: Pod\n');
     await page.getByRole('button', { name: 'Save' }).click();
 
-    await expect.element(page.getByRole('textbox')).toHaveValue(stored);
+    await vi.waitFor(() => expect(text()).toBe(stored));
     expect(ResourceService.ApplyYAML).toHaveBeenCalledWith(
         PROD,
         'pods',
@@ -134,14 +182,15 @@ test('a refused save is reported in the API server\u2019s own words', async () =
         new Error('Operation cannot be fulfilled on pods "web": the object has been modified'),
     );
     render(YamlEditor, { tab: TAB });
-    await expect.element(page.getByRole('textbox')).toHaveValue(LIVE);
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
 
-    await page.getByRole('textbox').fill('apiVersion: v1\nkind: Pod\n');
+    replaceAll('apiVersion: v1\nkind: Pod\n');
     await page.getByRole('button', { name: 'Save' }).click();
 
     await expect.element(page.getByText(/the object has been modified/)).toBeVisible();
     // The edit is still the only copy of what was written; it must survive.
-    await expect.element(page.getByRole('textbox')).toHaveValue('apiVersion: v1\nkind: Pod\n');
+    await vi.waitFor(() => expect(text()).toBe('apiVersion: v1\nkind: Pod\n'));
 });
 
 test('a cluster that will not answer offers a retry rather than an empty editor', async () => {
@@ -149,4 +198,57 @@ test('a cluster that will not answer offers a retry rather than an empty editor'
     render(YamlEditor, { tab: TAB });
 
     await expect.element(page.getByRole('button', { name: /Try again|Retry/ })).toBeVisible();
+});
+
+// ---- what the swap from a textarea was for --------------------------------
+
+// A textarea cannot mark the text inside it, which is why finding was not
+// possible before and is now.
+test('the find panel opens on the editor and marks what it finds', async () => {
+    render(YamlEditor, { tab: TAB });
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
+
+    editor().focus();
+    await userEvent.keyboard('{Meta>}f{/Meta}');
+
+    const find = document.querySelector('.cm-panel.cm-search input') as HTMLInputElement;
+    expect(find).toBeTruthy();
+
+    await userEvent.type(find, 'kind');
+    await expect.poll(() => document.querySelectorAll('.cm-searchMatch').length).toBeGreaterThan(0);
+});
+
+// The other thing a textarea makes impossible: hiding a run of lines while
+// leaving the rest editable.
+test('a nested block can be folded away and opened again', async () => {
+    render(YamlEditor, { tab: TAB });
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
+
+    // One arrow, on the only line of this document that opens a block.
+    const arrows = drawn('.cm-foldGutter .cm-gutterElement')
+        .map((el) => el.querySelector<HTMLElement>('[title="Fold line"]'))
+        .filter((el): el is HTMLElement => el !== null);
+    expect(arrows).toHaveLength(1);
+
+    arrows[0].click();
+
+    await expect.poll(() => document.querySelectorAll('.cm-foldPlaceholder').length).toBe(1);
+    // Folding hides lines; it must not change the document.
+    expect(text()).toBe(LIVE);
+
+    (document.querySelector('.cm-foldPlaceholder') as HTMLElement).click();
+    await expect.poll(() => document.querySelectorAll('.cm-foldPlaceholder').length).toBe(0);
+});
+
+test('the YAML is coloured by what the tokens are', async () => {
+    render(YamlEditor, { tab: TAB });
+    await ready();
+    await vi.waitFor(() => expect(text()).toBe(LIVE));
+
+    // Highlighting means spans inside the lines rather than bare text nodes.
+    await expect
+        .poll(() => document.querySelectorAll('.cm-line span[class*="ͼ"]').length)
+        .toBeGreaterThan(0);
 });
