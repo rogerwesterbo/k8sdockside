@@ -4,11 +4,12 @@
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { DASHBOARD } from './lib/catalogue';
+    import { DASHBOARD, SETTINGS } from './lib/catalogue';
     import Dashboard from './lib/components/Dashboard.svelte';
     import DetailPanel from './lib/components/DetailPanel.svelte';
     import Icon from './lib/components/Icon.svelte';
     import ResourceTable from './lib/components/ResourceTable.svelte';
+    import SettingsView from './lib/components/settings/SettingsView.svelte';
     import Sidebar from './lib/components/Sidebar.svelte';
     import TabBar from './lib/components/TabBar.svelte';
     import TopBar from './lib/components/TopBar.svelte';
@@ -21,6 +22,8 @@
 
     onMount(() => {
         workspace.load();
+        // Returned so the media query listener is torn down with the shell.
+        return workspace.watchSystemTheme();
     });
 
     // Zoom is applied as CSS on the app's own element, not through the window.
@@ -47,6 +50,19 @@
         document.documentElement.style.setProperty('--topbar-h', `${Math.max(44, 44 / scale)}px`);
     });
 
+    // The appearance preferences are applied to the document root rather than
+    // scoped to a component, because they are what every component's own tokens
+    // resolve against. `data-theme` is the seam the light palette hangs off:
+    // set here, read only by style.css.
+    $effect(() => {
+        const root = document.documentElement;
+        root.dataset.theme = workspace.resolvedTheme;
+        root.style.setProperty('--root-font-size', `${workspace.fontSize}px`);
+        const compact = workspace.density === 'compact';
+        root.style.setProperty('--row-h', compact ? '24px' : '30px');
+        root.style.setProperty('--cell-pad-y', compact ? '3px' : '6px');
+    });
+
     function onZoomKey(event: KeyboardEvent): void {
         if (!event.metaKey && !event.ctrlKey) return;
         // `code` as well as `key`, so the numeric keypad works and so that a
@@ -66,6 +82,11 @@
                 event.preventDefault();
                 workspace.resetZoom();
                 return;
+        }
+        if (event.key === ',') {
+            event.preventDefault();
+            workspace.openSettings();
+            return;
         }
         if (event.code === 'NumpadAdd') {
             event.preventDefault();
@@ -147,7 +168,9 @@
                 <div class="content">
                     {#if workspace.activeTab}
                         {#key workspace.activeTab.id}
-                            {#if workspace.activeTab.kind === DASHBOARD}
+                            {#if workspace.activeTab.kind === SETTINGS}
+                                <SettingsView />
+                            {:else if workspace.activeTab.kind === DASHBOARD}
                                 <Dashboard contextId={workspace.activeTab.contextId} />
                             {:else}
                                 <ResourceTable

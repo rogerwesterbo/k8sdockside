@@ -151,7 +151,9 @@
     }
 
     td {
-        padding: 6px 12px;
+        /* The density preference, set on the root by the shell. This is what
+           "compact" actually changes -- the row height follows its cells. */
+        padding: var(--cell-pad-y, 6px) 12px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;

@@ -93,6 +93,27 @@
         'dock-bottom': ['M4 5h16v14H4z', 'M4 14.5h16'],
         'dock-left': ['M4 5h16v14H4z', 'M9.5 5v14'],
         pin: ['M9 4h6', 'M10 4l-.5 7-3 2.5h11l-3-2.5-.5-7', 'M12 13.5V20'],
+
+        // Settings
+        // A cog: the app's own preferences, as against a cluster's contents.
+        settings: [
+            'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+            'M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.1 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z',
+        ],
+        // A sun: the light theme.
+        sun: ['M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M12 2v2', 'M12 20v2', 'M4.2 4.2l1.4 1.4', 'M18.4 18.4l1.4 1.4', 'M2 12h2', 'M20 12h2', 'M4.2 19.8l1.4-1.4', 'M18.4 5.6l1.4-1.4'],
+        // A crescent: the dark theme.
+        moon: ['M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z'],
+        // A display: the theme the OS is asking for.
+        monitor: ['M4 5h16v11H4z', 'M9 20h6', 'M12 16v4'],
+        // Rows at two spacings: the table density.
+        rows: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+        // A letter between size marks: the root font size.
+        type: ['M5 6V4h14v2', 'M12 4v16', 'M9 20h6'],
+        // A box being reopened: last session's tabs coming back.
+        restore: ['M3 12a9 9 0 1 0 2.6-6.4', 'M3 4v5h5', 'M12 8v4l3 2'],
+        // An open book: what the app is and where it keeps things.
+        info: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M12 11v5', 'M12 8h.01'],
     };
 </script>
 

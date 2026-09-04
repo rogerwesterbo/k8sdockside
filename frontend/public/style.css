@@ -24,17 +24,61 @@
 
     --radius: 6px;
     --radius-sm: 4px;
+    /* Both set from the density preference by the shell. These are the values
+       before the settings have loaded: --row-h is the sidebar tree's row,
+       --cell-pad-y the vertical padding in a resource table's cells. */
     --row-h: 30px;
+    --cell-pad-y: 6px;
 
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
     font-family: var(--font);
-    font-size: 13px;
+    /* Set from the font size preference by the shell, with 13px as the value
+       before the settings have loaded and if one is ever missing. */
+    font-size: var(--root-font-size, 13px);
     color-scheme: dark;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
+}
+
+/*
+   The theme seam.
+
+   The shell resolves the user's choice -- system, light or dark -- against the
+   OS and stamps the answer on the root as data-theme. Every rule below keys off
+   that attribute alone: no component asks what the theme is, and no media query
+   decides it, because "system" has already been resolved by the time it gets
+   here. That keeps one source of truth for what the app is currently wearing.
+
+   The tokens above are the dark palette, which is what this app has always
+   been, so [data-theme='dark'] adds nothing to them. The light palette is not
+   built yet -- these values are a placeholder so the control is not wired to
+   nothing, and the component-by-component audit that makes light actually
+   habitable is its own piece of work.
+*/
+:root[data-theme='light'] {
+    --bg: #f6f7f9;
+    --bg-sidebar: #eef0f4;
+    --bg-panel: #ffffff;
+    --bg-raised: #e7eaf0;
+    --bg-hover: rgba(0, 0, 0, 0.045);
+    --bg-active: rgba(0, 0, 0, 0.075);
+
+    --border: #d5dae2;
+    --border-soft: rgba(0, 0, 0, 0.07);
+
+    --text: #1b2430;
+    --text-dim: #55616f;
+    --text-faint: #7c8794;
+
+    --accent: #2f6fe4;
+    --ok: #1f8a58;
+    --warn: #a96b16;
+    --error: #c8384a;
+
+    color-scheme: light;
 }
 
 * {

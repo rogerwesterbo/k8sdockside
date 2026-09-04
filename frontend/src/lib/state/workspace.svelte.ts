@@ -15,7 +15,7 @@ import {
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
-import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, groupForKind, labelFor } from '../catalogue';
+import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, SETTINGS, groupForKind, labelFor } from '../catalogue';
 import { defaultColorFor } from '../colors';
 
 export type DockSide = 'right' | 'bottom' | 'left';
@@ -100,14 +100,33 @@ function defaultSettings(): Settings {
         excludedFiles: [],
         contexts: {},
         tabOrder: [],
+        preferences: {
+            theme: 'system',
+            density: 'comfortable',
+            fontSize: 13,
+            restoreTabs: true,
+            confirmSourceRemoval: false,
+        },
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
 }
+
+/**
+ * The settings tab's colour. Every other tab is painted with its cluster's, and
+ * the whole point of that is to tell clusters apart -- so the one tab that is
+ * not about a cluster takes the app's own accent instead of borrowing a
+ * cluster's identity.
+ */
+const NEUTRAL_TAB_COLOR = '#7b8794';
 
 /** Zoom bounds, matching appconfig.MinZoom/MaxZoom on the Go side. */
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2;
 const ZOOM_STEP = 0.1;
+
+/** Root font size bounds, matching appconfig.MinFontSize/MaxFontSize. */
+const MIN_FONT_SIZE = 11;
+const MAX_FONT_SIZE = 18;
 
 /** Adds or removes one label, whichever way the toggle should go. */
 function toggled(groups: string[], label: string): string[] {
@@ -127,6 +146,21 @@ function apiGroupKey(contextId: string, group: string): string {
 function tabId(contextId: string, kind: string): string {
     return `${contextId}#${kind}`;
 }
+
+/**
+ * Whether a tab is the app-wide settings view rather than a look at a cluster.
+ *
+ * It belongs to no context, so every place that resolves a tab's contextId --
+ * to colour it, to name it, to decide whether its cluster still exists -- has
+ * to ask this first. Keyed off the kind rather than the empty contextId
+ * because the kind is the thing that is actually meaningful.
+ */
+export function isSettingsTab(tab: { kind: string }): boolean {
+    return tab.kind === SETTINGS;
+}
+
+/** The id the settings tab always has: one per window, belonging to nothing. */
+const SETTINGS_TAB_ID = tabId('', SETTINGS);
 
 function message(err: unknown): string {
     if (err instanceof Error) return err.message;
@@ -178,6 +212,13 @@ class Workspace {
     reveal = $state<Reveal | null>(null);
     private revealCount = 0;
 
+    /**
+     * Whether the OS is asking for a dark appearance. Only consulted while the
+     * theme is `system`; kept up to date by watchSystemTheme so that changing
+     * the OS setting repaints the app straight away.
+     */
+    systemPrefersDark = $state(true);
+
     syncing = $state(false);
     loaded = $state(false);
     notice = $state<Notice | null>(null);
@@ -212,6 +253,21 @@ class Workspace {
     collapsedGroups = $derived(this.settings.layout.collapsedGroups ?? DEFAULT_COLLAPSED_GROUPS);
     /** The webview scale, 1 being normal size. */
     zoom = $derived(this.settings.layout.zoom || 1);
+
+    /** What the user chose: system, light or dark. */
+    theme = $derived(this.settings.preferences.theme);
+    /**
+     * The theme actually in force, with `system` resolved against the OS. It
+     * tracks `systemPrefersDark`, which a media query listener keeps current,
+     * so switching the OS appearance repaints without a restart.
+     */
+    resolvedTheme = $derived(
+        this.theme === 'system' ? (this.systemPrefersDark ? 'dark' : 'light') : this.theme,
+    );
+    density = $derived(this.settings.preferences.density);
+    fontSize = $derived(this.settings.preferences.fontSize || 13);
+    restoreTabsOnLaunch = $derived(this.settings.preferences.restoreTabs);
+    confirmSourceRemoval = $derived(this.settings.preferences.confirmSourceRemoval);
 
     // ----- loading -------------------------------------------------------
 
@@ -296,8 +352,23 @@ class Workspace {
         }
     }
 
+    /**
+     * Asks before dropping a kubeconfig source, when the user has turned that
+     * on. Both removals are already undoable -- a hidden file is listed under
+     * Hidden and a folder can be re-added -- so this is off by default and
+     * exists for people who would rather not have to undo.
+     */
+    private confirmRemoval(question: string): boolean {
+        if (!this.confirmSourceRemoval) return true;
+        if (typeof window === 'undefined' || !window.confirm) return true;
+        return window.confirm(question);
+    }
+
     /** Stops watching a folder; its configs leave the sidebar with it. */
     async removeFolder(path: string): Promise<void> {
+        if (!this.confirmRemoval(`Stop watching ${path}?\n\nIts kubeconfigs leave the sidebar with it.`)) {
+            return;
+        }
         try {
             this.files = adoptFiles(await KubeconfigService.RemoveFolder(path));
             this.settings = adoptSettings(await SettingsService.Get());
@@ -321,6 +392,9 @@ class Workspace {
 
     /** Forgets a kubeconfig the user added, closing any tabs that depended on it. */
     async removeFile(path: string): Promise<void> {
+        if (!this.confirmRemoval(`Remove ${path}?\n\nAny tabs open against its contexts will close.`)) {
+            return;
+        }
         try {
             this.files = adoptFiles(await KubeconfigService.RemoveFile(path));
             this.settings = adoptSettings(await SettingsService.Get());
@@ -338,8 +412,15 @@ class Workspace {
         return this.settings.contexts[context.id]?.alias?.trim() || context.name;
     }
 
-    /** The colour for a context: the user's choice, or one derived from its id. */
+    /**
+     * The colour for a context: the user's choice, or one derived from its id.
+     *
+     * An empty id is the settings tab, which belongs to no cluster. Deriving a
+     * colour for it would paint it as if it did, and always the same one, so
+     * it is given the neutral accent instead.
+     */
     colorOf(contextId: string): string {
+        if (!contextId) return NEUTRAL_TAB_COLOR;
         return this.settings.contexts[contextId]?.color || defaultColorFor(contextId);
     }
 
@@ -469,13 +550,32 @@ class Workspace {
         this.activateTab(id);
     }
 
+    /**
+     * Opens the app-wide settings, or focuses it if already open.
+     *
+     * It goes to the far end of the strip rather than beside the current tab,
+     * unlike openTab: it was not opened *from* the view you were looking at,
+     * and pushing it into the middle of a row of clusters would break up the
+     * grouping the user built by hand.
+     */
+    openSettings(): void {
+        if (!this.tabs.some((t) => t.id === SETTINGS_TAB_ID)) {
+            this.tabs = [...this.tabs, { id: SETTINGS_TAB_ID, contextId: '', kind: SETTINGS, title: 'Settings' }];
+            this.persistTabOrder();
+        }
+        this.activateTab(SETTINGS_TAB_ID);
+    }
+
     /** Focuses a tab and selects the context it belongs to. */
     activateTab(id: string): void {
         const changed = this.activeTabId !== id;
         this.activeTabId = id;
 
         const tab = this.tabs.find((t) => t.id === id);
-        if (tab) {
+        // The settings tab has no cluster to select, no tree section to unfold
+        // and nothing to scroll to. Left unguarded it would deselect whatever
+        // context the sidebar was showing every time you looked at settings.
+        if (tab && !isSettingsTab(tab)) {
             this.selectContext(tab.contextId);
             this.showSectionFor(tab);
             // Asked for here rather than in selectContext, which the sidebar
@@ -598,9 +698,20 @@ class Workspace {
      * no longer in a kubeconfig.
      */
     private restoreTabs(): void {
+        // Turned off, the strip starts empty -- but the *order* is left on disk
+        // untouched, so switching restore back on brings back the session it
+        // was switched off during rather than nothing.
+        if (!this.settings.preferences.restoreTabs) {
+            this.tabs = [];
+            this.activeTabId = null;
+            return;
+        }
+
         const known = new Set(this.contexts.map((c) => c.id));
         this.tabs = this.settings.tabOrder
-            .filter((ref) => known.has(ref.contextId))
+            // The settings tab has no context, so it can never be "known" --
+            // it is kept on its own terms.
+            .filter((ref) => ref.kind === SETTINGS || known.has(ref.contextId))
             .map((ref) => ({
                 id: tabId(ref.contextId, ref.kind),
                 contextId: ref.contextId,
@@ -608,7 +719,7 @@ class Workspace {
                 title: ref.kind === DASHBOARD ? 'Dashboard' : labelFor(ref.kind),
             }));
         this.activeTabId = this.tabs[0]?.id ?? null;
-        if (this.tabs[0]) {
+        if (this.tabs[0] && !isSettingsTab(this.tabs[0])) {
             this.selectContext(this.tabs[0].contextId);
         }
     }
@@ -616,7 +727,9 @@ class Workspace {
     /** Drops tabs whose context disappeared from disk between syncs. */
     private dropTabsForMissingContexts(): void {
         const known = new Set(this.contexts.map((c) => c.id));
-        const kept = this.tabs.filter((t) => known.has(t.contextId));
+        // The settings tab survives every sync: it does not depend on a
+        // kubeconfig, so losing every cluster must not close it.
+        const kept = this.tabs.filter((t) => isSettingsTab(t) || known.has(t.contextId));
         if (kept.length === this.tabs.length) return;
 
         this.tabs = kept;
@@ -802,7 +915,11 @@ class Workspace {
         this.detailError = null;
     }
 
-    /** Moves the detail panel to another edge of the window. */
+    /**
+     * Moves the detail panel to another edge of the window. Called both by
+     * dragging the panel and by the settings view, which sets the edge the next
+     * panel will open on.
+     */
     setDock(side: DockSide): void {
         this.settings.layout.detailDock = side;
         this.persistLayout();
@@ -933,6 +1050,133 @@ class Workspace {
     setSidebarWidth(px: number): void {
         this.settings.layout.sidebarWidth = Math.round(px);
         this.persistLayout();
+    }
+
+    // ----- preferences ---------------------------------------------------
+
+    /**
+     * Starts tracking the OS appearance, and returns the teardown. Called from
+     * the shell on mount rather than from the store's constructor: the store is
+     * built at import time, which in the unit tests is a jsdom without
+     * matchMedia.
+     */
+    watchSystemTheme(): () => void {
+        if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+
+        const query = window.matchMedia('(prefers-color-scheme: dark)');
+        this.systemPrefersDark = query.matches;
+
+        const onChange = (event: MediaQueryListEvent) => {
+            this.systemPrefersDark = event.matches;
+        };
+        query.addEventListener('change', onChange);
+        return () => query.removeEventListener('change', onChange);
+    }
+
+    setTheme(theme: 'system' | 'light' | 'dark'): void {
+        this.updatePreferences({ theme });
+    }
+
+    setDensity(density: 'comfortable' | 'compact'): void {
+        this.updatePreferences({ density });
+    }
+
+    setFontSize(px: number): void {
+        this.updatePreferences({ fontSize: Math.round(Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, px))) });
+    }
+
+    setRestoreTabs(restoreTabs: boolean): void {
+        this.updatePreferences({ restoreTabs });
+    }
+
+    setConfirmSourceRemoval(confirmSourceRemoval: boolean): void {
+        this.updatePreferences({ confirmSourceRemoval });
+    }
+
+    /**
+     * Applies a change to the preference block and saves it. The UI updates
+     * first and the write is debounced, matching how the layout is persisted:
+     * the font size comes from a slider, so this is called on every step of a
+     * drag.
+     */
+    private updatePreferences(patch: Partial<Settings['preferences']>): void {
+        this.settings.preferences = { ...this.settings.preferences, ...patch };
+        this.persistPreferences();
+    }
+
+    private persistPreferences = debounce(() => {
+        SettingsService.SetPreferences($state.snapshot(this.settings.preferences))
+            .then((saved) => {
+                this.settings = adoptSettings(saved);
+            })
+            .catch((err: unknown) => this.fail(`Could not save preferences: ${message(err)}`));
+    }, 250);
+
+    // ----- layout defaults, as edited from the settings view --------------
+
+    /**
+     * Sets the folding every context follows unless it has an override of its
+     * own. Distinct from toggleGroup, which records a choice against one
+     * cluster -- this is the shared baseline behind all of them.
+     */
+    setDefaultCollapsedGroups(groups: string[]): void {
+        this.settings.layout.collapsedGroups = [...groups];
+        this.persistLayout();
+    }
+
+    /** Folds or unfolds one group in the shared default. */
+    toggleDefaultGroup(label: string): void {
+        this.setDefaultCollapsedGroups(toggled(this.collapsedGroups, label));
+    }
+
+    /** How many contexts have overridden the shared folding with their own. */
+    foldingOverrideCount = $derived(
+        Object.values(this.settings.contexts).filter((prefs) => prefs.collapsedGroups !== null).length,
+    );
+
+    /**
+     * Drops every context's folding override, returning all of them to the
+     * shared default.
+     *
+     * The writes are issued here rather than through setFoldingOverride, which
+     * looks like the obvious way to do it but is wrong: persistContextPrefs is
+     * one shared debounce, so a loop through it would send only the last
+     * context and leave every other override on disk to reappear on the next
+     * read. Each is awaited in turn instead, and only the last result is
+     * adopted -- every call returns the whole settings, so the final one is
+     * already the complete picture.
+     */
+    async clearAllFoldingOverrides(): Promise<void> {
+        const entries = Object.entries(this.settings.contexts).filter(
+            ([, prefs]) => prefs.collapsedGroups !== null,
+        );
+        if (entries.length === 0) return;
+
+        try {
+            let saved: appconfig.Settings | null = null;
+            for (const [id, prefs] of entries) {
+                // Matches setFoldingOverride: a context left with nothing set
+                // is forgotten rather than kept as an empty record.
+                const cleared = { alias: prefs.alias, color: prefs.color, collapsedGroups: null };
+                saved = await SettingsService.SetContextPrefs(id, cleared);
+            }
+            if (saved) this.settings = adoptSettings(saved);
+            this.inform(
+                `${entries.length} context${entries.length === 1 ? '' : 's'} now follow the default folding`,
+            );
+        } catch (err) {
+            this.fail(`Could not clear the folding overrides: ${message(err)}`);
+            await this.reloadSettings();
+        }
+    }
+
+    /** Re-reads the settings after a write that may have partly succeeded. */
+    private async reloadSettings(): Promise<void> {
+        try {
+            this.settings = adoptSettings(await SettingsService.Get());
+        } catch {
+            // Already reporting the failure that got us here.
+        }
     }
 
     private persistLayout = debounce(() => {

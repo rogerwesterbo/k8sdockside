@@ -6,7 +6,7 @@
 <script lang="ts">
     import { iconFor } from '../catalogue';
     import { alpha, textOn } from '../colors';
-    import { workspace } from '../state/workspace.svelte';
+    import { isSettingsTab, workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
 
     /** Index of the tab currently being dragged, or null when not dragging. */
@@ -14,7 +14,12 @@
 
     // The context name only earns space on a tab when tabs from more than one
     // context are open; otherwise the colour alone is enough.
-    let showContext = $derived(new Set(workspace.tabs.map((t) => t.contextId)).size > 1);
+    // Counted over cluster tabs only. The settings tab has no context, so
+    // including its empty id would make a strip showing one cluster plus
+    // settings look like two clusters and start labelling every tab.
+    let showContext = $derived(
+        new Set(workspace.tabs.filter((t) => !isSettingsTab(t)).map((t) => t.contextId)).size > 1,
+    );
 
     function contextName(contextId: string): string {
         const context = workspace.contexts.find((c) => c.id === contextId);
@@ -235,7 +240,7 @@
             role="tab"
             tabindex={active ? 0 : -1}
             aria-selected={active}
-            title="{tab.title} — {contextName(tab.contextId)}"
+            title={isSettingsTab(tab) ? 'Application settings' : `${tab.title} — ${contextName(tab.contextId)}`}
             draggable="true"
             style:--tab-bg={active ? color : alpha(color, 0.18)}
             style:--tab-fg={active ? textOn(color) : 'var(--text-dim)'}
@@ -251,7 +256,7 @@
         >
             <Icon name={iconFor(tab.kind)} size={14} />
             <span class="title">{tab.title}</span>
-            {#if showContext}
+            {#if showContext && !isSettingsTab(tab)}
                 <span class="context">{contextName(tab.contextId)}</span>
             {/if}
             <button

@@ -60,6 +60,52 @@ export interface Layout {
 }
 
 /**
+ * Preferences are the app-wide choices that belong to neither one context nor
+ * the window's arrangement: how the app looks, and what it does on its own
+ * without being asked. They are kept apart from Layout deliberately -- Layout
+ * is "where the user left the furniture", which is written on every splitter
+ * drag, while these are settings someone sat down and chose.
+ */
+export interface Preferences {
+    /**
+     * Theme is system, light or dark. Empty means system, which follows the
+     * OS. The frontend resolves it to a data-theme attribute; nothing here
+     * knows what a colour is.
+     */
+    "theme": string;
+
+    /**
+     * Density is comfortable or compact, and drives the table row height.
+     * Empty means comfortable.
+     */
+    "density": string;
+
+    /**
+     * FontSize is the root font size in px. 0 means the built-in default,
+     * which is what a file written before this field existed will read as.
+     */
+    "fontSize": number;
+
+    /**
+     * RestoreTabs reopens last session's tabs at launch.
+     * 
+     * Nullable for the same reason Layout.CollapsedGroups is, and it matters
+     * more here: the default is *true*, so a plain bool read from a settings
+     * file written before this field existed would unmarshal to false and
+     * silently stop restoring tabs for every existing user. Nil means "never
+     * chosen" and resolves to true; only an explicit false turns it off.
+     */
+    "restoreTabs": boolean | null;
+
+    /**
+     * ConfirmSourceRemoval asks before hiding a kubeconfig or dropping a
+     * watched folder. No pointer needed: false is what the app does today, so
+     * an older file reading as false is already correct.
+     */
+    "confirmSourceRemoval": boolean;
+}
+
+/**
  * Settings is the whole persisted file.
  */
 export interface Settings {
@@ -82,6 +128,7 @@ export interface Settings {
     "contexts": { [_ in string]?: ContextPrefs } | null;
     "tabOrder": TabRef[] | null;
     "layout": Layout;
+    "preferences": Preferences;
 }
 
 /**

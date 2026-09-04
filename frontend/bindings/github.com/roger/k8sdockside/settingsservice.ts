@@ -3,9 +3,10 @@
 
 /**
  * SettingsService exposes the persisted user preferences to the frontend: the
- * per-context alias and colour, the tab order, and the window layout. Every
- * mutator returns the full settings so the frontend can replace its state with
- * what actually reached disk rather than assuming its optimistic update stuck.
+ * per-context alias and colour, the tab order, the window layout, and the
+ * app-wide preferences the settings view edits. Every mutator returns the full
+ * settings so the frontend can replace its state with what actually reached
+ * disk rather than assuming its optimistic update stuck.
  * @module
  */
 
@@ -16,6 +17,19 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as appconfig$0 from "./internal/appconfig/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as $models from "./models.js";
+
+/**
+ * About reports what this build is. The values come from the binary's own
+ * build info rather than a constant, so a development build says so instead of
+ * claiming whatever number was last committed.
+ */
+export function About(): $CancellablePromise<$models.About> {
+    return $Call.ByID(159705297);
+}
 
 /**
  * ConfigPath is where the settings file lives, shown in the UI so the user can
@@ -33,6 +47,20 @@ export function Get(): $CancellablePromise<appconfig$0.Settings> {
 }
 
 /**
+ * RevealConfig opens the settings file in the platform's file manager with the
+ * file itself selected, which is the useful thing to offer next to a path the
+ * user cannot click. The path comes from the store rather than the frontend so
+ * that nothing the webview says can decide what gets opened.
+ * 
+ * Nothing may have been saved yet -- Open deliberately creates no file -- so a
+ * missing one falls back to its directory rather than failing. That is still
+ * the answer to "where does this live?", which is what was asked.
+ */
+export function RevealConfig(): $CancellablePromise<void> {
+    return $Call.ByID(2343047891);
+}
+
+/**
  * SetContextPrefs saves the display name and colour for one context. Clearing
  * both fields resets the context to its defaults.
  */
@@ -45,6 +73,15 @@ export function SetContextPrefs(id: string, prefs: appconfig$0.ContextPrefs): $C
  */
 export function SetLayout(layout: appconfig$0.Layout): $CancellablePromise<appconfig$0.Settings> {
     return $Call.ByID(1286510778, layout);
+}
+
+/**
+ * SetPreferences saves the app-wide preferences: theme, density, font size,
+ * whether tabs are restored at launch, and whether removing a kubeconfig
+ * source asks first.
+ */
+export function SetPreferences(prefs: appconfig$0.Preferences): $CancellablePromise<appconfig$0.Settings> {
+    return $Call.ByID(357209814, prefs);
 }
 
 /**

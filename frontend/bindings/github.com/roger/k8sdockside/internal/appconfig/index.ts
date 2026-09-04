@@ -4,6 +4,7 @@
 export type {
     ContextPrefs,
     Layout,
+    Preferences,
     Settings,
     TabRef
 } from "./models.js";

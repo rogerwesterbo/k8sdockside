@@ -6,6 +6,18 @@
 export const DASHBOARD = 'dashboard';
 
 /**
+ * The app-wide settings view, which opens as a tab like any other but belongs
+ * to no cluster. It is a sentinel kind for the same reason DASHBOARD is: the
+ * tab machinery already keys everything off `kind`, and a second concept of
+ * "special tab" would have to be threaded through all of it.
+ *
+ * Its tabs carry an empty contextId, which the workspace guards for -- see
+ * isSettingsTab there. The value is namespaced so it can never collide with a
+ * resource kind coming back from the cluster.
+ */
+export const SETTINGS = '__settings__';
+
+/**
  * Helm releases: a kind the sidebar offers that no Kubernetes API serves. It is
  * read from Helm's own release Secrets rather than watched, so the few places
  * that have to know the difference name it from here.
@@ -223,6 +235,8 @@ export function groupForKind(kind: string): string | null {
  * without asking the cluster -- the CRD's own display kind lives on the server.
  */
 export function labelFor(kind: string): string {
+    if (kind === SETTINGS) return 'Settings';
+
     const known = BY_KIND.get(kind);
     if (known) return known.label;
 
@@ -234,6 +248,8 @@ export function labelFor(kind: string): string {
 
 /** The icon name for a kind. Custom resources all share one. */
 export function iconFor(kind: string): string {
+    if (kind === SETTINGS) return 'settings';
+
     const known = BY_KIND.get(kind);
     if (known) return known.icon;
     return parseCustomKind(kind) ? 'puzzle' : 'box';

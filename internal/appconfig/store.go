@@ -61,6 +61,36 @@ type Layout struct {
 	CollapsedGroups []string `json:"collapsedGroups"`
 }
 
+// Preferences are the app-wide choices that belong to neither one context nor
+// the window's arrangement: how the app looks, and what it does on its own
+// without being asked. They are kept apart from Layout deliberately -- Layout
+// is "where the user left the furniture", which is written on every splitter
+// drag, while these are settings someone sat down and chose.
+type Preferences struct {
+	// Theme is system, light or dark. Empty means system, which follows the
+	// OS. The frontend resolves it to a data-theme attribute; nothing here
+	// knows what a colour is.
+	Theme string `json:"theme"`
+	// Density is comfortable or compact, and drives the table row height.
+	// Empty means comfortable.
+	Density string `json:"density"`
+	// FontSize is the root font size in px. 0 means the built-in default,
+	// which is what a file written before this field existed will read as.
+	FontSize int `json:"fontSize"`
+	// RestoreTabs reopens last session's tabs at launch.
+	//
+	// Nullable for the same reason Layout.CollapsedGroups is, and it matters
+	// more here: the default is *true*, so a plain bool read from a settings
+	// file written before this field existed would unmarshal to false and
+	// silently stop restoring tabs for every existing user. Nil means "never
+	// chosen" and resolves to true; only an explicit false turns it off.
+	RestoreTabs *bool `json:"restoreTabs"`
+	// ConfirmSourceRemoval asks before hiding a kubeconfig or dropping a
+	// watched folder. No pointer needed: false is what the app does today, so
+	// an older file reading as false is already correct.
+	ConfirmSourceRemoval bool `json:"confirmSourceRemoval"`
+}
+
 // Settings is the whole persisted file.
 type Settings struct {
 	ManualFiles []string `json:"manualFiles"`
@@ -76,6 +106,7 @@ type Settings struct {
 	Contexts      map[string]ContextPrefs `json:"contexts"`
 	TabOrder      []TabRef                `json:"tabOrder"`
 	Layout        Layout                  `json:"layout"`
+	Preferences   Preferences             `json:"preferences"`
 }
 
 // Defaults returns a settings value that is safe to use before anything has
@@ -88,6 +119,7 @@ func Defaults() Settings {
 		Contexts:      map[string]ContextPrefs{},
 		TabOrder:      []TabRef{},
 		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
+		Preferences:   Preferences{Theme: ThemeSystem, Density: DensityComfortable, FontSize: DefaultFontSize},
 	}
 }
 
@@ -98,6 +130,29 @@ func Defaults() Settings {
 const (
 	MinZoom = 0.5
 	MaxZoom = 2.0
+)
+
+// The values Preferences.Theme and Preferences.Density may take. They are
+// strings rather than an enum so the settings file stays readable and so an
+// unknown value from a hand-edited file normalises back to the default instead
+// of failing to parse.
+const (
+	ThemeSystem = "system"
+	ThemeLight  = "light"
+	ThemeDark   = "dark"
+
+	DensityComfortable = "comfortable"
+	DensityCompact     = "compact"
+)
+
+// The root font size may be set between these, in px. The floor is where the
+// sidebar's context names stop being readable; above the ceiling a table row
+// no longer fits its own height. DefaultFontSize matches the value in the
+// frontend's style.css.
+const (
+	MinFontSize     = 11
+	MaxFontSize     = 18
+	DefaultFontSize = 13
 )
 
 // Store is the settings file plus the lock guarding it. Wails calls service
@@ -297,6 +352,22 @@ func (s *Store) SetLayout(l Layout) (Settings, error) {
 	return s.update(func(d *Settings) { d.Layout = l })
 }
 
+// SetPreferences records the app-wide preferences. It replaces the block
+// wholesale rather than patching one field, matching SetLayout: the settings
+// view edits them together and hands back the whole thing, so a partial
+// mutator would only add a way for the two to disagree.
+func (s *Store) SetPreferences(p Preferences) (Settings, error) {
+	return s.update(func(d *Settings) {
+		// Copied on the way in for the same reason clone copies it on the way
+		// out: the caller's pointer must not become the store's.
+		if p.RestoreTabs != nil {
+			restore := *p.RestoreTabs
+			p.RestoreTabs = &restore
+		}
+		d.Preferences = p
+	})
+}
+
 // SetTabOrder records the order the user dragged their tabs into.
 func (s *Store) SetTabOrder(order []TabRef) (Settings, error) {
 	return s.update(func(d *Settings) { d.TabOrder = slices.Clone(order) })
@@ -394,6 +465,25 @@ func normalise(s Settings) Settings {
 	if s.Layout.Zoom < MinZoom || s.Layout.Zoom > MaxZoom {
 		s.Layout.Zoom = d.Zoom
 	}
+
+	p := Defaults().Preferences
+	switch s.Preferences.Theme {
+	case ThemeSystem, ThemeLight, ThemeDark:
+	default:
+		s.Preferences.Theme = p.Theme
+	}
+	switch s.Preferences.Density {
+	case DensityComfortable, DensityCompact:
+	default:
+		s.Preferences.Density = p.Density
+	}
+	// Catches both a file written before this field existed, which reads as 0,
+	// and a hand-edited one asking for something unreadable.
+	if s.Preferences.FontSize < MinFontSize || s.Preferences.FontSize > MaxFontSize {
+		s.Preferences.FontSize = p.FontSize
+	}
+	// RestoreTabs is deliberately not defaulted: nil is a value in its own
+	// right here, meaning "never chosen", and the frontend resolves it to true.
 	return s
 }
 
@@ -405,6 +495,12 @@ func clone(s Settings) Settings {
 	out.TabOrder = slices.Clone(s.TabOrder)
 	// slices.Clone keeps nil as nil, which is what preserves "never chosen".
 	out.Layout.CollapsedGroups = slices.Clone(s.Layout.CollapsedGroups)
+	// A copy of the struct shares the pointer; the whole point of clone is that
+	// a caller holding the result cannot reach back into the store.
+	if s.Preferences.RestoreTabs != nil {
+		restore := *s.Preferences.RestoreTabs
+		out.Preferences.RestoreTabs = &restore
+	}
 	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
 	for k, v := range s.Contexts {
 		v.CollapsedGroups = slices.Clone(v.CollapsedGroups)

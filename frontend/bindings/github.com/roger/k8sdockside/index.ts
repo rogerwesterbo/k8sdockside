@@ -9,3 +9,7 @@ export {
     ResourceService,
     SettingsService
 };
+
+export type {
+    About
+} from "./models.js";

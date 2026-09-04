@@ -85,6 +85,18 @@
         >
             <Icon name="folder-plus" size={15} />
         </button>
+
+        <!-- Separated from the kubeconfig controls beside it: those act on the
+             list below, this opens a view of its own. -->
+        <span class="divider"></span>
+        <button
+            class="action"
+            onclick={() => workspace.openSettings()}
+            title="Application settings (⌘,)"
+            aria-label="Application settings"
+        >
+            <Icon name="settings" size={15} />
+        </button>
     </header>
 
     {#if total > 6}

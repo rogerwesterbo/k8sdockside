@@ -12,6 +12,9 @@
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 
+/** The root font size, matching appconfig.DefaultFontSize and style.css. */
+const DEFAULT_FONT_SIZE = 13;
+
 /** A kubeconfig file and the contexts parsed out of it. */
 export interface ConfigFile {
     path: string;
@@ -27,6 +30,19 @@ export interface Settings {
     excludedFiles: string[];
     contexts: Record<string, { alias: string; color: string; collapsedGroups: string[] | null }>;
     tabOrder: { contextId: string; kind: string }[];
+    /**
+     * The app-wide preferences the settings view edits. Unlike `layout`, every
+     * field here is resolved: `restoreTabs` arrives nullable from Go and is
+     * settled to a boolean on the way in, because "never chosen" is a storage
+     * concern and nothing downstream should have to know about it.
+     */
+    preferences: {
+        theme: 'system' | 'light' | 'dark';
+        density: 'comfortable' | 'compact';
+        fontSize: number;
+        restoreTabs: boolean;
+        confirmSourceRemoval: boolean;
+    };
     layout: {
         detailDock: string;
         detailSize: number;
@@ -85,6 +101,17 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             ]),
         ),
         tabOrder: (settings.tabOrder ?? []).map((tab) => ({ contextId: tab.contextId, kind: tab.kind })),
+        preferences: {
+            // The store normalises these, so the fallbacks only cover a
+            // service call that failed before it reached the store.
+            theme: (settings.preferences?.theme || 'system') as 'system' | 'light' | 'dark',
+            density: (settings.preferences?.density || 'comfortable') as 'comfortable' | 'compact',
+            fontSize: settings.preferences?.fontSize || DEFAULT_FONT_SIZE,
+            // null is "never chosen", and the default is on. `??` rather than
+            // `||`: an explicit false is a choice and must survive.
+            restoreTabs: settings.preferences?.restoreTabs ?? true,
+            confirmSourceRemoval: settings.preferences?.confirmSourceRemoval ?? false,
+        },
         layout: {
             ...settings.layout,
             // Preserved as null rather than defaulted to []: the two mean

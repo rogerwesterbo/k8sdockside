@@ -18,10 +18,13 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         ConfigPath: vi.fn().mockResolvedValue(''),
         SetTabOrder: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
+        SetPreferences: vi.fn().mockResolvedValue({}),
+        SetContextPrefs: vi.fn().mockResolvedValue({}),
     },
 }));
 
-const { workspace } = await import('./workspace.svelte');
+const { workspace, isSettingsTab } = await import('./workspace.svelte');
+const { SETTINGS } = await import('../catalogue');
 const { ResourceService, KubeconfigService } = await import('../../../bindings/github.com/roger/k8sdockside');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
@@ -947,5 +950,222 @@ describe('clicking a context name', () => {
 
         expect(workspace.isExpanded(PROD)).toBe(true);
         expect(workspace.selectedContextId).toBe(PROD);
+    });
+});
+
+describe('the settings tab', () => {
+    /** One context on disk, so the sync-driven pruning has something to keep. */
+    function seedProd(): void {
+        workspace.files = [
+            {
+                path: '/home/u/.kube/prod',
+                source: 'manual',
+                error: '',
+                contexts: [
+                    {
+                        id: PROD,
+                        name: 'admin@prod',
+                        cluster: 'prod',
+                        user: 'admin',
+                        namespace: '',
+                        server: '',
+                        file: '/home/u/.kube/prod',
+                        current: false,
+                    },
+                ],
+            },
+        ];
+    }
+
+    beforeEach(() => {
+        workspace.files = [];
+    });
+
+    test('opens once, however many times it is asked for', () => {
+        workspace.openSettings();
+        workspace.openSettings();
+
+        expect(workspace.tabs.filter((t) => t.kind === SETTINGS)).toHaveLength(1);
+        expect(workspace.activeTab?.kind).toBe(SETTINGS);
+    });
+
+    test('goes to the end of the strip rather than beside the current tab', () => {
+        open([PROD, 'pods'], [PROD, 'nodes']);
+        workspace.activateTab(workspace.tabs[0].id);
+
+        workspace.openSettings();
+
+        expect(workspace.tabs.at(-1)?.kind).toBe(SETTINGS);
+    });
+
+    test('carries no context, so it is not painted as a cluster', () => {
+        workspace.openSettings();
+        const tab = workspace.tabs.find((t) => t.kind === SETTINGS);
+
+        expect(tab?.contextId).toBe('');
+        expect(isSettingsTab(tab!)).toBe(true);
+        // Distinct from what any real context would be given.
+        expect(workspace.colorOf('')).not.toBe(workspace.colorOf(PROD));
+    });
+
+    test('activating it leaves the sidebar on the context it was showing', () => {
+        seedProd();
+        open([PROD, 'pods']);
+        expect(workspace.selectedContextId).toBe(PROD);
+
+        workspace.openSettings();
+
+        expect(workspace.activeTab?.kind).toBe(SETTINGS);
+        expect(workspace.selectedContextId).toBe(PROD);
+    });
+
+    test('survives a sync that drops every cluster', async () => {
+        seedProd();
+        open([PROD, 'pods']);
+        workspace.openSettings();
+
+        // Every kubeconfig has gone.
+        vi.mocked(KubeconfigService.Sync).mockResolvedValueOnce([]);
+        await workspace.sync();
+
+        expect(workspace.tabs.map((t) => t.kind)).toEqual([SETTINGS]);
+    });
+
+    test('closes with "close all tabs", but not with a context-scoped close', () => {
+        seedProd();
+        open([PROD, 'pods']);
+        workspace.openSettings();
+
+        workspace.closeAllTabs(PROD);
+        expect(workspace.tabs.map((t) => t.kind)).toEqual([SETTINGS]);
+
+        workspace.closeAllTabs();
+        expect(workspace.tabs).toHaveLength(0);
+    });
+});
+
+describe('preferences', () => {
+    beforeEach(() => {
+        workspace.settings.preferences = {
+            theme: 'system',
+            density: 'comfortable',
+            fontSize: 13,
+            restoreTabs: true,
+            confirmSourceRemoval: false,
+        };
+    });
+
+    test('a chosen theme is used as-is', () => {
+        workspace.setTheme('light');
+        expect(workspace.resolvedTheme).toBe('light');
+
+        workspace.setTheme('dark');
+        expect(workspace.resolvedTheme).toBe('dark');
+    });
+
+    test('system follows what the OS is asking for', () => {
+        workspace.setTheme('system');
+
+        workspace.systemPrefersDark = true;
+        expect(workspace.resolvedTheme).toBe('dark');
+
+        workspace.systemPrefersDark = false;
+        expect(workspace.resolvedTheme).toBe('light');
+    });
+
+    test('a chosen theme ignores the OS', () => {
+        workspace.setTheme('light');
+        workspace.systemPrefersDark = true;
+
+        expect(workspace.resolvedTheme).toBe('light');
+    });
+
+    test('the font size is clamped to what stays readable', () => {
+        workspace.setFontSize(2);
+        expect(workspace.fontSize).toBe(11);
+
+        workspace.setFontSize(400);
+        expect(workspace.fontSize).toBe(18);
+    });
+
+    test('turning tab restore off is a choice that sticks', () => {
+        workspace.setRestoreTabs(false);
+        // `??` rather than `||` on the way in: false must not read as unset.
+        expect(workspace.restoreTabsOnLaunch).toBe(false);
+    });
+});
+
+describe('restoring tabs at launch', () => {
+    beforeEach(() => {
+        workspace.files = [
+            {
+                path: '/home/u/.kube/prod',
+                source: 'manual',
+                error: '',
+                contexts: [
+                    {
+                        id: PROD,
+                        name: 'admin@prod',
+                        cluster: 'prod',
+                        user: 'admin',
+                        namespace: '',
+                        server: '',
+                        file: '/home/u/.kube/prod',
+                        current: false,
+                    },
+                ],
+            },
+        ];
+        vi.mocked(KubeconfigService.Sync).mockResolvedValue(workspace.files);
+    });
+
+    test('reopens last session, settings tab included', async () => {
+        workspace.settings.tabOrder = [
+            { contextId: PROD, kind: 'pods' },
+            { contextId: '', kind: SETTINGS },
+        ];
+        workspace.settings.preferences.restoreTabs = true;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.tabs.map((t) => t.kind)).toEqual(['pods', SETTINGS]);
+    });
+
+    test('drops a remembered tab whose cluster has gone, but keeps settings', async () => {
+        workspace.settings.tabOrder = [
+            { contextId: STAGING, kind: 'pods' },
+            { contextId: '', kind: SETTINGS },
+        ];
+        workspace.settings.preferences.restoreTabs = true;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.tabs.map((t) => t.kind)).toEqual([SETTINGS]);
+    });
+
+    test('turned off, it starts empty but leaves the remembered order alone', async () => {
+        const order = [{ contextId: PROD, kind: 'pods' }];
+        workspace.settings.tabOrder = order;
+        workspace.settings.preferences.restoreTabs = false;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.tabs).toHaveLength(0);
+        // The order is what turning it back on has to restore, so the launch
+        // that skipped it must not have overwritten it.
+        expect(workspace.settings.tabOrder).toEqual(order);
+    });
+
+    test('a settings tab restored first does not select a context', async () => {
+        workspace.settings.tabOrder = [{ contextId: '', kind: SETTINGS }];
+        workspace.settings.preferences.restoreTabs = true;
+        workspace.selectedContextId = null;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.activeTab?.kind).toBe(SETTINGS);
+        // ensureSelection may still pick one for the sidebar; what must not
+        // happen is the settings tab claiming the empty id as a context.
+        expect(workspace.selectedContextId).not.toBe('');
     });
 });
