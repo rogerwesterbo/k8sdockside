@@ -5,12 +5,13 @@
 -->
 <script lang="ts">
     import { fly } from 'svelte/transition';
-    import { HELM_RELEASES, singularFor } from '../catalogue';
+    import { singularFor } from '../catalogue';
     import { alpha } from '../colors';
     import { changes } from '../state/changes.svelte';
     import { workspace, type DockSide } from '../state/workspace.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
+    import ObjectActions from './ObjectActions.svelte';
 
     const DOCKS: { side: DockSide; icon: string; label: string }[] = [
         { side: 'left', icon: 'dock-left', label: 'Dock left' },
@@ -23,14 +24,6 @@
     let target = $derived(workspace.detailTarget);
     let dock = $derived(workspace.dock);
     let color = $derived(target ? workspace.colorOf(target.contextId) : 'var(--accent)');
-    /**
-     * Helm releases are the one thing listed here that is not a Kubernetes
-     * object: they are Secrets the backend decodes, so there is nothing to open
-     * an editor on -- editing the release means editing the chart's values,
-     * which is Helm's job and not this panel's.
-     */
-    let editable = $derived(target !== null && target.kind !== HELM_RELEASES);
-
     /**
      * Keeps the report level with the object.
      *
@@ -146,17 +139,6 @@
             </div>
 
             <div class="controls">
-                {#if editable}
-                    <!-- The way in to editing: the panel says what the object
-                         is, and this opens the same object as YAML in the dock
-                         at the foot of the window, where it stays while you
-                         carry on looking around. -->
-                    <button class="edit" onclick={() => workspace.openEditor(target)} title="Edit this object as YAML">
-                        <Icon name="edit" size={13} />
-                        Edit
-                    </button>
-                {/if}
-
                 <div class="docks" role="group" aria-label="Panel position">
                     {#each DOCKS as option (option.side)}
                         <button
@@ -175,6 +157,11 @@
                 </button>
             </div>
         </header>
+
+        <!-- What can be done to the object, under the line that says what it
+             is. Editing lives here too: it is an action like the rest, and the
+             header was doing identity, editing and window management at once. -->
+        <ObjectActions object={target} />
 
         <div class="body">
             {#if workspace.detailLoading}
@@ -323,23 +310,6 @@
     .docks button.on {
         color: var(--text);
         background: var(--bg-active);
-    }
-
-    .edit {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        height: 24px;
-        padding: 0 10px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-raised);
-        box-shadow: inset 0 0 0 1px var(--border);
-        font-size: 12px;
-        color: var(--text);
-    }
-
-    .edit:hover {
-        background: var(--bg-hover);
     }
 
     .close {

@@ -12,6 +12,7 @@ import type * as kube$0 from "../../../../roger/k8sdockside/internal/kube/models
 declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
+            "node:drain": kube$0.DrainProgress;
             "resource:snapshot": kube$0.Snapshot;
         }
     }

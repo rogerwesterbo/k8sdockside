@@ -10,6 +10,15 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         ResourceYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
     },
+    ActionService: {
+        ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false }),
+        Delete: vi.fn().mockResolvedValue(undefined),
+        Scale: vi.fn().mockResolvedValue(undefined),
+        Restart: vi.fn().mockResolvedValue(undefined),
+        Cordon: vi.fn().mockResolvedValue(undefined),
+        Drain: vi.fn().mockResolvedValue('drain-1'),
+        CancelDrain: vi.fn(),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),

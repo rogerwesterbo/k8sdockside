@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main starts the app: it opens the settings file, wires up the three services
+// main starts the app: it opens the settings file, wires up the four services
 // the frontend calls, and shows the main window.
 func main() {
 	// The settings store holds the user's kubeconfig paths, context aliases and
@@ -28,6 +28,10 @@ func main() {
 	}
 
 	configs := NewKubeconfigService(settings)
+	// The action service borrows the resource service's watcher rather than
+	// opening its own: acting on an object in a context already showing in a
+	// tab should cost no second connection and no second credential exec.
+	resources := NewResourceService(configs)
 
 	app := application.New(application.Options{
 		Name:        "k8sdockside",
@@ -35,7 +39,8 @@ func main() {
 		Services: []application.Service{
 			application.NewService(configs),
 			application.NewService(NewSettingsService(settings)),
-			application.NewService(NewResourceService(configs)),
+			application.NewService(resources),
+			application.NewService(NewActionService(configs, resources.watcher)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

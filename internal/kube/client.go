@@ -10,6 +10,7 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -38,9 +39,13 @@ const callTimeout = 20 * time.Second
 // kinds the UI names into the resources this particular server actually serves.
 type clusterClient struct {
 	dynamic dynamic.Interface
-	mapper  meta.ResettableRESTMapper
-	disco   discovery.CachedDiscoveryInterface
-	host    string
+	// typed serves the one thing the dynamic client cannot reach: the Eviction
+	// API a drain goes through, which is a subresource create with a body of
+	// its own rather than a write to a resource.
+	typed  kubernetes.Interface
+	mapper meta.ResettableRESTMapper
+	disco  discovery.CachedDiscoveryInterface
+	host   string
 }
 
 // newClusterClient builds the live clients for one kubeconfig context.
@@ -71,6 +76,11 @@ func newClusterClient(kc Context) (*clusterClient, error) {
 		return nil, fmt.Errorf("dynamic client for context %q: %w", kc.Name, err)
 	}
 
+	typed, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("client for context %q: %w", kc.Name, err)
+	}
+
 	disco, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("discovery client for context %q: %w", kc.Name, err)
@@ -79,6 +89,7 @@ func newClusterClient(kc Context) (*clusterClient, error) {
 
 	return &clusterClient{
 		dynamic: dyn,
+		typed:   typed,
 		mapper:  restmapper.NewDeferredDiscoveryRESTMapper(cached),
 		disco:   cached,
 		host:    cfg.Host,

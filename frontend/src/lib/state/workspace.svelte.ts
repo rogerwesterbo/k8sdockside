@@ -1634,7 +1634,12 @@ class Workspace {
 
     // ----- notices -------------------------------------------------------
 
-    private fail(text: string): void {
+    /**
+     * Reports something that went wrong, in the words of whatever refused it.
+     * Public because an action's refusal -- an API server saying which verb on
+     * which resource was denied -- is reported by the component that asked.
+     */
+    fail(text: string): void {
         this.notice = { text, tone: 'error' };
     }
 

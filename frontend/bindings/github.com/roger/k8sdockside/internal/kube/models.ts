@@ -65,6 +65,24 @@ export interface CustomResourceKind {
 }
 
 /**
+ * DrainProgress is one report from a drain in flight.
+ */
+export interface DrainProgress {
+    "drainId": string;
+    "node": string;
+
+    /**
+     * Phase is "cordoning", "planning", "evicting", "done" or "failed".
+     */
+    "phase": string;
+    "evicted": number;
+    "total": number;
+    "refused": Refusal[] | null;
+    "error": string;
+    "done": boolean;
+}
+
+/**
  * File is a kubeconfig file on disk together with the contexts parsed out of
  * it. A file that failed to parse is still returned, with Error set, so the
  * sidebar can show it as broken rather than silently dropping it.
@@ -84,6 +102,25 @@ export interface Gauge {
     "used": number;
     "capacity": number;
     "unit": string;
+}
+
+/**
+ * ObjectState is what the action bar needs to know about an object beyond its
+ * name: which of its buttons apply, and what they should start from.
+ */
+export interface ObjectState {
+    /**
+     * Scalable reports whether the object carries a replica count. The
+     * workloads that have one are exactly the ones worth offering Scale for.
+     */
+    "scalable": boolean;
+    "replicas": number;
+
+    /**
+     * Cordoned is a node's spec.unschedulable, which decides whether its button
+     * offers to cordon or to uncordon.
+     */
+    "cordoned": boolean;
 }
 
 /**
@@ -107,6 +144,24 @@ export interface Overview {
      */
     "events": Table;
     "error": string;
+}
+
+/**
+ * PodRef names one pod. Namespace and name, because that is all an eviction
+ * needs and all the panel shows.
+ */
+export interface PodRef {
+    "namespace": string;
+    "name": string;
+}
+
+/**
+ * Refusal is a pod the drain would not move, and why. It is reported rather
+ * than acted on: the reasons are the ones kubectl needs a second flag for.
+ */
+export interface Refusal {
+    "pod": PodRef;
+    "reason": string;
 }
 
 /**
