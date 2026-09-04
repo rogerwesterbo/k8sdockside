@@ -134,6 +134,38 @@ func (s *ResourceService) Describe(contextID, kind, namespace, name string) (str
 	return s.watcher.Describe(ctx, kind, namespace, name)
 }
 
+// ResourceYAML returns one object as the YAML the editor opens with. It is a
+// live read rather than the informer's copy: the cache drops managed fields and
+// redacts secret values, and an editor must open on the object rather than on
+// the table's view of it.
+func (s *ResourceService) ResourceYAML(contextID, kind, namespace, name string) (string, error) {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return "", err
+	}
+	return s.watcher.ResourceYAML(ctx, kind, namespace, name)
+}
+
+// ApplyYAML writes an edited object back to the cluster and returns it as the
+// server left it -- with the resourceVersion the next save will be checked
+// against, and whatever defaulting and admission control did to it on the way
+// in. The editor replaces its contents with the result, which is what makes a
+// second save work rather than fail as a conflict.
+func (s *ResourceService) ApplyYAML(contextID, kind, namespace, name, yaml string) (string, error) {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return "", err
+	}
+	return s.watcher.ApplyYAML(ctx, kind, namespace, name, yaml)
+}
+
+// CheckYAML reports whether what is in the editor is still YAML. It touches no
+// cluster: it is called as the user types, and the only question it answers is
+// whether the document parses.
+func (s *ResourceService) CheckYAML(yaml string) kube.YAMLCheck {
+	return kube.ValidateYAML(yaml)
+}
+
 // Namespaces lists the namespaces available for the namespace filter.
 func (s *ResourceService) Namespaces(contextID string) ([]string, error) {
 	ctx, err := s.resolve(contextID)

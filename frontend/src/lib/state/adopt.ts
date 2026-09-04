@@ -28,6 +28,15 @@ export interface Settings {
     contexts: Record<string, { alias: string; color: string; collapsedGroups: string[] | null }>;
     tabOrder: { contextId: string; kind: string }[];
     /**
+     * The bottom dock: what it has open, whether it is showing it, and how tall
+     * it stands. One record with one writer -- see appconfig.Dock for why.
+     */
+    dock: {
+        open: boolean;
+        size: number;
+        tabs: { type: string; contextId: string; kind: string; namespace: string; name: string }[];
+    };
+    /**
      * The app-wide preferences the settings view edits. Unlike `layout`, every
      * field here is resolved: `restoreTabs` arrives nullable from Go and is
      * settled to a boolean on the way in, because "never chosen" is a storage
@@ -39,6 +48,7 @@ export interface Settings {
         restoreTabs: boolean;
         confirmSourceRemoval: boolean;
         showKubeconfigNames: boolean;
+        showLineNumbers: boolean;
     };
     layout: {
         detailDock: string;
@@ -98,6 +108,19 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             ]),
         ),
         tabOrder: (settings.tabOrder ?? []).map((tab) => ({ contextId: tab.contextId, kind: tab.kind })),
+        dock: {
+            // Closed until an editor is opened, which is what an older file
+            // reads as too.
+            open: settings.dock?.open ?? false,
+            size: settings.dock?.size || 320,
+            tabs: (settings.dock?.tabs ?? []).map((tab) => ({
+                type: tab.type,
+                contextId: tab.contextId,
+                kind: tab.kind,
+                namespace: tab.namespace,
+                name: tab.name,
+            })),
+        },
         preferences: {
             // The store normalises these, so the fallbacks only cover a
             // service call that failed before it reached the store.
@@ -110,6 +133,9 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // Off by default: most people keep every context in one
             // ~/.kube/config, where a heading per file only repeats itself.
             showKubeconfigNames: settings.preferences?.showKubeconfigNames ?? false,
+            // On by default, and nullable on the Go side for exactly that
+            // reason -- see RestoreTabs above.
+            showLineNumbers: settings.preferences?.showLineNumbers ?? true,
         },
         layout: {
             ...settings.layout,

@@ -84,6 +84,15 @@
         ],
         folder: ['M3 7a1 1 0 0 1 1-1h5l2 2.5h8a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z'],
         close: ['M6.5 6.5l11 11', 'M17.5 6.5l-11 11'],
+        // A small disc: an editor holding changes that are not in the cluster.
+        // Drawn as a circle of almost no radius and filled out by the stroke,
+        // so it stays a single-stroke glyph like everything else here.
+        dot: ['M12 10.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z'],
+        // A pencil: edit this object.
+        edit: ['M4 20h4L18.5 9.5a2.83 2.83 0 0 0-4-4L4 16v4z', 'M13.5 6.5l4 4'],
+        // A floppy disk, which is still what "save" looks like.
+        save: ['M5 4h11l3 3v13H5z', 'M8.5 4v5h6.5V4', 'M8 20v-6h8v6'],
+        'chevron-up': ['M6 14.5l6-6 6 6'],
         alert: ['M12 3.5l9.5 17h-19l9.5-17z', 'M12 9.5v4.5', 'M12 17.5h.01'],
         file: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z', 'M14 3v5h5'],
         search: ['M11 4.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13z', 'M20 20l-4.4-4.4'],

@@ -1,0 +1,131 @@
+import { beforeEach, expect, test, vi } from 'vitest';
+import { page } from 'vitest/browser';
+import { render } from 'vitest-browser-svelte';
+import Dock from './Dock.svelte';
+
+vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+    KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
+    ResourceService: {
+        Describe: vi.fn().mockResolvedValue(''),
+        ResourceYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
+        ApplyYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
+        CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
+    },
+    SettingsService: {
+        Get: vi.fn().mockResolvedValue({}),
+        ConfigPath: vi.fn().mockResolvedValue(''),
+        SetContextPrefs: vi.fn().mockResolvedValue({}),
+        SetTabOrder: vi.fn().mockResolvedValue({}),
+        SetDock: vi.fn().mockResolvedValue({}),
+        SetLayout: vi.fn().mockResolvedValue({}),
+        SetPreferences: vi.fn().mockResolvedValue({}),
+    },
+}));
+
+const { workspace } = await import('../state/workspace.svelte');
+
+const PROD = '/home/u/.kube/prod::admin@prod';
+const STAGING = '/home/u/.kube/staging::admin@staging';
+
+/** Gives the contexts real names, so the tabs and menu can label them. */
+function withClusters(): void {
+    workspace.files = [
+        {
+            path: '/home/u/.kube/prod',
+            source: 'manual',
+            error: '',
+            contexts: [{ id: PROD, name: 'admin@prod' } as never],
+        },
+        {
+            path: '/home/u/.kube/staging',
+            source: 'manual',
+            error: '',
+            contexts: [{ id: STAGING, name: 'admin@staging' } as never],
+        },
+    ];
+}
+
+function object(contextId: string, name: string) {
+    return { contextId, kind: 'pods', namespace: 'default', name };
+}
+
+/** Right-click, dispatched so the menu's coordinates are ours to name. */
+function rightClick(element: Element): void {
+    element.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 40 }),
+    );
+}
+
+beforeEach(() => {
+    workspace.closeAllDockTabs();
+    workspace.settings.dock.open = false;
+    withClusters();
+});
+
+// The whole point of a dock: it is a place things go, and a place has to be
+// there before anything is in it.
+test('the strip is on screen with nothing open, and says what it is for', async () => {
+    render(Dock);
+
+    await expect.element(page.getByRole('tablist', { name: 'Dock' })).toBeVisible();
+    await expect.element(page.getByText(/Edit in the details panel/)).toBeVisible();
+});
+
+test('an object opened for editing becomes a tab named after it', async () => {
+    render(Dock);
+
+    workspace.openEditor(object(PROD, 'web'));
+
+    const tab = page.getByRole('tab', { name: /web/ });
+    await expect.element(tab).toBeVisible();
+    // Every dock tab names its cluster: an object's name does not say which
+    // cluster it is in, and that is the mistake worth spending the space on.
+    await expect.element(page.getByRole('tab', { name: /admin@prod/ })).toBeVisible();
+    await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
+});
+
+test('folding the dock keeps the tabs and gives the room back', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    await expect.element(page.getByRole('textbox')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Hide the dock' }).click();
+
+    // Polled rather than read straight after the click: the click resolves
+    // when the event is dispatched, not when Svelte has finished with it.
+    await expect.poll(() => page.getByRole('textbox').elements()).toHaveLength(0);
+    await expect.element(page.getByRole('tab', { name: /web/ })).toBeVisible();
+});
+
+test('closing the last tab leaves the strip and its hint behind', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    await expect.element(page.getByRole('tab', { name: /web/ })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Close web' }).click();
+
+    await expect.element(page.getByText(/Edit in the details panel/)).toBeVisible();
+    await expect.element(page.getByRole('tablist', { name: 'Dock' })).toBeVisible();
+});
+
+test('the cluster-scoped menu items appear once two clusters are open here', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    workspace.openEditor(object(STAGING, 'api'));
+    await expect.element(page.getByRole('tab', { name: /api/ })).toBeVisible();
+
+    rightClick(await page.getByRole('tab', { name: /api/ }).element());
+
+    await expect.element(page.getByRole('menuitem', { name: 'Close', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('menuitem', { name: 'Close All in admin@staging' })).toBeVisible();
+});
+
+test('an unsaved document is marked on its tab', async () => {
+    render(Dock);
+    workspace.openEditor(object(PROD, 'web'));
+    await expect.element(page.getByRole('textbox')).toBeVisible();
+
+    await page.getByRole('textbox').fill('kind: Pod\nmetadata: {}\n');
+
+    await expect.element(page.getByRole('button', { name: /unsaved changes/ })).toBeVisible();
+});

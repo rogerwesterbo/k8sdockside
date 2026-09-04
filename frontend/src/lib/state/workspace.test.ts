@@ -17,6 +17,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
         SetTabOrder: vi.fn().mockResolvedValue({}),
+        SetDock: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
         SetPreferences: vi.fn().mockResolvedValue({}),
         SetContextPrefs: vi.fn().mockResolvedValue({}),
@@ -25,7 +26,9 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 
 const { workspace, isSettingsTab } = await import('./workspace.svelte');
 const { SETTINGS } = await import('../catalogue');
-const { ResourceService, KubeconfigService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { ResourceService, KubeconfigService, SettingsService } = await import(
+    '../../../bindings/github.com/roger/k8sdockside',
+);
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const STAGING = '/home/u/.kube/staging::admin@staging';
@@ -1065,6 +1068,7 @@ describe('preferences', () => {
             restoreTabs: true,
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
+            showLineNumbers: true,
         };
     });
 
@@ -1172,5 +1176,255 @@ describe('restoring tabs at launch', () => {
         // ensureSelection may still pick one for the sidebar; what must not
         // happen is the settings tab claiming the empty id as a context.
         expect(workspace.selectedContextId).not.toBe('');
+    });
+});
+
+describe('the dock', () => {
+    /** The identity of one object, as the detail panel hands it over. */
+    function object(contextId: string, name: string, namespace = 'default', kind = 'pods') {
+        return { contextId, kind, namespace, name };
+    }
+
+    beforeEach(() => {
+        workspace.closeAllDockTabs();
+        workspace.settings.dock.open = false;
+        expect(workspace.dockTabs).toHaveLength(0);
+    });
+
+    test('editing an object opens it, focuses it and unfolds the dock', () => {
+        workspace.openEditor(object(PROD, 'web'));
+
+        expect(workspace.dockTabs.map((t) => t.title)).toEqual(['web']);
+        expect(workspace.activeDockTab?.name).toBe('web');
+        expect(workspace.dockOpen).toBe(true);
+        expect(workspace.isEditing(object(PROD, 'web'))).toBe(true);
+    });
+
+    test('editing the same object again focuses the tab it already has', () => {
+        workspace.openEditor(object(PROD, 'web'));
+        workspace.openEditor(object(PROD, 'api'));
+        workspace.openEditor(object(PROD, 'web'));
+
+        expect(workspace.dockTabs).toHaveLength(2);
+        expect(workspace.activeDockTab?.name).toBe('web');
+    });
+
+    // A name is only unique within a namespace, and two clusters can both have
+    // a "web". Either would otherwise reopen the other's document.
+    test('the same name in another namespace or cluster is another tab', () => {
+        workspace.openEditor(object(PROD, 'web', 'default'));
+        workspace.openEditor(object(PROD, 'web', 'kube-system'));
+        workspace.openEditor(object(STAGING, 'web', 'default'));
+
+        expect(workspace.dockTabs).toHaveLength(3);
+    });
+
+    test('reopening the tab you are on does not fold the dock away', () => {
+        workspace.openEditor(object(PROD, 'web'));
+        workspace.openEditor(object(PROD, 'web'));
+
+        expect(workspace.dockOpen).toBe(true);
+    });
+
+    test('clicking the tab you are on folds the dock, and again brings it back', () => {
+        workspace.openEditor(object(PROD, 'web'));
+        const id = workspace.activeDockTabId!;
+
+        workspace.activateDockTab(id);
+        expect(workspace.dockOpen).toBe(false);
+        // The tab is still there and still the one selected -- only the room
+        // it was taking has gone back.
+        expect(workspace.activeDockTabId).toBe(id);
+
+        workspace.activateDockTab(id);
+        expect(workspace.dockOpen).toBe(true);
+    });
+
+    test('closing moves focus to the right, then to the left', () => {
+        workspace.openEditor(object(PROD, 'one'));
+        workspace.openEditor(object(PROD, 'two'));
+        workspace.openEditor(object(PROD, 'three'));
+        workspace.activateDockTab(workspace.dockTabs[1].id);
+
+        workspace.closeDockTab(workspace.dockTabs[1].id);
+        expect(workspace.activeDockTab?.name).toBe('three');
+
+        workspace.closeDockTab(workspace.dockTabs[1].id);
+        expect(workspace.activeDockTab?.name).toBe('one');
+    });
+
+    test('closing the last tab folds the dock away', () => {
+        workspace.openEditor(object(PROD, 'web'));
+
+        workspace.closeDockTab(workspace.dockTabs[0].id);
+
+        expect(workspace.dockTabs).toHaveLength(0);
+        expect(workspace.activeDockTabId).toBeNull();
+        expect(workspace.dockOpen).toBe(false);
+    });
+
+    test('closing others can be scoped to one cluster', () => {
+        workspace.openEditor(object(PROD, 'one'));
+        workspace.openEditor(object(PROD, 'two'));
+        workspace.openEditor(object(STAGING, 'three'));
+        const keep = workspace.dockTabs[0].id;
+
+        workspace.closeOtherDockTabs(keep, PROD);
+
+        expect(workspace.dockTabs.map((t) => t.name)).toEqual(['one', 'three']);
+    });
+
+    test('closing all can be scoped to one cluster', () => {
+        workspace.openEditor(object(PROD, 'one'));
+        workspace.openEditor(object(STAGING, 'two'));
+
+        workspace.closeAllDockTabs(PROD);
+
+        expect(workspace.dockTabs.map((t) => t.contextId)).toEqual([STAGING]);
+    });
+
+    test('tabs are dragged into order', () => {
+        workspace.openEditor(object(PROD, 'one'));
+        workspace.openEditor(object(PROD, 'two'));
+
+        workspace.moveDockTab(1, 0);
+        expect(workspace.dockTabs.map((t) => t.name)).toEqual(['two', 'one']);
+
+        // Off the end is not a move, and must not drop the tab.
+        workspace.moveDockTab(0, 5);
+        expect(workspace.dockTabs.map((t) => t.name)).toEqual(['two', 'one']);
+    });
+
+    // The point of the dock: what is open in it is a document you are part way
+    // through, and looking at something else must not close it.
+    test('the dock is untouched by what happens to the tabs above it', () => {
+        open([PROD, 'pods'], [STAGING, 'nodes']);
+        workspace.openEditor(object(PROD, 'web'));
+
+        workspace.activateTab(workspace.tabs[1].id);
+        workspace.selectContext(STAGING);
+        workspace.closeAllTabs();
+
+        expect(workspace.dockTabs.map((t) => t.name)).toEqual(['web']);
+        expect(workspace.dockOpen).toBe(true);
+    });
+
+    test('a cluster that leaves the kubeconfig takes its dock tabs with it', async () => {
+        workspace.openEditor(object(PROD, 'web'));
+
+        // Nothing on disk this time round, so every context has gone.
+        vi.mocked(KubeconfigService.Sync).mockResolvedValueOnce([]);
+        await workspace.sync();
+
+        expect(workspace.dockTabs).toHaveLength(0);
+        expect(workspace.dockOpen).toBe(false);
+    });
+});
+
+describe('restoring the dock at launch', () => {
+    beforeEach(() => {
+        workspace.closeAllDockTabs();
+        workspace.files = [
+            {
+                path: '/home/u/.kube/prod',
+                source: 'manual',
+                error: '',
+                contexts: [
+                    {
+                        id: PROD,
+                        name: 'admin@prod',
+                        cluster: 'prod',
+                        user: 'admin',
+                        namespace: '',
+                        server: '',
+                        file: '/home/u/.kube/prod',
+                        current: false,
+                    },
+                ],
+            },
+        ];
+        vi.mocked(KubeconfigService.Sync).mockResolvedValue(workspace.files);
+        workspace.settings.preferences.restoreTabs = true;
+    });
+
+    test('reopens the editors from last session', async () => {
+        workspace.settings.dock.tabs = [
+            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
+        ];
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.dockTabs.map((t) => t.name)).toEqual(['web']);
+        expect(workspace.activeDockTab?.namespace).toBe('default');
+    });
+
+    test('skips a tab whose cluster has gone, and a view this build does not have', async () => {
+        workspace.settings.dock.tabs = [
+            { type: 'edit', contextId: STAGING, kind: 'pods', namespace: 'default', name: 'gone' },
+            { type: 'terminal', contextId: PROD, kind: 'pods', namespace: 'default', name: 'future' },
+            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
+        ];
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.dockTabs.map((t) => t.name)).toEqual(['web']);
+    });
+
+    test('turned off, the dock starts empty but the remembered tabs are left alone', async () => {
+        const remembered = [
+            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
+        ];
+        workspace.settings.dock.tabs = remembered;
+        workspace.settings.preferences.restoreTabs = false;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.dockTabs).toHaveLength(0);
+        expect(workspace.settings.dock.tabs).toEqual(remembered);
+    });
+});
+
+describe('saving settings', () => {
+    // The bug this guards against: opening an editor adds a dock tab and
+    // unfolds the dock, and any other settings write already on its way answers
+    // with the file as it was before either happened. Adopting that answer
+    // whole shut the dock again a quarter of a second after it opened.
+    test('an answer from a write in flight does not roll back a later change', async () => {
+        vi.useFakeTimers();
+        let landed: (saved: unknown) => void = () => {};
+        try {
+            // The tab-order call answers with a file that predates the dock
+            // being opened, which is what one in flight really carries...
+            vi.mocked(SettingsService.SetTabOrder).mockResolvedValue({} as never);
+            // ...while the dock's own call is still out, so its answer cannot
+            // be what puts things right.
+            vi.mocked(SettingsService.SetDock).mockReturnValue(
+                new Promise((resolve) => {
+                    landed = resolve;
+                }) as never,
+            );
+
+            workspace.openTab(PROD, 'pods');
+            const tab = workspace.activeTabId!;
+            await vi.advanceTimersByTimeAsync(1000);
+
+            // One gesture, two sections: the strip above loses a tab and the
+            // dock below gains one.
+            workspace.closeTab(tab);
+            workspace.openEditor({ contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' });
+            await vi.advanceTimersByTimeAsync(1000);
+
+            expect(workspace.dockTabs.map((t) => t.name)).toEqual(['web']);
+            expect(workspace.dockOpen).toBe(true);
+            // And what was sent is the dock as it actually stood.
+            expect(SettingsService.SetDock).toHaveBeenCalledWith(
+                expect.objectContaining({ open: true, tabs: [expect.objectContaining({ name: 'web' })] }),
+            );
+        } finally {
+            landed({});
+            vi.useRealTimers();
+            vi.mocked(SettingsService.SetTabOrder).mockReset().mockResolvedValue({} as never);
+            vi.mocked(SettingsService.SetDock).mockReset().mockResolvedValue({} as never);
+        }
     });
 });

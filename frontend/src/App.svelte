@@ -7,6 +7,7 @@
     import { DASHBOARD, SETTINGS } from './lib/catalogue';
     import Dashboard from './lib/components/Dashboard.svelte';
     import DetailPanel from './lib/components/DetailPanel.svelte';
+    import Dock from './lib/components/Dock.svelte';
     import Icon from './lib/components/Icon.svelte';
     import ResourceTable from './lib/components/ResourceTable.svelte';
     import SettingsView from './lib/components/settings/SettingsView.svelte';
@@ -205,6 +206,11 @@
 
                 <DetailPanel />
             </div>
+
+            <!-- Under the view rather than beside the sidebar: it is about the
+                 object you were just looking at, and it keeps the sidebar
+                 whole-height so the context list is never shortened by it. -->
+            <Dock />
         </main>
     </div>
 

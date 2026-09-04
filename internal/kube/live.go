@@ -261,18 +261,7 @@ func (w *Watcher) Describe(kc Context, kind, namespace, name string) (string, er
 		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 		defer cancel()
 
-		mapping, err := c.mappingForKind(kind)
-		if err != nil {
-			return err
-		}
-
-		ri := c.dynamic.Resource(mapping.Resource)
-		var got *unstructured.Unstructured
-		if mapping.Scope.Name() == "namespace" {
-			got, err = ri.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-		} else {
-			got, err = ri.Get(ctx, name, metav1.GetOptions{})
-		}
+		got, mapping, err := c.get(ctx, kind, namespace, name)
 		if err != nil {
 			return err
 		}

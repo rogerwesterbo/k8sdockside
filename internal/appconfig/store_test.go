@@ -574,3 +574,145 @@ func TestPreferencesCopyThePointerField(t *testing.T) {
 		t.Error("writing through a returned pointer changed what the store holds")
 	}
 }
+
+func TestTheDockRoundTrips(t *testing.T) {
+	path := tempSettings(t)
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetDock(Dock{
+		Open: true,
+		Size: 420,
+		Tabs: []DockTabRef{
+			{Type: "edit", ContextID: "cfg::prod", Kind: "pods", Namespace: "default", Name: "web"},
+			{Type: "edit", ContextID: "cfg::stage", Kind: "nodes", Name: "node-1"},
+		},
+	}); err != nil {
+		t.Fatalf("SetDock: %v", err)
+	}
+
+	reopened, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dock := reopened.Get().Dock
+	if !dock.Open || dock.Size != 420 {
+		t.Errorf("dock = %+v, want it open at 420", dock)
+	}
+	got := dock.Tabs
+	if len(got) != 2 {
+		t.Fatalf("dock tabs = %d, want 2", len(got))
+	}
+	if got[0].Namespace != "default" || got[0].Name != "web" || got[0].Type != "edit" {
+		t.Errorf("first dock tab = %+v, want the namespaced pod it was given", got[0])
+	}
+	// A cluster-scoped object has no namespace, and that has to survive as the
+	// empty string rather than becoming the tab's undoing on the way back.
+	if got[1].Namespace != "" || got[1].Name != "node-1" {
+		t.Errorf("second dock tab = %+v, want the cluster-scoped node", got[1])
+	}
+}
+
+func TestTheDockHasAListOfTabsEvenWhenTheFileHasNone(t *testing.T) {
+	path := tempSettings(t)
+
+	if err := os.WriteFile(path, []byte(`{"contexts":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get().Dock.Tabs; got == nil {
+		t.Error("the dock's tabs are nil, want an empty list so the frontend need not guard")
+	}
+}
+
+// The dock's height has the same problem the zoom did: a file written before
+// the field existed unmarshals to 0, which is a dock with no editor in it.
+func TestAnUnusableDockHeightFallsBackToTheDefault(t *testing.T) {
+	path := tempSettings(t)
+
+	if err := os.WriteFile(path, []byte(`{"contexts":{},"dock":{"size":12,"open":true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dock := store.Get().Dock
+	if dock.Size != Defaults().Dock.Size {
+		t.Errorf("dock size = %d, want the default %d", dock.Size, Defaults().Dock.Size)
+	}
+	// Repairing the height must not close a dock the user left open.
+	if !dock.Open {
+		t.Error("the dock was closed by the repair")
+	}
+}
+
+// The default is on, so a file written before the field existed must not
+// unmarshal to Go's zero value and take the gutter away.
+func TestShowLineNumbersIsNilUntilTheUserChooses(t *testing.T) {
+	path := tempSettings(t)
+
+	if err := os.WriteFile(path, []byte(`{"contexts":{},"preferences":{"theme":"dark"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Get().Preferences.ShowLineNumbers != nil {
+		t.Error("ShowLineNumbers should stay nil until chosen, so the frontend can default it to true")
+	}
+}
+
+func TestTurningLineNumbersOffSurvivesAReopen(t *testing.T) {
+	path := tempSettings(t)
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	if _, err := store.SetPreferences(Preferences{
+		Theme:           ThemeDark,
+		Density:         DensityComfortable,
+		ShowLineNumbers: &off,
+	}); err != nil {
+		t.Fatalf("SetPreferences: %v", err)
+	}
+
+	// The caller's own pointer must not be the one the store kept.
+	off = true
+
+	reopened, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Get().Preferences.ShowLineNumbers; got == nil || *got {
+		t.Error("an explicit 'no line numbers' came back as nil or true")
+	}
+	if got := store.Get().Preferences.ShowLineNumbers; got == nil || *got {
+		t.Error("mutating the caller's pointer changed what the store holds")
+	}
+}
+
+// The dock is written as one value precisely so that the frontend's two
+// concerns -- what is open, and whether it is showing -- cannot reach the file
+// through separate calls and undo each other.
+func TestSetDockKeepsTheCallersSliceOutOfTheStore(t *testing.T) {
+	store := openIn(t)
+
+	tabs := []DockTabRef{{Type: "edit", ContextID: "cfg::prod", Kind: "pods", Name: "web"}}
+	if _, err := store.SetDock(Dock{Open: true, Size: 320, Tabs: tabs}); err != nil {
+		t.Fatalf("SetDock: %v", err)
+	}
+
+	tabs[0].Name = "elsewhere"
+	if got := store.Get().Dock.Tabs[0].Name; got != "web" {
+		t.Errorf("tab name = %q, want the store to hold its own copy", got)
+	}
+}

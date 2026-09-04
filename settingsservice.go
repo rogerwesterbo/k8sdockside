@@ -111,3 +111,10 @@ func (s *SettingsService) SetPreferences(prefs appconfig.Preferences) (appconfig
 func (s *SettingsService) SetTabOrder(order []appconfig.TabRef) (appconfig.Settings, error) {
 	return s.store.SetTabOrder(order)
 }
+
+// SetDock saves the bottom dock: its tabs in order, whether it is open, and how
+// tall it stands. It is a separate call from SetTabOrder because the two strips
+// are dragged independently and each writes on its own.
+func (s *SettingsService) SetDock(dock appconfig.Dock) (appconfig.Settings, error) {
+	return s.store.SetDock(dock)
+}

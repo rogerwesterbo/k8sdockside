@@ -3,6 +3,8 @@
 
 export type {
     ContextPrefs,
+    Dock,
+    DockTabRef,
     Layout,
     Preferences,
     Settings,

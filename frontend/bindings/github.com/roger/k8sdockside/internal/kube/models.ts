@@ -156,3 +156,16 @@ export interface Table {
     "namespaced": boolean;
     "error": string;
 }
+
+/**
+ * YAMLCheck is the answer to the only question the editor asks while you type:
+ * is this still YAML, and if not, where did it stop being YAML?
+ * 
+ * Line is 1-based and 0 when the parser named none, so the gutter can mark the
+ * offending row without the frontend having to read error prose.
+ */
+export interface YAMLCheck {
+    "valid": boolean;
+    "message": string;
+    "line": number;
+}

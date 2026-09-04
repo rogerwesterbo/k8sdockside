@@ -35,6 +35,19 @@ cluster you are looking at.
 - **A describe panel that slides in.** Click a row and its `describe` report
   slides in from the edge. Dock it right, bottom or left, and drag its edge to
   resize; both are remembered.
+- **Edit an object as YAML.** The describe panel has an **Edit** button, which
+  opens that object in the dock at the foot of the window: the live YAML, with
+  line numbers (a setting, on by default), checked as you type, and a **Save**
+  that writes it back with `⌘S`. A save that the cluster refuses -- a conflict,
+  an admission webhook, a missing permission -- is reported in the API server's
+  own words, and what you typed stays where it is.
+- **A dock that stays put.** The dock's tabs are always on screen and behave
+  like the strip above them: coloured by their cluster, dragged into order,
+  scrolled when they no longer fit, right-clicked for what to close, and
+  reopened next launch. What is open in it survives switching context, opening
+  and closing tabs, and closing every tab there is -- an edit you are part way
+  through is the one thing that must not disappear because you looked at
+  something else. A tab with unsaved changes wears a dot instead of its cross.
 
 ## How the cluster data gets here
 
@@ -59,7 +72,18 @@ Some details worth knowing:
   tables match the command line.
 - **Secrets are redacted before they are cached.** An informer holds the whole
   collection in memory; the tables only ever show how many keys a secret has, so
-  the values are dropped on the way in.
+  the values are dropped on the way in. The editor is the exception, and has to
+  be: it reads the object live rather than from the cache, because an editor
+  that opened on a redacted copy would save the redaction back over the secret.
+- **Editing is a read, a `PUT` and nothing clever.** The document keeps its
+  `resourceVersion`, so a save while a controller (or another person) has moved
+  the object on is refused as a conflict rather than silently winning it. What
+  comes back from the save is what the editor then holds -- with the new
+  version, and whatever defaulting and admission control did on the way in --
+  so a second save is not arguing with an object that no longer exists.
+  Changing `apiVersion`, `kind`, `metadata.name` or `metadata.namespace` is
+  refused: the write goes to the URL of the object that was opened, so a rename
+  there cannot mean what it looks like it means.
 - **Node and dashboard figures are capacity and requests, not usage.** Live
   usage comes from the metrics API, a separate server that is not always
   installed.
@@ -127,15 +151,16 @@ WAILS_SERVER_PORT=9741 ./bin/k8sdockside-server
 main.go                      window, and the three services the frontend calls
 kubeconfigservice.go         discovery, add/remove, the context cache
 settingsservice.go           aliases, colours, tab order, layout
-resourceservice.go           dashboard, resource tables, describe
+resourceservice.go           dashboard, resource tables, describe, editing
 internal/kube/               kubeconfig parsing, and the stubbed cluster data
 internal/appconfig/          the settings file
 frontend/src/
-  App.svelte                 shell: sidebar | tabs + view | detail panel
+  App.svelte                 shell: sidebar | tabs + view | detail panel | dock
   lib/state/workspace.svelte.ts   all application state
+  lib/state/editor.svelte.ts      the documents open in the dock's editor
   lib/catalogue.ts           the resource kinds the sidebar offers
   lib/colors.ts              the context palette
-  lib/components/            sidebar, tab bar, tables, detail panel
+  lib/components/            sidebar, tab bar, tables, detail panel, dock
 ```
 
 Your settings live in `$XDG_CONFIG_HOME/k8sdockside/settings.json`, falling

@@ -20,6 +20,26 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as kube$0 from "./internal/kube/models.js";
 
 /**
+ * ApplyYAML writes an edited object back to the cluster and returns it as the
+ * server left it -- with the resourceVersion the next save will be checked
+ * against, and whatever defaulting and admission control did to it on the way
+ * in. The editor replaces its contents with the result, which is what makes a
+ * second save work rather than fail as a conflict.
+ */
+export function ApplyYAML(contextID: string, kind: string, $namespace: string, name: string, yaml: string): $CancellablePromise<string> {
+    return $Call.ByID(1166098740, contextID, kind, $namespace, name, yaml);
+}
+
+/**
+ * CheckYAML reports whether what is in the editor is still YAML. It touches no
+ * cluster: it is called as the user types, and the only question it answers is
+ * whether the document parses.
+ */
+export function CheckYAML(yaml: string): $CancellablePromise<kube$0.YAMLCheck> {
+    return $Call.ByID(3233044240, yaml);
+}
+
+/**
  * CustomResourceKinds lists what a cluster defines, grouped by API group, for
  * the definitions section of the sidebar.
  */
@@ -68,6 +88,16 @@ export function Overview(contextID: string): $CancellablePromise<kube$0.Overview
  */
 export function Ping(contextID: string): $CancellablePromise<void> {
     return $Call.ByID(1821171873, contextID);
+}
+
+/**
+ * ResourceYAML returns one object as the YAML the editor opens with. It is a
+ * live read rather than the informer's copy: the cache drops managed fields and
+ * redacts secret values, and an editor must open on the object rather than on
+ * the table's view of it.
+ */
+export function ResourceYAML(contextID: string, kind: string, $namespace: string, name: string): $CancellablePromise<string> {
+    return $Call.ByID(2893618278, contextID, kind, $namespace, name);
 }
 
 /**

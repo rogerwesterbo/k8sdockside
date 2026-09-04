@@ -12,5 +12,6 @@ export type {
     Row,
     Snapshot,
     Stat,
-    Table
+    Table,
+    YAMLCheck
 } from "./models.js";

@@ -15,6 +15,7 @@ import {
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
+import { editors } from './editor.svelte';
 import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, SETTINGS, groupForKind, labelFor } from '../catalogue';
 import { defaultColorFor } from '../colors';
 
@@ -35,6 +36,33 @@ export interface DetailTarget {
     kind: string;
     namespace: string;
     name: string;
+}
+
+/**
+ * What a dock tab shows. There is one view today; it is named rather than
+ * assumed so that the strip, the store and the settings file do not all have to
+ * change to gain a second.
+ */
+export type DockView = 'edit';
+
+/**
+ * One tab in the bottom dock.
+ *
+ * Where a Tab is a kind viewed against a context -- the pods of a cluster -- a
+ * dock tab is a view onto one object, so it carries that object's identity. It
+ * is otherwise the same animal: coloured by its context, dragged into order,
+ * closed, and reopened next launch.
+ */
+export interface DockTab {
+    /** `${view}:${contextId}#${kind}#${namespace}#${name}` -- a key, never parsed back. */
+    id: string;
+    view: DockView;
+    contextId: string;
+    kind: string;
+    namespace: string;
+    name: string;
+    /** The object's own name, which is what the strip shows. */
+    title: string;
 }
 
 /**
@@ -100,12 +128,14 @@ function defaultSettings(): Settings {
         excludedFiles: [],
         contexts: {},
         tabOrder: [],
+        dock: { open: false, size: 320, tabs: [] },
         preferences: {
             theme: 'system',
             density: 'comfortable',
             restoreTabs: true,
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
+            showLineNumbers: true,
         },
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
@@ -130,6 +160,20 @@ function toggled(groups: string[], label: string): string[] {
     return groups.includes(label) ? groups.filter((g) => g !== label) : [...groups, label];
 }
 
+/**
+ * The list with one item moved, or null when the move would change nothing --
+ * which is every out-of-range index a drag can produce at the ends of a strip.
+ */
+function moved<T>(list: T[], from: number, to: number): T[] | null {
+    if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) {
+        return null;
+    }
+    const next = [...list];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    return next;
+}
+
 /** Whether two folding lists say the same thing, regardless of order. */
 function sameGroups(a: string[], b: string[]): boolean {
     return a.length === b.length && [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
@@ -142,6 +186,15 @@ function apiGroupKey(contextId: string, group: string): string {
 
 function tabId(contextId: string, kind: string): string {
     return `${contextId}#${kind}`;
+}
+
+/**
+ * The key one dock tab is held under. Two views of the same object are two
+ * tabs, so the view is part of it; the namespace is too, because a name alone
+ * is not unique across namespaces.
+ */
+function dockTabId(view: DockView, target: DetailTarget): string {
+    return `${view}:${target.contextId}#${target.kind}#${target.namespace}#${target.name}`;
 }
 
 /**
@@ -177,6 +230,13 @@ function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (.
     };
 }
 
+/**
+ * The parts of the settings the app writes independently. Each has one
+ * debounced writer, and each is what a stale answer can roll back -- see
+ * Workspace.writer.
+ */
+type Section = 'contexts' | 'tabOrder' | 'dock' | 'layout' | 'preferences';
+
 class Workspace {
     /** Kubeconfig files from the last sync, each with its parsed contexts. */
     files = $state<ConfigFile[]>([]);
@@ -184,6 +244,14 @@ class Workspace {
     settings = $state<Settings>(defaultSettings());
     tabs = $state<Tab[]>([]);
     activeTabId = $state<string | null>(null);
+    /**
+     * The bottom dock's tabs. They belong to the window rather than to a
+     * cluster: selecting another context, or closing every tab above them,
+     * leaves the dock exactly as it was, because what is open in it is a
+     * document you are part way through editing.
+     */
+    dockTabs = $state<DockTab[]>([]);
+    activeDockTabId = $state<string | null>(null);
     /** The context whose resource tree is showing, and whose settings the bottom panel edits. */
     selectedContextId = $state<string | null>(null);
     /** Contexts whose resource tree is expanded in the sidebar. */
@@ -227,6 +295,7 @@ class Workspace {
     /** Files the user has hidden, so the sidebar can offer to show them again. */
     excluded = $derived(this.settings.excludedFiles);
     activeTab = $derived(this.tabs.find((t) => t.id === this.activeTabId) ?? null);
+    activeDockTab = $derived(this.dockTabs.find((t) => t.id === this.activeDockTabId) ?? null);
     selectedContext = $derived(this.contexts.find((c) => c.id === this.selectedContextId) ?? null);
     /** Files that could not be parsed, surfaced in the sidebar rather than dropped. */
     brokenFiles = $derived(this.files.filter((f) => f.error !== ''));
@@ -242,6 +311,14 @@ class Workspace {
     dock = $derived((this.settings.layout.detailDock || 'right') as DockSide);
     detailSize = $derived(this.settings.layout.detailSize || 520);
     sidebarWidth = $derived(this.settings.layout.sidebarWidth || 260);
+    /** How tall the dock stands when it is open, in px. */
+    dockSize = $derived(this.settings.dock.size || 320);
+    /**
+     * Whether the dock is showing its contents rather than just its tabs. The
+     * strip itself is always on screen -- that is what makes it a dock and not
+     * a panel -- so this only decides whether the editor under it is drawn.
+     */
+    dockOpen = $derived(this.settings.dock.open && this.dockTabs.length > 0);
     /**
      * The folded groups, falling back to the catalogue's defaults only while
      * the user has never chosen. `?? ` rather than `||` is load-bearing: an
@@ -270,6 +347,8 @@ class Workspace {
     confirmSourceRemoval = $derived(this.settings.preferences.confirmSourceRemoval);
     /** Whether the sidebar groups contexts under the kubeconfig they came from. */
     showKubeconfigNames = $derived(this.settings.preferences.showKubeconfigNames);
+    /** Whether the YAML editor draws a line-number gutter. On by default. */
+    showLineNumbers = $derived(this.settings.preferences.showLineNumbers);
 
     // ----- loading -------------------------------------------------------
 
@@ -300,6 +379,7 @@ class Workspace {
                 this.restoreTabs();
             } else {
                 this.dropTabsForMissingContexts();
+                this.dropDockTabsForMissingContexts();
                 this.recheckHealth();
                 this.recheckCustomKinds();
                 // Only for a sync the user asked for: a rescan that finds
@@ -449,13 +529,13 @@ class Workspace {
         this.persistContextPrefs(contextId, prefs);
     }
 
-    private persistContextPrefs = debounce((contextId: string, prefs: appconfig.ContextPrefs) => {
-        SettingsService.SetContextPrefs(contextId, prefs)
-            .then((saved) => {
-                this.settings = adoptSettings(saved);
-            })
-            .catch((err: unknown) => this.fail(`Could not save context settings: ${message(err)}`));
-    }, 300);
+    private persistContextPrefs = this.writer(
+        'contexts',
+        (contextId: string, prefs: appconfig.ContextPrefs) =>
+            SettingsService.SetContextPrefs(contextId, prefs),
+        'Could not save context settings',
+        300,
+    );
 
     /** Clears the alias and colour, returning the context to its defaults. */
     resetContextPrefs(contextId: string): void {
@@ -640,7 +720,8 @@ class Workspace {
 
         const hadActive = this.activeTabId !== null;
         const stillActive = survivors.some((t) => t.id === this.activeTabId);
-        const successor = hadActive && !stillActive ? this.successorFor(this.activeTabId, keep) : null;
+        const successor =
+            hadActive && !stillActive ? this.successorFor(this.tabs, this.activeTabId, keep) : null;
 
         this.tabs = survivors;
 
@@ -656,28 +737,32 @@ class Workspace {
      * The tab that takes over when the active one closes: the first survivor to
      * its right, else the nearest to its left, so focus moves the short way and
      * lands where the eye already is.
+     *
+     * Written over any strip of tabs rather than over `tabs`, because the dock
+     * below closes its own the same way and there is no second answer to where
+     * focus should land.
      */
-    private successorFor(activeId: string | null, keep: (tab: Tab) => boolean): Tab | null {
-        const index = this.tabs.findIndex((t) => t.id === activeId);
+    private successorFor<T extends { id: string }>(
+        tabs: T[],
+        activeId: string | null,
+        keep: (tab: T) => boolean,
+    ): T | null {
+        const index = tabs.findIndex((t) => t.id === activeId);
         if (index === -1) return null;
 
-        for (let i = index + 1; i < this.tabs.length; i++) {
-            if (keep(this.tabs[i])) return this.tabs[i];
+        for (let i = index + 1; i < tabs.length; i++) {
+            if (keep(tabs[i])) return tabs[i];
         }
         for (let i = index - 1; i >= 0; i--) {
-            if (keep(this.tabs[i])) return this.tabs[i];
+            if (keep(tabs[i])) return tabs[i];
         }
         return null;
     }
 
     /** Reorders tabs after a drag. Both indices are positions in `tabs`. */
     moveTab(from: number, to: number): void {
-        if (from === to || from < 0 || to < 0 || from >= this.tabs.length || to >= this.tabs.length) {
-            return;
-        }
-        const next = [...this.tabs];
-        const [moved] = next.splice(from, 1);
-        next.splice(to, 0, moved);
+        const next = moved(this.tabs, from, to);
+        if (!next) return;
         this.tabs = next;
         this.persistTabOrder();
     }
@@ -686,14 +771,16 @@ class Workspace {
      * Debounced because dragging a tab reorders on every pointer move; without
      * it a single drag would write the settings file dozens of times.
      */
-    private persistTabOrder = debounce(() => {
-        const order = this.tabs.map((t) => ({ contextId: t.contextId, kind: t.kind }));
-        SettingsService.SetTabOrder($state.snapshot(order))
-            .then((saved) => {
-                this.settings = adoptSettings(saved);
-            })
-            .catch((err: unknown) => this.fail(`Could not save tab order: ${message(err)}`));
-    }, 250);
+    private saveTabOrder = this.writer(
+        'tabOrder',
+        (order: appconfig.TabRef[]) => SettingsService.SetTabOrder(order),
+        'Could not save tab order',
+        250,
+    );
+
+    private persistTabOrder(): void {
+        this.saveTabOrder($state.snapshot(this.tabs.map((t) => ({ contextId: t.contextId, kind: t.kind }))));
+    }
 
     /**
      * Reopens the tabs from the previous session, skipping any whose context is
@@ -724,6 +811,38 @@ class Workspace {
         if (this.tabs[0] && !isSettingsTab(this.tabs[0])) {
             this.selectContext(this.tabs[0].contextId);
         }
+        this.restoreDockTabs();
+    }
+
+    /**
+     * Reopens the dock's tabs from the previous session, skipping any whose
+     * context has gone and any view this build does not know about -- a
+     * hand-edited file, or one written by a later version.
+     *
+     * The documents themselves are not restored, only the tabs: an editor
+     * reopens on what the cluster says now, because a draft written against a
+     * fortnight-old resourceVersion could not be saved anyway.
+     */
+    private restoreDockTabs(): void {
+        if (!this.settings.preferences.restoreTabs) {
+            this.dockTabs = [];
+            this.activeDockTabId = null;
+            return;
+        }
+
+        const known = new Set(this.contexts.map((c) => c.id));
+        this.dockTabs = this.settings.dock.tabs
+            .filter((ref) => ref.type === 'edit' && known.has(ref.contextId))
+            .map((ref) => ({
+                id: dockTabId('edit', ref),
+                view: 'edit' as DockView,
+                contextId: ref.contextId,
+                kind: ref.kind,
+                namespace: ref.namespace,
+                name: ref.name,
+                title: ref.name,
+            }));
+        this.activeDockTabId = this.dockTabs[0]?.id ?? null;
     }
 
     /** Drops tabs whose context disappeared from disk between syncs. */
@@ -742,6 +861,17 @@ class Workspace {
         this.persistTabOrder();
     }
 
+    /**
+     * Drops dock tabs whose context disappeared from disk. Called from sync
+     * beside dropTabsForMissingContexts rather than from inside it: an editor
+     * open on an object in a kubeconfig that has gone cannot be saved, but that
+     * is the only reason the dock ever loses a tab it was not asked to.
+     */
+    private dropDockTabsForMissingContexts(): void {
+        const known = new Set(this.contexts.map((c) => c.id));
+        this.retainDockTabs((tab) => known.has(tab.contextId));
+    }
+
     /** Keeps a context selected if there is one, so the sidebar is never idle. */
     private ensureSelection(): void {
         if (this.selectedContextId && this.contexts.some((c) => c.id === this.selectedContextId)) {
@@ -752,6 +882,177 @@ class Workspace {
         if (current) {
             this.selectContext(current.id);
         }
+    }
+
+    // ----- the dock ------------------------------------------------------
+    //
+    // The strip at the foot of the window. It is deliberately not tied to the
+    // selected context or to the tab above it: an object you are part way
+    // through editing has to still be there after you have gone to look at
+    // something else, which is the whole reason it is a dock rather than
+    // another panel inside the view.
+
+    /** Opens the YAML editor for one object, or focuses it if it is open. */
+    openEditor(target: DetailTarget): void {
+        const id = dockTabId('edit', target);
+
+        if (!this.dockTabs.some((t) => t.id === id)) {
+            const tab: DockTab = {
+                id,
+                view: 'edit',
+                contextId: target.contextId,
+                kind: target.kind,
+                namespace: target.namespace,
+                name: target.name,
+                title: target.name,
+            };
+            // Beside the tab you were on rather than at the far end, for the
+            // reason openTab does the same: that is where you will look for it.
+            const at = this.dockTabs.findIndex((t) => t.id === this.activeDockTabId);
+            this.dockTabs =
+                at === -1
+                    ? [...this.dockTabs, tab]
+                    : [...this.dockTabs.slice(0, at + 1), tab, ...this.dockTabs.slice(at + 1)];
+            this.persistDock();
+        }
+
+        // Not through activateDockTab: opening something is never a request to
+        // fold the dock away, which is what that does on a second click.
+        this.activeDockTabId = id;
+        this.setDockOpen(true);
+    }
+
+    /**
+     * Focuses a dock tab, or folds the dock away when it is the one already
+     * showing.
+     *
+     * The second click is the point, as it is for a context in the sidebar:
+     * clicking the tab you are on has to do something, and what it should do is
+     * give the room back to the view above.
+     */
+    activateDockTab(id: string): void {
+        if (this.activeDockTabId === id && this.dockOpen) {
+            this.setDockOpen(false);
+            return;
+        }
+        this.activeDockTabId = id;
+        this.setDockOpen(true);
+    }
+
+    /** Closes one dock tab, discarding whatever was unsaved in it. */
+    closeDockTab(id: string): void {
+        this.retainDockTabs((tab) => tab.id !== id);
+    }
+
+    /** Closes every dock tab but one, optionally sparing the other clusters'. */
+    closeOtherDockTabs(id: string, withinContextId?: string): void {
+        this.retainDockTabs(
+            (tab) => tab.id === id || (withinContextId !== undefined && tab.contextId !== withinContextId),
+        );
+    }
+
+    /** Closes every dock tab, or every one belonging to a context. */
+    closeAllDockTabs(withinContextId?: string): void {
+        this.retainDockTabs((tab) => withinContextId !== undefined && tab.contextId !== withinContextId);
+    }
+
+    /**
+     * Keeps the dock tabs matching `keep` and drops the rest.
+     *
+     * The documents of the tabs that go are dropped with them: an editor's
+     * contents belong to its tab, and keeping them would mean a tab reopened on
+     * the same object came back holding an edit made against a version of it
+     * the cluster has long since moved past.
+     */
+    private retainDockTabs(keep: (tab: DockTab) => boolean): void {
+        const survivors = this.dockTabs.filter(keep);
+        if (survivors.length === this.dockTabs.length) return;
+
+        for (const tab of this.dockTabs) {
+            if (!keep(tab)) editors.forget(tab.id);
+        }
+
+        const stillActive = survivors.some((t) => t.id === this.activeDockTabId);
+        const successor = stillActive
+            ? null
+            : this.successorFor(this.dockTabs, this.activeDockTabId, keep);
+
+        this.dockTabs = survivors;
+        if (!stillActive) {
+            this.activeDockTabId = successor?.id ?? null;
+        }
+        // An open dock with nothing in it is a blank panel taking up a third of
+        // the window. The strip stays; the room goes back.
+        if (survivors.length === 0) {
+            this.setDockOpen(false);
+        }
+        this.persistDock();
+    }
+
+    /** Reorders dock tabs after a drag. Both indices are positions in `dockTabs`. */
+    moveDockTab(from: number, to: number): void {
+        const next = moved(this.dockTabs, from, to);
+        if (!next) return;
+        this.dockTabs = next;
+        this.persistDock();
+    }
+
+    /** Whether one object already has an editor open on it. */
+    isEditing(target: DetailTarget): boolean {
+        const id = dockTabId('edit', target);
+        return this.dockTabs.some((t) => t.id === id);
+    }
+
+    /** Shows or folds away the dock's contents. The strip itself always stays. */
+    setDockOpen(open: boolean): void {
+        if (this.settings.dock.open === open) return;
+        this.settings.dock.open = open;
+        this.persistDock();
+    }
+
+    toggleDock(): void {
+        this.setDockOpen(!this.dockOpen);
+    }
+
+    setDockSize(px: number): void {
+        this.settings.dock.size = Math.round(px);
+        this.persistDock();
+    }
+
+    /**
+     * Writes the whole dock: its tabs, whether it is open, and its height.
+     *
+     * One writer for all three, which is what stops them undoing each other.
+     * Opening an editor adds a tab *and* unfolds the dock, and every settings
+     * call answers with the whole file for the store to adopt -- so two
+     * debounced writers over that one gesture would race, and whichever
+     * answered second would carry the other's change back to what it was.
+     *
+     * Debounced like the tab order, and for the same reason: dragging a tab
+     * through the strip reorders on every pointer move, and so does dragging
+     * the dock's edge.
+     */
+    private saveDock = this.writer(
+        'dock',
+        (dock: appconfig.Dock) => SettingsService.SetDock(dock),
+        'Could not save the dock',
+        250,
+    );
+
+    private persistDock(): void {
+        this.saveDock(
+            $state.snapshot({
+                open: this.settings.dock.open,
+                size: this.settings.dock.size,
+                tabs: this.dockTabs.map((t) => ({
+                    type: t.view,
+                    contextId: t.contextId,
+                    kind: t.kind,
+                    namespace: t.namespace,
+                    name: t.name,
+                })),
+            }),
+        );
     }
 
     // ----- custom resources ----------------------------------------------
@@ -1098,6 +1399,10 @@ class Workspace {
         this.updatePreferences({ showKubeconfigNames });
     }
 
+    setShowLineNumbers(showLineNumbers: boolean): void {
+        this.updatePreferences({ showLineNumbers });
+    }
+
     /**
      * Applies a change to the preference block and saves it. The UI updates
      * first and the write is debounced, matching how the layout is persisted:
@@ -1109,13 +1414,16 @@ class Workspace {
         this.persistPreferences();
     }
 
-    private persistPreferences = debounce(() => {
-        SettingsService.SetPreferences($state.snapshot(this.settings.preferences))
-            .then((saved) => {
-                this.settings = adoptSettings(saved);
-            })
-            .catch((err: unknown) => this.fail(`Could not save preferences: ${message(err)}`));
-    }, 250);
+    private savePreferences = this.writer(
+        'preferences',
+        (prefs: appconfig.Preferences) => SettingsService.SetPreferences(prefs),
+        'Could not save preferences',
+        250,
+    );
+
+    private persistPreferences(): void {
+        this.savePreferences($state.snapshot(this.settings.preferences));
+    }
 
     // ----- layout defaults, as edited from the settings view --------------
 
@@ -1184,13 +1492,97 @@ class Workspace {
         }
     }
 
-    private persistLayout = debounce(() => {
-        SettingsService.SetLayout($state.snapshot(this.settings.layout))
-            .then((saved) => {
-                this.settings = adoptSettings(saved);
-            })
-            .catch((err: unknown) => this.fail(`Could not save layout: ${message(err)}`));
-    }, 400);
+    private saveLayout = this.writer(
+        'layout',
+        (layout: appconfig.Layout) => SettingsService.SetLayout(layout),
+        'Could not save layout',
+        400,
+    );
+
+    private persistLayout(): void {
+        this.saveLayout($state.snapshot(this.settings.layout));
+    }
+
+    // ----- saving --------------------------------------------------------
+    //
+    // Every mutator on the Go side answers with the whole settings, and the
+    // store replaces its own with that -- so what is on screen is what actually
+    // reached disk rather than an optimistic guess. Writes are debounced,
+    // because they come from drags and keystrokes.
+    //
+    // Those two together are what the machinery below exists for. A write in
+    // flight is carrying an answer from *before* whatever was changed after it
+    // was sent, so adopting it whole would roll that change back a moment after
+    // it was made -- and the writer that would have saved it reads the state it
+    // was just rolled back to, so the change is lost from the file as well as
+    // from the screen. Opening an editor did exactly that: it adds a dock tab
+    // and unfolds the dock, and any other write in flight undid the second.
+
+    /** Per section, the last write scheduled and the last one answered. */
+    private writes = new Map<Section, { scheduled: number; answered: number }>();
+
+    /** Whether a section has a write scheduled or in flight. */
+    private isPending(section: Section): boolean {
+        const write = this.writes.get(section);
+        return write !== undefined && write.scheduled !== write.answered;
+    }
+
+    /**
+     * Builds the debounced writer for one section: it records that the section
+     * is on its way out, sends the last value it was given, and adopts the
+     * answer.
+     *
+     * The value is passed in rather than read at send time, so that a rollback
+     * arriving in between cannot change what gets written.
+     */
+    private writer<A extends unknown[]>(
+        section: Section,
+        send: (...args: A) => Promise<appconfig.Settings>,
+        failure: string,
+        ms: number,
+    ): (...args: A) => void {
+        const flush = debounce((...args: A) => {
+            const id = this.writes.get(section)?.scheduled ?? 0;
+            send(...args)
+                .then((saved) => this.adopt(saved, section, id))
+                .catch((err: unknown) => {
+                    this.settle(section, id);
+                    this.fail(`${failure}: ${message(err)}`);
+                });
+        }, ms);
+
+        return (...args: A) => {
+            const write = this.writes.get(section) ?? { scheduled: 0, answered: 0 };
+            this.writes.set(section, { ...write, scheduled: write.scheduled + 1 });
+            flush(...args);
+        };
+    }
+
+    /**
+     * Takes what the backend saved, keeping the sections whose own write has
+     * not landed yet. Their answer is on its way and is the one that settles
+     * them; this one is by definition older than the change they are carrying.
+     */
+    private adopt(saved: appconfig.Settings, section: Section, id: number): void {
+        this.settle(section, id);
+
+        const next = adoptSettings(saved);
+        if (this.isPending('contexts')) next.contexts = this.settings.contexts;
+        if (this.isPending('tabOrder')) next.tabOrder = this.settings.tabOrder;
+        if (this.isPending('dock')) next.dock = this.settings.dock;
+        if (this.isPending('layout')) next.layout = this.settings.layout;
+        if (this.isPending('preferences')) next.preferences = this.settings.preferences;
+        this.settings = next;
+    }
+
+    /**
+     * Marks one write finished. A later one scheduled while it was in flight
+     * leaves the section pending, so its own answer is still awaited.
+     */
+    private settle(section: Section, id: number): void {
+        const write = this.writes.get(section);
+        if (write) this.writes.set(section, { ...write, answered: Math.max(write.answered, id) });
+    }
 
     // ----- notices -------------------------------------------------------
 

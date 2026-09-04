@@ -104,6 +104,17 @@
         />
     </SettingsRow>
 
+    <SettingsRow
+        label="Show line numbers"
+        hint="Draws a numbered gutter down the side of the YAML editor in the dock. The numbers are also where a YAML error is marked, so turning them off leaves the message without a row to point at."
+    >
+        <Toggle
+            checked={workspace.showLineNumbers}
+            label="Show line numbers in the YAML editor"
+            onchange={(v) => workspace.setShowLineNumbers(v)}
+        />
+    </SettingsRow>
+
     <SettingsRow label="Table density" hint="How tall a row is in a resource listing.">
         <SegmentedControl
             options={DENSITIES}

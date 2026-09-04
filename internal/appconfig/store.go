@@ -41,6 +41,39 @@ type TabRef struct {
 	Kind      string `json:"kind"`
 }
 
+// DockTabRef identifies one tab in the bottom dock. Where a TabRef names a
+// collection -- the pods of a cluster -- a dock tab is a view onto one object,
+// so it carries that object's namespace and name as well.
+//
+// Type names which view it is. There is only one today, "edit", and it is
+// stored rather than assumed so that a dock which grows a second view can still
+// read a file written by this one.
+type DockTabRef struct {
+	Type      string `json:"type"`
+	ContextID string `json:"contextId"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
+// Dock is the state of the strip at the foot of the window: what it has open,
+// whether it is showing it, and how tall it stands when it is.
+//
+// It is one record with one writer rather than tabs here and a size in Layout,
+// and that is load bearing. Everything in it changes together -- opening an
+// editor adds a tab and unfolds the dock in the same gesture -- and every
+// mutator on this store answers with the whole settings for the frontend to
+// adopt. Two writers over one gesture would each answer with the whole of it,
+// and the slower would carry the other's change back to what it was before it
+// was made.
+type Dock struct {
+	Open bool `json:"open"`
+	// Size is the dock's height in px when it is open. Zero from a file written
+	// before the dock existed, which normalise repairs.
+	Size int          `json:"size"`
+	Tabs []DockTabRef `json:"tabs"`
+}
+
 // Layout is the arrangement the user last left the window in.
 type Layout struct {
 	DetailDock   string `json:"detailDock"`   // right | bottom | left
@@ -97,6 +130,14 @@ type Preferences struct {
 	// are the same, so a settings file written before this field existed reads
 	// as "hidden", which is exactly right.
 	ShowKubeconfigNames bool `json:"showKubeconfigNames"`
+	// ShowLineNumbers draws a line-number gutter down the side of the YAML
+	// editor in the bottom dock.
+	//
+	// Nullable for the same reason RestoreTabs is, and for the same reason it
+	// matters: the default is *on*, so a plain bool read from a file written
+	// before this field existed would unmarshal to false and quietly take the
+	// gutter away from everyone who already had it.
+	ShowLineNumbers *bool `json:"showLineNumbers"`
 }
 
 // Settings is the whole persisted file.
@@ -113,8 +154,14 @@ type Settings struct {
 	ExcludedFiles []string                `json:"excludedFiles"`
 	Contexts      map[string]ContextPrefs `json:"contexts"`
 	TabOrder      []TabRef                `json:"tabOrder"`
-	Layout        Layout                  `json:"layout"`
-	Preferences   Preferences             `json:"preferences"`
+	// Dock is the bottom strip: its tabs in the order the user left them, and
+	// whether it is showing them. Kept apart from TabOrder rather than merged
+	// into it: the two strips are reordered independently and hold different
+	// things, and one list would have to carry a discriminator to be split
+	// back apart on read.
+	Dock        Dock        `json:"dock"`
+	Layout      Layout      `json:"layout"`
+	Preferences Preferences `json:"preferences"`
 }
 
 // Defaults returns a settings value that is safe to use before anything has
@@ -126,6 +173,7 @@ func Defaults() Settings {
 		ExcludedFiles: []string{},
 		Contexts:      map[string]ContextPrefs{},
 		TabOrder:      []TabRef{},
+		Dock:          Dock{Size: 320, Tabs: []DockTabRef{}},
 		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
 		Preferences:   Preferences{Theme: ThemeSystem, Density: DensityComfortable},
 	}
@@ -362,6 +410,10 @@ func (s *Store) SetPreferences(p Preferences) (Settings, error) {
 			restore := *p.RestoreTabs
 			p.RestoreTabs = &restore
 		}
+		if p.ShowLineNumbers != nil {
+			numbers := *p.ShowLineNumbers
+			p.ShowLineNumbers = &numbers
+		}
 		d.Preferences = p
 	})
 }
@@ -369,6 +421,17 @@ func (s *Store) SetPreferences(p Preferences) (Settings, error) {
 // SetTabOrder records the order the user dragged their tabs into.
 func (s *Store) SetTabOrder(order []TabRef) (Settings, error) {
 	return s.update(func(d *Settings) { d.TabOrder = slices.Clone(order) })
+}
+
+// SetDock records the whole state of the bottom dock. It is written as one
+// value for the reason Dock is one -- see there.
+func (s *Store) SetDock(dock Dock) (Settings, error) {
+	return s.update(func(d *Settings) {
+		// Cloned on the way in for the same reason clone copies it on the way
+		// out: the caller's slice must not become the store's.
+		dock.Tabs = slices.Clone(dock.Tabs)
+		d.Dock = dock
+	})
 }
 
 // settingsFormat pins the file format to what encoding/json v1 wrote, so moving
@@ -446,6 +509,9 @@ func normalise(s Settings) Settings {
 	if s.TabOrder == nil {
 		s.TabOrder = []TabRef{}
 	}
+	if s.Dock.Tabs == nil {
+		s.Dock.Tabs = []DockTabRef{}
+	}
 	d := Defaults().Layout
 	switch s.Layout.DetailDock {
 	case "right", "bottom", "left":
@@ -463,6 +529,12 @@ func normalise(s Settings) Settings {
 	if s.Layout.Zoom < MinZoom || s.Layout.Zoom > MaxZoom {
 		s.Layout.Zoom = d.Zoom
 	}
+	// Below this the dock would show its tab strip and a couple of lines of
+	// YAML, which is not an editor. A file written before the dock existed
+	// reads as 0 and lands here.
+	if s.Dock.Size < 160 {
+		s.Dock.Size = Defaults().Dock.Size
+	}
 
 	p := Defaults().Preferences
 	switch s.Preferences.Theme {
@@ -475,8 +547,9 @@ func normalise(s Settings) Settings {
 	default:
 		s.Preferences.Density = p.Density
 	}
-	// RestoreTabs is deliberately not defaulted: nil is a value in its own
-	// right here, meaning "never chosen", and the frontend resolves it to true.
+	// RestoreTabs and ShowLineNumbers are deliberately not defaulted: nil is a
+	// value in its own right for both, meaning "never chosen", and the frontend
+	// resolves each to true.
 	return s
 }
 
@@ -486,6 +559,7 @@ func clone(s Settings) Settings {
 	out.ManualFolders = slices.Clone(s.ManualFolders)
 	out.ExcludedFiles = slices.Clone(s.ExcludedFiles)
 	out.TabOrder = slices.Clone(s.TabOrder)
+	out.Dock.Tabs = slices.Clone(s.Dock.Tabs)
 	// slices.Clone keeps nil as nil, which is what preserves "never chosen".
 	out.Layout.CollapsedGroups = slices.Clone(s.Layout.CollapsedGroups)
 	// A copy of the struct shares the pointer; the whole point of clone is that
@@ -493,6 +567,10 @@ func clone(s Settings) Settings {
 	if s.Preferences.RestoreTabs != nil {
 		restore := *s.Preferences.RestoreTabs
 		out.Preferences.RestoreTabs = &restore
+	}
+	if s.Preferences.ShowLineNumbers != nil {
+		numbers := *s.Preferences.ShowLineNumbers
+		out.Preferences.ShowLineNumbers = &numbers
 	}
 	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
 	for k, v := range s.Contexts {

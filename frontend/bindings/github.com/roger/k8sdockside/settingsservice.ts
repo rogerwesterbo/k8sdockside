@@ -69,6 +69,15 @@ export function SetContextPrefs(id: string, prefs: appconfig$0.ContextPrefs): $C
 }
 
 /**
+ * SetDock saves the bottom dock: its tabs in order, whether it is open, and how
+ * tall it stands. It is a separate call from SetTabOrder because the two strips
+ * are dragged independently and each writes on its own.
+ */
+export function SetDock(dock: appconfig$0.Dock): $CancellablePromise<appconfig$0.Settings> {
+    return $Call.ByID(1291703891, dock);
+}
+
+/**
  * SetLayout saves the sidebar width and the detail panel's dock and size.
  */
 export function SetLayout(layout: appconfig$0.Layout): $CancellablePromise<appconfig$0.Settings> {

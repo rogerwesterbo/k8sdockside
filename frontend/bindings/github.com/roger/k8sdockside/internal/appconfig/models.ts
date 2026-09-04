@@ -21,6 +21,46 @@ export interface ContextPrefs {
 }
 
 /**
+ * Dock is the state of the strip at the foot of the window: what it has open,
+ * whether it is showing it, and how tall it stands when it is.
+ * 
+ * It is one record with one writer rather than tabs here and a size in Layout,
+ * and that is load bearing. Everything in it changes together -- opening an
+ * editor adds a tab and unfolds the dock in the same gesture -- and every
+ * mutator on this store answers with the whole settings for the frontend to
+ * adopt. Two writers over one gesture would each answer with the whole of it,
+ * and the slower would carry the other's change back to what it was before it
+ * was made.
+ */
+export interface Dock {
+    "open": boolean;
+
+    /**
+     * Size is the dock's height in px when it is open. Zero from a file written
+     * before the dock existed, which normalise repairs.
+     */
+    "size": number;
+    "tabs": DockTabRef[] | null;
+}
+
+/**
+ * DockTabRef identifies one tab in the bottom dock. Where a TabRef names a
+ * collection -- the pods of a cluster -- a dock tab is a view onto one object,
+ * so it carries that object's namespace and name as well.
+ * 
+ * Type names which view it is. There is only one today, "edit", and it is
+ * stored rather than assumed so that a dock which grows a second view can still
+ * read a file written by this one.
+ */
+export interface DockTabRef {
+    "type": string;
+    "contextId": string;
+    "kind": string;
+    "namespace": string;
+    "name": string;
+}
+
+/**
  * Layout is the arrangement the user last left the window in.
  */
 export interface Layout {
@@ -111,6 +151,17 @@ export interface Preferences {
      * as "hidden", which is exactly right.
      */
     "showKubeconfigNames": boolean;
+
+    /**
+     * ShowLineNumbers draws a line-number gutter down the side of the YAML
+     * editor in the bottom dock.
+     * 
+     * Nullable for the same reason RestoreTabs is, and for the same reason it
+     * matters: the default is *on*, so a plain bool read from a file written
+     * before this field existed would unmarshal to false and quietly take the
+     * gutter away from everyone who already had it.
+     */
+    "showLineNumbers": boolean | null;
 }
 
 /**
@@ -135,6 +186,15 @@ export interface Settings {
     "excludedFiles": string[] | null;
     "contexts": { [_ in string]?: ContextPrefs } | null;
     "tabOrder": TabRef[] | null;
+
+    /**
+     * Dock is the bottom strip: its tabs in the order the user left them, and
+     * whether it is showing them. Kept apart from TabOrder rather than merged
+     * into it: the two strips are reordered independently and hold different
+     * things, and one list would have to carry a discriminator to be split
+     * back apart on read.
+     */
+    "dock": Dock;
     "layout": Layout;
     "preferences": Preferences;
 }
