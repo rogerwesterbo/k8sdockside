@@ -1,0 +1,230 @@
+import { beforeEach, expect, test, vi } from 'vitest';
+import { page } from 'vitest/browser';
+import { render } from 'vitest-browser-svelte';
+import TabBar from './TabBar.svelte';
+
+vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+    KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
+    ResourceService: { Describe: vi.fn().mockResolvedValue('') },
+    SettingsService: {
+        Get: vi.fn().mockResolvedValue({}),
+        ConfigPath: vi.fn().mockResolvedValue(''),
+        // Activating a tab unfolds the section its resource is listed under,
+        // and that folding is a per-context preference, so it is written here.
+        SetContextPrefs: vi.fn().mockResolvedValue({}),
+        SetTabOrder: vi.fn().mockResolvedValue({}),
+        SetLayout: vi.fn().mockResolvedValue({}),
+    },
+}));
+
+const { workspace } = await import('../state/workspace.svelte');
+
+const PROD = '/home/u/.kube/prod::admin@prod';
+const STAGING = '/home/u/.kube/staging::admin@staging';
+
+/** Gives the contexts real names, so the menu can label the scoped items. */
+function withClusters(): void {
+    workspace.files = [
+        {
+            path: '/home/u/.kube/prod',
+            source: 'manual',
+            error: '',
+            contexts: [{ id: PROD, name: 'admin@prod' } as never],
+        },
+        {
+            path: '/home/u/.kube/staging',
+            source: 'manual',
+            error: '',
+            contexts: [{ id: STAGING, name: 'admin@staging' } as never],
+        },
+    ];
+}
+
+/**
+ * Right-click. Dispatched rather than driven through the pointer because the
+ * menu positions itself from clientX/clientY, and naming them keeps the
+ * assertions independent of where the tab happens to land.
+ */
+function rightClick(element: Element): void {
+    element.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 40 }),
+    );
+}
+
+beforeEach(() => {
+    workspace.closeAllTabs();
+    workspace.files = [];
+});
+
+test('right-clicking a tab opens the menu', async () => {
+    workspace.openTab(PROD, 'pods');
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').element());
+
+    await expect.element(page.getByRole('menuitem', { name: 'Close', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('menuitem', { name: 'Close Others' })).toBeVisible();
+    await expect.element(page.getByRole('menuitem', { name: 'Close All' })).toBeVisible();
+});
+
+test('the cluster-scoped items stay hidden while only one cluster has tabs', async () => {
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(PROD, 'nodes');
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').first().element());
+
+    await expect.element(page.getByRole('menuitem', { name: 'Close All' })).toBeVisible();
+    expect(page.getByRole('menuitem', { name: /Close All in/ }).elements()).toHaveLength(0);
+});
+
+test('the cluster-scoped items name the cluster once a second one has tabs', async () => {
+    withClusters();
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(STAGING, 'pods');
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').first().element());
+
+    await expect.element(page.getByRole('menuitem', { name: 'Close Others in admin@prod' })).toBeVisible();
+    await expect.element(page.getByRole('menuitem', { name: 'Close All in admin@prod' })).toBeVisible();
+});
+
+test('right-clicking activates the tab before acting on it', async () => {
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(PROD, 'nodes');
+    workspace.activateTab(workspace.tabs[0].id);
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').nth(1).element());
+
+    expect(workspace.activeTabId).toBe(workspace.tabs[1].id);
+});
+
+test('Close Others leaves the tab it was opened on', async () => {
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(PROD, 'nodes');
+    workspace.openTab(PROD, 'services');
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').nth(1).element());
+    await page.getByRole('menuitem', { name: 'Close Others' }).click();
+
+    expect(workspace.tabs.map((t) => t.kind)).toEqual(['nodes']);
+});
+
+test('Close All in a cluster spares the other cluster', async () => {
+    withClusters();
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(PROD, 'nodes');
+    workspace.openTab(STAGING, 'pods');
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').first().element());
+    await page.getByRole('menuitem', { name: 'Close All in admin@prod' }).click();
+
+    expect(workspace.tabs.map((t) => t.contextId)).toEqual([STAGING]);
+});
+
+test('Escape dismisses the menu without closing anything', async () => {
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(PROD, 'nodes');
+    render(TabBar);
+
+    rightClick(await page.getByRole('tab').first().element());
+    await expect.element(page.getByRole('menuitem', { name: 'Close All' })).toBeVisible();
+
+    await page.getByRole('menu').element().dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+
+    expect(page.getByRole('menuitem').elements()).toHaveLength(0);
+    expect(workspace.tabs).toHaveLength(2);
+});
+
+// ----- scrolling ---------------------------------------------------------
+//
+// These are the reason the component tests run in a real browser: overflow,
+// ResizeObserver and scrollIntoView have no meaningful behaviour in jsdom.
+
+const MANY = ['pods', 'nodes', 'services', 'deployments', 'statefulsets', 'daemonsets',
+    'jobs', 'cronjobs', 'ingresses', 'configmaps', 'secrets', 'persistentvolumeclaims',
+    'events', 'namespaces', 'gateways', 'httproutes', 'grpcroutes', 'gatewayclasses'];
+
+/** Opens enough tabs to overflow the window. */
+function openMany(): void {
+    for (const kind of MANY) workspace.openTab(PROD, kind);
+}
+
+function strip(): HTMLElement {
+    return document.querySelector('.tabbar') as HTMLElement;
+}
+
+/** Puts the strip at its left end and waits for it to settle there. */
+async function scrollToStart(): Promise<void> {
+    workspace.activateTab(workspace.tabs[0].id);
+    await expect.poll(() => strip().scrollLeft).toBe(0);
+}
+
+/** How many arrows of one direction are in the accessibility tree. */
+function arrows(direction: 'left' | 'right'): number {
+    return page.getByRole('button', { name: `Scroll tabs ${direction}` }).elements().length;
+}
+
+test('neither arrow shows while every tab fits', async () => {
+    workspace.openTab(PROD, 'pods');
+    workspace.openTab(PROD, 'nodes');
+    render(TabBar);
+
+    await expect.element(page.getByRole('tab').first()).toBeVisible();
+    // A hidden arrow is out of the accessibility tree entirely, not merely
+    // transparent -- so it cannot be found, rather than found and invisible.
+    expect(arrows('left')).toBe(0);
+    expect(arrows('right')).toBe(0);
+});
+
+test('the right arrow appears once the tabs overflow', async () => {
+    openMany();
+    render(TabBar);
+
+    await expect.element(page.getByRole('button', { name: 'Scroll tabs right' })).toBeVisible();
+
+    // Opening scrolled to the newest tab; back at the left end there is
+    // nothing behind us to reach.
+    await scrollToStart();
+    await expect.poll(() => arrows('left')).toBe(0);
+});
+
+test('the arrow scrolls the strip, and the left one then appears', async () => {
+    openMany();
+    render(TabBar);
+    await scrollToStart();
+
+    await page.getByRole('button', { name: 'Scroll tabs right' }).click();
+
+    await expect.poll(() => strip().scrollLeft).toBeGreaterThan(0);
+    await expect.element(page.getByRole('button', { name: 'Scroll tabs left' })).toBeVisible();
+});
+
+test('a vertical wheel scrolls the strip sideways', async () => {
+    openMany();
+    render(TabBar);
+    await scrollToStart();
+
+    strip().dispatchEvent(new WheelEvent('wheel', { deltaY: 240, bubbles: true, cancelable: true }));
+
+    await expect.poll(() => strip().scrollLeft).toBeGreaterThan(0);
+});
+
+test('selecting a tab that is scrolled out of sight brings it back', async () => {
+    openMany();
+    render(TabBar);
+
+    const first = workspace.tabs[0].id;
+    strip().scrollLeft = strip().scrollWidth;
+    await expect.poll(() => strip().scrollLeft).toBeGreaterThan(0);
+
+    workspace.activateTab(first);
+
+    await expect.poll(() => strip().scrollLeft, { timeout: 3000 }).toBe(0);
+});

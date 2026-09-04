@@ -30,3 +30,26 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+
+.task
+bin
+frontend/dist
+# Unanchored, so a node_modules created anywhere is ignored -- not only the
+# real one at frontend/. A mistyped tool invocation (a --root resolved against
+# the wrong directory, say) drops a dependency cache wherever it was run, and
+# the anchored form left that as 18MB of untracked files asking to be committed.
+node_modules/
+
+# Vite's dependency-optimisation cache, for the same reason.
+.vite/
+# vitest browser-mode leftovers from a failed assertion
+frontend/.vitest-attachments
+frontend/src/**/__screenshots__
+build/linux/appimage/build
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+# Mobile generated (per-machine; overlays hold absolute paths)
+build/ios/xcode/overlay.json
+build/ios/xcode/gen/
+build/android/overlay.json
+build/android/gen/

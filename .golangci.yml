@@ -1,0 +1,9 @@
+version: "2"
+
+linters:
+  exclusions:
+    paths:
+      # Wails scaffold: build/ios and build/android hold generated platform glue
+      # (e.g. modifyOptionsForIOS, only referenced behind //go:build ios) and
+      # Wails' own dependency installer scripts. Not our code, not our lint.
+      - build/

@@ -1,0 +1,203 @@
+/* Application shell: design tokens, reset, and the few rules that have to be
+   global. Everything else lives in the component that owns it. */
+
+:root {
+    /* Surfaces, darkest (window) to lightest (raised control). */
+    --bg: #10151c;
+    --bg-sidebar: #151b24;
+    --bg-panel: #19202a;
+    --bg-raised: #212b38;
+    --bg-hover: rgba(255, 255, 255, 0.08);
+    --bg-active: rgba(255, 255, 255, 0.13);
+
+    /* Borders carry no text, so WCAG's 4.5 does not apply to them -- but at
+       the old #28323f they sat at 1.1--1.4 against the surfaces either side,
+       which is close enough to invisible that panels ran into one another. */
+    --border: #46536a;
+    /* Deliberately much fainter than --border, and tuned down by eye rather
+       than to a contrast target. This one separates rows inside a list --
+       table rows, settings rows -- where a line per item adds up, and the job
+       is to group the rows without the grid competing with what is in it.
+       --border is the structural edge around a panel, where being seen is the
+       whole point; the two are not the same setting and should not be merged. */
+    --border-soft: rgba(255, 255, 255, 0.05);
+
+    /*
+       Text contrast, measured against all four surfaces above.
+
+       --text-faint was the problem: at #616e7d it scored 2.75 on --bg-raised,
+       failing every WCAG threshold, and it is the token carrying most of the
+       small print -- hints, counts, section headings, file paths -- much of it
+       at 10--11px. The values below clear AA (4.5) on every surface, the worst
+       case being --text-faint on --bg-raised at 4.57.
+
+       --accent is deliberately unchanged. It is used as a background as often
+       as a colour, and lightening it for text would take white-on-accent from
+       3.42 down to 2.67 and shift every context-coloured tab with it.
+    */
+    --text: #e8eef7;
+    --text-dim: #a9b6c6;
+    --text-faint: #8593a3;
+
+    --accent: #4a86ff;
+    --ok: #5fd39b;
+    --warn: #efb567;
+    --error: #f4787f;
+
+    --radius: 6px;
+    --radius-sm: 4px;
+    /* Both set from the density preference by the shell. These are the values
+       before the settings have loaded: --row-h is the sidebar tree's row,
+       --cell-pad-y the vertical padding in a resource table's cells. */
+    --row-h: 30px;
+    --cell-pad-y: 6px;
+
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    font-family: var(--font);
+    font-size: 13px;
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+}
+
+/*
+   The theme seam.
+
+   The shell resolves the user's choice -- system, light or dark -- against the
+   OS and stamps the answer on the root as data-theme. Every rule below keys off
+   that attribute alone: no component asks what the theme is, and no media query
+   decides it, because "system" has already been resolved by the time it gets
+   here. That keeps one source of truth for what the app is currently wearing.
+
+   The tokens above are the dark palette, which is what this app has always
+   been, so [data-theme='dark'] adds nothing to them. The light palette is not
+   built yet -- these values are a placeholder so the control is not wired to
+   nothing, and the component-by-component audit that makes light actually
+   habitable is its own piece of work.
+*/
+:root[data-theme='light'] {
+    --bg: #f6f7f9;
+    --bg-sidebar: #eef0f4;
+    --bg-panel: #ffffff;
+    --bg-raised: #e7eaf0;
+    --bg-hover: rgba(0, 0, 0, 0.045);
+    --bg-active: rgba(0, 0, 0, 0.075);
+
+    --border: #d5dae2;
+    --border-soft: rgba(0, 0, 0, 0.07);
+
+    --text: #1b2430;
+    --text-dim: #55616f;
+    --text-faint: #7c8794;
+
+    --accent: #2f6fe4;
+    --ok: #1f8a58;
+    --warn: #a96b16;
+    --error: #c8384a;
+
+    color-scheme: light;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+}
+
+body {
+    /* This is an application, not a document: only fields and code blocks are
+       selectable, and they opt back in below. */
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* The zoom is applied here rather than on :root, and the difference matters.
+   A percentage height inside a zoomed *root* does not account for that zoom, so
+   the shell resolves to the full viewport height and is then scaled past it --
+   which is what puts scrollbars on the window. On a child element the
+   containing block is divided by the element's own zoom, so `height: 100%`
+   keeps meaning "the window" at every scale. */
+#app {
+    height: 100%;
+    zoom: var(--app-zoom, 1);
+}
+
+input,
+textarea,
+pre,
+code,
+.selectable {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+input[type="text"],
+input[type="search"] {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 5px 8px;
+    outline: none;
+}
+
+input[type="text"]:focus,
+input[type="search"]:focus {
+    border-color: var(--accent);
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+/* Scrollbars: present but quiet, so dense tables do not gain a heavy frame. */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.11);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+    background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+    }
+}

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=k8sdockside
+Exec=k8sdockside
+Icon=k8sdockside
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false
