@@ -133,6 +133,21 @@ func mapString(m map[string]any, key string) string {
 	return s
 }
 
+// mapInt reads a whole number from an unstructured map. The dynamic client
+// decodes JSON numbers to int64, but an object that has been through a JSON
+// round trip can hold float64, so both are read; anything else -- including a
+// missing key -- counts as absent, which for a printer column's priority is
+// the same as saying zero.
+func mapInt(m map[string]any, key string) int64 {
+	switch n := m[key].(type) {
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return 0
+}
+
 // ageOf renders how long ago an object was created, in the same shape the rest
 // of the app uses.
 func ageOf(u *unstructured.Unstructured) string {
@@ -181,8 +196,8 @@ var builtinColumns = map[string][]column{
 		{Name: "QoS", Path: ".status.qosClass"},
 		ageColumn,
 	},
-	KindDeployments:  workloadColumns,
-	KindStatefulSet:  workloadColumns,
+	KindDeployments: workloadColumns,
+	KindStatefulSet: workloadColumns,
 	KindDaemonSets: {
 		nameColumn,
 		{Name: "Desired", Path: ".status.desiredNumberScheduled"},
@@ -679,7 +694,8 @@ var crdResource = schema.GroupVersionResource{
 // else: a CRD carries additionalPrinterColumns -- a header and a JSONPath for
 // each -- precisely so a client can render a kind it has never heard of. It is
 // where `kubectl get` gets its columns too, so the tables match what the user
-// sees on the command line.
+// sees on the command line: the priority-0 columns of a plain `kubectl get`,
+// without the extras that only `-o wide` asks for.
 func (c *clusterClient) customColumns(kind string, namespaced bool) ([]column, error) {
 	plural, group, ok := ParseCustomKind(kind)
 	if !ok {
@@ -697,11 +713,25 @@ func (c *clusterClient) customColumns(kind string, namespaced bool) ([]column, e
 		return withNamespace([]column{nameColumn, ageColumn}, namespaced), nil
 	}
 
+	return withNamespace(crdColumns(crd), namespaced), nil
+}
+
+// crdColumns turns what a definition declares into the columns of its table,
+// between the Name and Age every kind gets.
+func crdColumns(crd *unstructured.Unstructured) []column {
 	cols := []column{nameColumn}
 	for _, raw := range pickCRDVersion(crd) {
 		spec := asMap(raw)
 		name, path := mapString(spec, "name"), mapString(spec, "jsonPath")
 		if name == "" || path == "" {
+			continue
+		}
+		// A printer column's priority says which view it belongs to: 0 is the
+		// standard table, anything higher is held back for `kubectl get -o
+		// wide`. A tab is the standard table, so the wide-only columns are
+		// dropped rather than left to crowd it -- an operator that declares a
+		// dozen of them would otherwise make the tab unreadable.
+		if mapInt(spec, "priority") != 0 {
 			continue
 		}
 		// A CRD is free to define an Age column of its own; ours goes last, so
@@ -711,9 +741,7 @@ func (c *clusterClient) customColumns(kind string, namespaced bool) ([]column, e
 		}
 		cols = append(cols, column{Name: name, Path: path})
 	}
-	cols = append(cols, ageColumn)
-
-	return withNamespace(cols, namespaced), nil
+	return append(cols, ageColumn)
 }
 
 // pickCRDVersion returns the printer columns of the version the cluster stores,
@@ -738,7 +766,6 @@ func pickCRDVersion(crd *unstructured.Unstructured) []any {
 	}
 	return first
 }
-
 
 // orderRows arranges a kind's rows: by its declared column where it has one,
 // otherwise by namespace and name.

@@ -205,6 +205,42 @@ func TestPickCRDVersionPrefersStorageOverServed(t *testing.T) {
 	}
 }
 
+// TestCRDColumnsKeepTheStandardTableAndDropTheWideOnes pins the priority rule:
+// a tab is a plain `kubectl get`, so priority-0 columns are the table and the
+// higher ones -- the `-o wide` extras -- are left out.
+func TestCRDColumnsKeepTheStandardTableAndDropTheWideOnes(t *testing.T) {
+	crd := obj(map[string]any{
+		"metadata": map[string]any{"name": "certificates.cert-manager.io"},
+		"spec": map[string]any{"versions": []any{
+			map[string]any{"name": "v1", "served": true, "storage": true,
+				"additionalPrinterColumns": []any{
+					map[string]any{"name": "Ready", "jsonPath": ".status.ready"},
+					// Wide-only, spelled both ways a decoded manifest can hold
+					// a number.
+					map[string]any{"name": "Issuer", "jsonPath": ".spec.issuerRef.name", "priority": int64(1)},
+					map[string]any{"name": "Secret", "jsonPath": ".spec.secretName", "priority": float64(1)},
+					// Absent priority means 0, which is the standard table.
+					map[string]any{"name": "Expires", "jsonPath": ".status.notAfter"},
+					// A CRD's own Age would double the one we append.
+					map[string]any{"name": "Age", "jsonPath": ".metadata.creationTimestamp"},
+					// Neither half of a column is optional.
+					map[string]any{"name": "Nameless", "jsonPath": ""},
+					map[string]any{"name": "", "jsonPath": ".spec.pathless"},
+				}},
+		}},
+	})
+
+	var got []string
+	for _, c := range crdColumns(crd) {
+		got = append(got, c.Name)
+	}
+
+	want := []string{"Name", "Ready", "Expires", "Age"}
+	if !slices.Equal(got, want) {
+		t.Errorf("columns = %v, want %v", got, want)
+	}
+}
+
 func TestStripBulkRedactsSecretValuesBeforeTheyAreCached(t *testing.T) {
 	secret := obj(map[string]any{
 		"kind":     "Secret",
