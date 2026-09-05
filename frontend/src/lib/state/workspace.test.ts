@@ -85,7 +85,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
 }));
 
-const { workspace, isSettingsTab, resourceTabId, CLUSTERS_TAB_ID, clustersTab } =
+const { workspace, isSettingsTab, resourceTabId, tabIdFor, CLUSTERS_TAB_ID, clustersTab } =
     await import('./workspace.svelte');
 const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
@@ -2171,5 +2171,83 @@ describe('the cluster tree', () => {
         await workspace.sync();
 
         expect(workspace.paneOf(CLUSTERS_TAB_ID)).not.toBeNull();
+    });
+});
+
+// The way out of an arrangement that has gone wrong. It gives up the
+// arrangement, never the work: a reset closes nothing.
+describe('resetting the layout', () => {
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    beforeEach(() => {
+        workspace.closeAllTabsIn('main');
+        workspace.closeAllTabsIn('right');
+        workspace.closeAllTabsIn('bottom');
+        if (workspace.paneOf(CLUSTERS_TAB_ID) === null) {
+            workspace.panes.left.tabs = [clustersTab()];
+        }
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'left');
+    });
+
+    test('sends every view back to the pane its kind opens in', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+        // Everything piled into one pane, which is the state this undoes.
+        workspace.moveTabToPane(resourceTabId(PROD, 'pods'), 'right');
+        workspace.moveTabToPane(tabIdFor('edit', WEB), 'right');
+
+        workspace.resetLayout();
+
+        expect(workspace.panes.main.tabs.map((t) => t.kind)).toEqual(['pods']);
+        expect(workspace.panes.bottom.tabs.map((t) => t.name)).toEqual(['web']);
+        expect(workspace.panes.right.tabs).toHaveLength(0);
+    });
+
+    test('closes nothing: the tabs are the work, only their places are given up', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+        const before = workspace.allTabs.length;
+
+        workspace.resetLayout();
+
+        expect(workspace.allTabs).toHaveLength(before);
+        // And the editor is still the same editor, so nothing in it was lost.
+        expect(workspace.isEditing(WEB)).toBe(true);
+    });
+
+    test('brings back a panel that had been hidden, and the tree with it', () => {
+        workspace.toggleClusters();
+        expect(workspace.isPaneOpen('left')).toBe(false);
+
+        workspace.resetLayout();
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+        expect(workspace.isPaneOpen('left')).toBe(true);
+    });
+
+    test('puts the sizes back', () => {
+        workspace.setPaneSize('left', 500);
+
+        workspace.resetLayout();
+
+        expect(workspace.panes.left.size).toBe(260);
+    });
+
+    test('leaves the bottom pane folded when the reset put nothing in it', () => {
+        workspace.openTab(PROD, 'pods');
+
+        workspace.resetLayout();
+
+        expect(workspace.panes.bottom.open).toBe(false);
+    });
+
+    // One tree, not two: it is already in a fresh set of panes, so the one the
+    // user had must not be added beside it.
+    test('does not end up with two cluster trees', () => {
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'bottom');
+
+        workspace.resetLayout();
+
+        expect(workspace.allTabs.filter((t) => t.view === 'clusters')).toHaveLength(1);
     });
 });

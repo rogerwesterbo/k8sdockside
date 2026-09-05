@@ -34,6 +34,7 @@ import {
     CLUSTERS_TAB_ID,
     PANE_IDS,
     clustersTab,
+    defaultPaneFor,
     defaultPanes,
     isDocumentView,
     isPaneId,
@@ -77,6 +78,7 @@ export {
     PANE_IDS,
     PANE_LABELS,
     clustersTab,
+    defaultPaneFor,
     isHorizontal,
     isDocumentView,
     isPaneId,
@@ -888,6 +890,9 @@ class Workspace {
     // thing that differs between "close this editor" and "close this pod list"
     // is which pane the predicate runs over.
 
+    /** The cluster tree's tab id, so a component can ask where the tree is. */
+    readonly CLUSTERS_TAB_ID = CLUSTERS_TAB_ID;
+
     /** The pane a tab is in, or null if no pane holds it. */
     paneOf(id: string): PaneId | null {
         return PANE_IDS.find((pane) => this.panes[pane].tabs.some((t) => t.id === id)) ?? null;
@@ -1240,6 +1245,39 @@ class Workspace {
     setPaneSize(pane: PaneId, px: number): void {
         this.panes[pane].size = Math.round(px);
         this.persistPanes();
+    }
+
+    /**
+     * Puts every view back where it would have opened, at the sizes a fresh
+     * install has.
+     *
+     * The way out of an arrangement that has gone wrong -- a panel dragged to
+     * one pixel, everything piled into one pane, a layout restored from a much
+     * larger screen. Nothing is closed: the tabs are the user's work and only
+     * their arrangement is being given up, so each goes back to the pane its
+     * kind of view opens in.
+     */
+    resetLayout(): void {
+        const open = PANE_IDS.flatMap((pane) => this.panes[pane].tabs);
+        const fresh = defaultPanes();
+
+        for (const tab of open) {
+            // The tree is already in the fresh panes; adding it again would
+            // give the left panel two of it.
+            if (tab.view === 'clusters') continue;
+            fresh[defaultPaneFor(tab.view)].tabs.push(tab);
+        }
+        for (const pane of PANE_IDS) {
+            fresh[pane].activeId = fresh[pane].tabs[0]?.id ?? null;
+        }
+        // The bottom pane unfolds only if the reset put something in it, which
+        // is the rule it follows everywhere else.
+        fresh.bottom.open = fresh.bottom.tabs.length > 0;
+
+        this.panes = fresh;
+        this.focusedTabId = null;
+        this.persistPanes();
+        this.inform('Layout reset');
     }
 
     // ----- the bottom pane, under the names the dock had ------------------
