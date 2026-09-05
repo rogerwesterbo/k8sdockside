@@ -301,7 +301,7 @@ jobs:
       # than as a release asset. Answers "which workflow, from which commit,
       # produced this exact file" for anyone running `gh attestation verify`.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*
 
