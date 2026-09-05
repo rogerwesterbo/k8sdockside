@@ -4,6 +4,20 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 // checking what has been typed, and writing it back -- so the bindings are
 // stubbed. What is under test is what happens to a document in between.
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+    HelmService: {
+        Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
+        Detail: vi.fn().mockResolvedValue({
+            name: '', namespace: '', revision: 1, status: 'deployed',
+            chart: '', chartName: '', chartVersion: '', appVersion: '',
+            description: '', firstDeployed: '', updated: '', notes: '',
+            values: '', userValues: '', resources: [], revisions: [],
+        }),
+        Tool: vi.fn().mockResolvedValue({ found: true, path: '/usr/bin/helm', version: 'v3.16.2', configured: false, reason: '' }),
+        Upgrade: vi.fn().mockResolvedValue(''),
+        Rollback: vi.fn().mockResolvedValue(''),
+        Uninstall: vi.fn().mockResolvedValue(''),
+        ChartVersions: vi.fn().mockResolvedValue([]),
+    },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
         Open: vi.fn().mockResolvedValue('logs-1'),
@@ -18,7 +32,9 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 
 const { editors } = await import('./editor.svelte');
 const { changes } = await import('./changes.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+const { HelmService, ResourceService } = await import(
+    '../../../bindings/github.com/rogerwesterbo/k8sdockside'
+);
 
 const TAB = 'edit:cfg::prod#pods#default#web';
 const TARGET = { contextId: 'cfg::prod', kind: 'pods', namespace: 'default', name: 'web' };
@@ -234,4 +250,136 @@ test('closing a tab drops its document', async () => {
 
     expect(editors.doc(TAB).status).toBe('loading');
     expect(editors.isDirty(TAB)).toBe(false);
+});
+
+// A Helm release opens in the same editor as an object, and that is the whole
+// point: the folding, the search, the dirty mark and surviving a switch to
+// another dock tab are worth as much to a values file as to a manifest. What
+// differs is what is read and what a save means.
+describe('a Helm release, which is a document but not an object', () => {
+    const RELEASE_TAB = 'helmvalues:cfg::prod#helmreleases#rook-ceph#rook-ceph';
+    const RELEASE = {
+        contextId: 'cfg::prod',
+        kind: 'helmreleases',
+        namespace: 'rook-ceph',
+        name: 'rook-ceph',
+    };
+
+    const DETAIL = {
+        name: 'rook-ceph',
+        namespace: 'rook-ceph',
+        revision: 3,
+        status: 'deployed',
+        chart: 'rook-ceph-v1.19.8',
+        chartName: 'rook-ceph',
+        chartVersion: 'v1.19.8',
+        appVersion: 'v1.19.8',
+        description: 'Upgrade complete',
+        firstDeployed: '',
+        updated: '',
+        notes: '',
+        values: 'allowLoopDevices: false\ncsi:\n  provisionerReplicas: 3\n',
+        userValues: 'csi:\n  provisionerReplicas: 3\n',
+        resources: [],
+        revisions: [],
+    };
+
+    beforeEach(() => {
+        editors.forget(RELEASE_TAB);
+        vi.mocked(HelmService.Detail).mockReset().mockResolvedValue(DETAIL);
+        vi.mocked(HelmService.Upgrade).mockReset().mockResolvedValue('Release "rook-ceph" has been upgraded.');
+    });
+
+    // The user's own document, not the merged one. Editing the chart's defaults
+    // would turn every default into an override, and pin the release to today's
+    // values of settings the chart is free to change.
+    test('the document is the user-supplied values, not the merged ones', async () => {
+        await editors.load(RELEASE_TAB, RELEASE);
+
+        expect(editors.doc(RELEASE_TAB).text).toBe(DETAIL.userValues);
+        expect(editors.doc(RELEASE_TAB).text).not.toContain('allowLoopDevices');
+        expect(ResourceService.ResourceYAML).not.toHaveBeenCalled();
+    });
+
+    // The half that is known. A repo alias, an OCI URL or a path is not in the
+    // release record at all, so the field opens on the chart's bare name and
+    // the user completes it.
+    test('the chart and version open on what the release knows', async () => {
+        await editors.load(RELEASE_TAB, RELEASE);
+        const doc = editors.doc(RELEASE_TAB);
+
+        expect(doc.chart).toBe('rook-ceph');
+        expect(doc.version).toBe('v1.19.8');
+    });
+
+    test('saving runs an upgrade with the edited values', async () => {
+        await editors.load(RELEASE_TAB, RELEASE);
+        editors.setChart(RELEASE_TAB, { chart: 'rook-release/rook-ceph', version: 'v1.19.9' });
+        editors.edit(RELEASE_TAB, 'csi:\n  provisionerReplicas: 5\n');
+
+        expect(await editors.save(RELEASE_TAB, RELEASE)).toBe(true);
+
+        expect(HelmService.Upgrade).toHaveBeenCalledWith(
+            'cfg::prod',
+            'rook-ceph',
+            'rook-ceph',
+            'rook-release/rook-ceph',
+            'v1.19.9',
+            'csi:\n  provisionerReplicas: 5\n',
+        );
+        expect(ResourceService.ApplyYAML).not.toHaveBeenCalled();
+    });
+
+    // helm answers with a report of the upgrade rather than with the release,
+    // so what was sent is what the release now holds -- and the document is
+    // level with the cluster rather than still reading as unsaved.
+    test('a successful upgrade leaves the document clean', async () => {
+        await editors.load(RELEASE_TAB, RELEASE);
+        editors.setChart(RELEASE_TAB, { chart: 'rook-release/rook-ceph' });
+        editors.edit(RELEASE_TAB, 'csi:\n  provisionerReplicas: 5\n');
+        expect(editors.isDirty(RELEASE_TAB)).toBe(true);
+
+        await editors.save(RELEASE_TAB, RELEASE);
+
+        expect(editors.isDirty(RELEASE_TAB)).toBe(false);
+        expect(editors.doc(RELEASE_TAB).text).toBe('csi:\n  provisionerReplicas: 5\n');
+    });
+
+    test('a failed upgrade keeps the edit and reports what helm said', async () => {
+        vi.mocked(HelmService.Upgrade).mockRejectedValue(
+            new Error('Error: UPGRADE FAILED: timed out waiting for the condition'),
+        );
+        await editors.load(RELEASE_TAB, RELEASE);
+        editors.setChart(RELEASE_TAB, { chart: 'rook-release/rook-ceph' });
+        editors.edit(RELEASE_TAB, 'csi:\n  provisionerReplicas: 5\n');
+
+        expect(await editors.save(RELEASE_TAB, RELEASE)).toBe(false);
+
+        const doc = editors.doc(RELEASE_TAB);
+        expect(doc.error).toContain('timed out waiting for the condition');
+        // The edit is still there to try again with.
+        expect(doc.text).toBe('csi:\n  provisionerReplicas: 5\n');
+        expect(editors.isDirty(RELEASE_TAB)).toBe(true);
+    });
+
+    // Typing a repo alias and then switching dock tabs is not finishing, so it
+    // must not have to be typed again.
+    test('the chart survives being edited without the document being touched', async () => {
+        await editors.load(RELEASE_TAB, RELEASE);
+
+        editors.setChart(RELEASE_TAB, { chart: 'oci://ghcr.io/rook/rook-ceph' });
+
+        expect(editors.doc(RELEASE_TAB).chart).toBe('oci://ghcr.io/rook/rook-ceph');
+        // Changing where the chart comes from is not an edit to the values.
+        expect(editors.isDirty(RELEASE_TAB)).toBe(false);
+    });
+
+    test('a release that cannot be read reports it where the document would be', async () => {
+        vi.mocked(HelmService.Detail).mockRejectedValue(new Error('secrets is forbidden'));
+
+        await editors.load(RELEASE_TAB, RELEASE);
+
+        expect(editors.doc(RELEASE_TAB).status).toBe('error');
+        expect(editors.doc(RELEASE_TAB).error).toContain('forbidden');
+    });
 });

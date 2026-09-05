@@ -6,6 +6,20 @@ import SettingsView from './SettingsView.svelte';
 // The About section asks the backend what this build is the moment it mounts,
 // and the sources section reads the file list; neither is what is under test.
 vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+    HelmService: {
+        Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
+        Detail: vi.fn().mockResolvedValue({
+            name: '', namespace: '', revision: 1, status: 'deployed',
+            chart: '', chartName: '', chartVersion: '', appVersion: '',
+            description: '', firstDeployed: '', updated: '', notes: '',
+            values: '', userValues: '', resources: [], revisions: [],
+        }),
+        Tool: vi.fn().mockResolvedValue({ found: true, path: '/usr/bin/helm', version: 'v3.16.2', configured: false, reason: '' }),
+        Upgrade: vi.fn().mockResolvedValue(''),
+        Rollback: vi.fn().mockResolvedValue(''),
+        Uninstall: vi.fn().mockResolvedValue(''),
+        ChartVersions: vi.fn().mockResolvedValue([]),
+    },
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue('') },
     LogService: {
@@ -88,6 +102,7 @@ test('the sections are ordered with the everyday ones first and About last', asy
         'Plugins',
         'Behaviour',
         'Terminal',
+        'Helm',
         'Kubeconfig sources',
         'About',
     ]);

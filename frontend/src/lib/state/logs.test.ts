@@ -13,6 +13,20 @@ vi.mock('@wailsio/runtime', () => ({
     },
 }));
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+    HelmService: {
+        Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
+        Detail: vi.fn().mockResolvedValue({
+            name: '', namespace: '', revision: 1, status: 'deployed',
+            chart: '', chartName: '', chartVersion: '', appVersion: '',
+            description: '', firstDeployed: '', updated: '', notes: '',
+            values: '', userValues: '', resources: [], revisions: [],
+        }),
+        Tool: vi.fn().mockResolvedValue({ found: true, path: '/usr/bin/helm', version: 'v3.16.2', configured: false, reason: '' }),
+        Upgrade: vi.fn().mockResolvedValue(''),
+        Rollback: vi.fn().mockResolvedValue(''),
+        Uninstall: vi.fn().mockResolvedValue(''),
+        ChartVersions: vi.fn().mockResolvedValue([]),
+    },
     LogService: { Containers, Open, Close },
 }));
 

@@ -1,5 +1,15 @@
 <!--
-  The YAML editor: one object, as the cluster has it, editable and saved back.
+  The YAML editor: one object, as the cluster has it, editable and saved back --
+  or one Helm release's values, which is the same gesture on a different kind of
+  document.
+
+  A release is not an object, so its document is its user-supplied values and a
+  save is `helm upgrade` rather than an apply. Two things follow that this
+  component has to show and an object's editor does not: which chart the upgrade
+  fetches, and which version of it. Neither can be derived -- Helm's release
+  record keeps a chart's name and version but not where it came from -- so they
+  are fields, filled in as far as the release can fill them. See
+  ../state/editor.svelte.ts.
 
   CodeMirror rather than a textarea. A textarea holds one flat string, which
   makes two things impossible rather than merely absent: finding text with the
@@ -20,6 +30,7 @@
     import { extensions, numbering, setBadLine } from '../editor/setup';
     import { lineNumbers } from '@codemirror/view';
     import { editors } from '../state/editor.svelte';
+    import { helm } from '../state/helm.svelte';
     import { workspace, type DockTab } from '../state/workspace.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
@@ -34,7 +45,69 @@
     let dirty = $derived(editors.isDirty(tab.id));
     let color = $derived(workspace.colorOf(tab.contextId));
     let context = $derived(workspace.contexts.find((c) => c.id === tab.contextId) ?? null);
-    let canSave = $derived(doc.status === 'ready' && dirty && doc.check.valid && !doc.saving);
+
+    /** Whether this tab holds a Helm release's values rather than an object. */
+    let isRelease = $derived(tab.view === 'helmvalues');
+    /**
+     * Whether helm is on this machine, which only a release needs.
+     *
+     * Probed once when a release tab opens rather than read at the button: the
+     * answer changes when the setting does, and `helm.probe` is what the
+     * settings view calls then.
+     */
+    let helmMissing = $derived(isRelease && helm.probed && !helm.tool.found);
+
+    /**
+     * An upgrade is worth offering when there is something to change *and* a
+     * chart to fetch. The version may be empty -- helm reads that as "whatever
+     * the repository calls latest", which is a real thing to ask for.
+     *
+     * A release is savable even when the document is not dirty: bumping the
+     * version alone is a change, and it is not in the text.
+     */
+    let changed = $derived(isRelease ? dirty || doc.version !== '' : dirty);
+    let canSave = $derived(
+        doc.status === 'ready' &&
+            changed &&
+            doc.check.valid &&
+            !doc.saving &&
+            (!isRelease || (doc.chart.trim() !== '' && !helmMissing)),
+    );
+
+    /** The versions the repositories offer for the chart in the field. */
+    let versions = $state<string[]>([]);
+    let lookingUp = $state(false);
+
+    // Ask where helm is the first time a release tab is opened. Nothing else in
+    // this component needs it, so an object's editor never makes the call.
+    $effect(() => {
+        if (isRelease && !helm.probed) void helm.probe();
+    });
+
+    /**
+     * Asks the repositories what versions of this chart exist.
+     *
+     * On demand rather than as the field is typed: it reaches the network, and
+     * a lookup per keystroke against a repo index would be both slow and rude.
+     * Finding nothing is an ordinary answer -- an OCI or local chart is in no
+     * index -- so it is reported quietly and the field stays typeable.
+     */
+    async function lookUpVersions(): Promise<void> {
+        const chart = doc.chart.trim();
+        if (!chart || lookingUp) return;
+        lookingUp = true;
+        try {
+            const found = await helm.versions(chart);
+            versions = found.map((v) => v.version);
+            if (versions.length === 0) {
+                workspace.inform(`No repository on this machine offers ${chart}`);
+            }
+        } catch (err) {
+            workspace.fail(err instanceof Error ? err.message : String(err));
+        } finally {
+            lookingUp = false;
+        }
+    }
 
     let host = $state<HTMLElement | null>(null);
     let view: EditorView | null = null;
@@ -107,11 +180,23 @@
     async function save(): Promise<void> {
         if (!canSave) return;
         if (await editors.save(tab.id, tab)) {
-            workspace.inform(`${singularFor(tab.kind)} ${tab.name} saved`);
+            workspace.inform(
+                isRelease
+                    ? `${tab.name} upgraded to ${doc.chart}${doc.version ? ` ${doc.version}` : ''}`
+                    : `${singularFor(tab.kind)} ${tab.name} saved`,
+            );
         }
     }
 
-    /** Re-reads the object, throwing away whatever was typed against it. */
+    /** Why Upgrade is or is not available, as the button's tooltip. */
+    function upgradeHint(): string {
+        if (helmMissing) return 'helm was not found on this machine';
+        if (doc.chart.trim() === '') return 'Name the chart this release should be upgraded to';
+        if (!changed) return 'Nothing to upgrade';
+        return 'Run helm upgrade with these values (⌘S)';
+    }
+
+    /** Re-reads the document, throwing away whatever was typed against it. */
     function reload(): void {
         if (dirty && !confirm(`Discard your changes to ${tab.name} and re-read it from the cluster?`)) {
             return;
@@ -123,7 +208,7 @@
 <div class="editor" style:--ctx-color={color} style:--ctx-tint={alpha(color, 0.1)}>
     <header>
         <div class="ident">
-            <span class="kind">{singularFor(tab.kind)}</span>
+            <span class="kind">{isRelease ? 'Values' : singularFor(tab.kind)}</span>
             <span class="name selectable">{tab.name}</span>
             {#if tab.namespace}<span class="dim">in {tab.namespace}</span>{/if}
             {#if context}<span class="dim">· {workspace.displayName(context)}</span>{/if}
@@ -153,13 +238,60 @@
                 class="save"
                 onclick={save}
                 disabled={!canSave}
-                title={dirty ? 'Save to the cluster (⌘S)' : 'No changes to save'}
+                title={isRelease ? upgradeHint() : dirty ? 'Save to the cluster (⌘S)' : 'No changes to save'}
             >
-                <Icon name="save" size={13} />
-                Save
+                <Icon name={isRelease ? 'rocket' : 'save'} size={13} />
+                {isRelease ? 'Upgrade' : 'Save'}
             </button>
         </div>
     </header>
+
+    {#if isRelease && doc.status === 'ready'}
+        <!-- What an upgrade will fetch. Below the header rather than in it: the
+             chart is not part of the release's identity, it is an argument to
+             the thing the button does. -->
+        <div class="chart">
+            <label>
+                <span>Chart</span>
+                <input
+                    type="text"
+                    value={doc.chart}
+                    oninput={(e) => editors.setChart(tab.id, { chart: e.currentTarget.value })}
+                    placeholder="repo/chart, oci://…, or a path"
+                    spellcheck="false"
+                />
+            </label>
+            <label class="version">
+                <span>Version</span>
+                <input
+                    type="text"
+                    list="{tab.id}-versions"
+                    value={doc.version}
+                    oninput={(e) => editors.setChart(tab.id, { version: e.currentTarget.value })}
+                    placeholder="latest"
+                    spellcheck="false"
+                />
+                <datalist id="{tab.id}-versions">
+                    {#each versions as version (version)}
+                        <option value={version}></option>
+                    {/each}
+                </datalist>
+            </label>
+            <button class="ghost" onclick={lookUpVersions} disabled={lookingUp || doc.chart.trim() === ''}>
+                <Icon name="search" size={12} />
+                {lookingUp ? 'Looking…' : 'Versions'}
+            </button>
+        </div>
+
+        {#if helmMissing}
+            <!-- Not a failure of this view: everything above still works, and
+                 the drawer behind it reads the release without helm at all. -->
+            <p class="refused selectable">
+                <Icon name="alert" size={13} />
+                <span>{helm.tool.reason}</span>
+            </p>
+        {/if}
+    {/if}
 
     {#if doc.error && doc.status === 'ready'}
         <!-- A refused save: the API server's own words, which is where the
@@ -303,6 +435,58 @@
         box-shadow: inset 0 0 0 1px var(--border);
         color: var(--text-faint);
         opacity: 1;
+    }
+
+    /* The chart an upgrade fetches, on its own strip under the header. The
+       chart field takes the room because a reference is long -- an OCI URL or a
+       path -- and a version is six characters. */
+    .chart {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 12px;
+        flex: 0 0 auto;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+    }
+
+    .chart label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1 1 auto;
+        min-width: 0;
+        font-size: 11px;
+        color: var(--text-faint);
+    }
+
+    .chart label.version {
+        flex: 0 0 auto;
+        width: 190px;
+    }
+
+    .chart span {
+        flex: 0 0 auto;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        font-size: 10px;
+    }
+
+    .chart input {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 3px 7px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-panel);
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11.5px;
+    }
+
+    .chart input:focus-visible {
+        outline: none;
+        border-color: var(--ctx-color);
     }
 
     .refused {

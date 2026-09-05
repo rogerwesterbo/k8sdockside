@@ -16,7 +16,10 @@ export type ActionId =
     | 'restart'
     | 'cordon'
     | 'drain'
-    | 'delete';
+    | 'delete'
+    | 'values'
+    | 'rollback'
+    | 'uninstall';
 
 /**
  * How choosing an action behaves.
@@ -24,7 +27,7 @@ export type ActionId =
  * `immediate` runs at once, `confirm` replaces the bar with a question naming
  * the object, and `number` asks for a replica count first.
  */
-export type ActionForm = 'immediate' | 'confirm' | 'number' | 'ports';
+export type ActionForm = 'immediate' | 'confirm' | 'number' | 'ports' | 'revision';
 
 export interface Action {
     id: ActionId;
@@ -33,6 +36,15 @@ export interface Action {
     form: ActionForm;
     /** Marks the action that cannot be undone, so the bar can colour it apart. */
     tone?: 'danger';
+    /**
+     * Marks an action that runs helm rather than talking to the API server.
+     *
+     * The bar disables these, with the reason, on a machine where helm was not
+     * found. Reading a release needs nothing installed -- the record is a
+     * Secret the app decodes -- but changing one is Helm's own operation. See
+     * internal/helmcli.
+     */
+    needsHelm?: boolean;
 }
 
 const EDIT: Action = { id: 'edit', label: 'Edit', icon: 'edit', form: 'immediate' };
@@ -56,6 +68,42 @@ const CORDON: Action = { id: 'cordon', label: 'Cordon', icon: 'shield', form: 'i
 // Draining moves every workload off a node. Routine, and never a single click.
 const DRAIN: Action = { id: 'drain', label: 'Drain', icon: 'server', form: 'confirm' };
 const DELETE: Action = { id: 'delete', label: 'Delete', icon: 'trash', form: 'confirm', tone: 'danger' };
+
+/**
+ * The three things that can be done to a Helm release.
+ *
+ * Values opens the release's user-supplied values in the dock, exactly as Edit
+ * opens an object's YAML: the same gesture on the same editor. There is no
+ * separate Upgrade button, and that is deliberate rather than an omission --
+ * an upgrade is a chart, a version and a set of values applied together, so
+ * splitting it into a button here and a document there would mean choosing a
+ * version without seeing the values it applies to. The editor carries all
+ * three and its save button is the upgrade.
+ *
+ * It needs no helm to open: reading the values is reading the release, which
+ * the app does itself. Upgrading from it does, and the editor says so there.
+ */
+const VALUES: Action = { id: 'values', label: 'Values', icon: 'edit', form: 'immediate' };
+/**
+ * Back to an earlier revision, which asks which one.
+ *
+ * Unlike an upgrade it needs no chart: the revision being returned to stored
+ * its own rendered manifest, so a release whose chart nobody can find any more
+ * can still be rolled back.
+ */
+const ROLLBACK: Action = { id: 'rollback', label: 'Rollback', icon: 'undo', form: 'revision', needsHelm: true };
+/**
+ * Removing the release and everything it installed. Danger-toned and confirmed,
+ * like Delete, and for more reason than Delete has: one release is many objects.
+ */
+const UNINSTALL: Action = {
+    id: 'uninstall',
+    label: 'Uninstall',
+    icon: 'trash',
+    form: 'confirm',
+    tone: 'danger',
+    needsHelm: true,
+};
 
 /**
  * The kinds that have logs: a pod, and the workloads whose own pods can be
@@ -124,15 +172,21 @@ const SCALABLE = ['deployments', 'statefulsets', 'replicasets', 'replicationcont
 const ROLLABLE = ['deployments', 'statefulsets', 'daemonsets'];
 
 /**
- * The views that are not objects at all. The dashboard and settings are places
- * in the app; a Helm release is a Secret the backend decodes, so deleting "it"
- * would not mean what it appears to.
+ * The views that are not objects at all: places in the app rather than things
+ * in a cluster.
+ *
+ * Helm releases used to be here, and are not any more. A release is still not a
+ * Kubernetes object -- it is a Secret the backend decodes -- which is why it
+ * gets its own four actions below rather than Edit and Delete: deleting the
+ * Secret would leave every object the release installed running, with nothing
+ * left that knows they belong together.
  */
-const NOT_AN_OBJECT = [DASHBOARD, SETTINGS, HELM_RELEASES, PORT_FORWARDS];
+const NOT_AN_OBJECT = [DASHBOARD, SETTINGS, PORT_FORWARDS];
 
 /** The actions offered for one kind, in the order the bar draws them. */
 export function actionsFor(kind: string): Action[] {
     if (NOT_AN_OBJECT.includes(kind)) return [];
+    if (kind === HELM_RELEASES) return [VALUES, ROLLBACK, UNINSTALL];
 
     const out: Action[] = [EDIT];
     if (LOGGABLE.includes(kind)) out.push(LOGS);

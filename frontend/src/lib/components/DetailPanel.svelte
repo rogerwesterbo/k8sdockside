@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
     import { fly } from 'svelte/transition';
-    import { singularFor } from '../catalogue';
+    import { HELM_RELEASES, singularFor } from '../catalogue';
     import MetricsPanel from '../charts/MetricsPanel.svelte';
     import ResourceBudget from '../budget/ResourceBudget.svelte';
     import { alpha } from '../colors';
@@ -14,6 +14,7 @@
     import { workspace, type DockSide } from '../state/workspace.svelte';
     import ContainerPills from './ContainerPills.svelte';
     import ErrorState from './ErrorState.svelte';
+    import HelmRelease from './HelmRelease.svelte';
     import Icon from './Icon.svelte';
     import ObjectActions from './ObjectActions.svelte';
 
@@ -51,6 +52,12 @@
             void workspace.refreshDetail();
         }
     });
+
+    /**
+     * Whether this is a Helm release, which is described by its own record
+     * rather than by a report read off an object. See HelmRelease.svelte.
+     */
+    let isRelease = $derived(target?.kind === HELM_RELEASES);
 
     /**
      * The object's containers, read by the action bar below and shown again
@@ -216,7 +223,15 @@
                 compact
             />
 
-            {#if workspace.detailLoading}
+            {#if isRelease}
+                <HelmRelease
+                    release={{
+                        contextId: target.contextId,
+                        namespace: target.namespace,
+                        name: target.name,
+                    }}
+                />
+            {:else if workspace.detailLoading}
                 <p class="status">Describing {target.name}…</p>
             {:else if workspace.detailError}
                 <ErrorState message={workspace.detailError} compact />

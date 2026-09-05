@@ -173,6 +173,52 @@ const (
 	MaxScrollback   = 200000
 )
 
+// Helm is how the app runs helm, and what it passes when it does.
+//
+// One record rather than four loose preferences, for the reason Terminal is
+// one: the fields only make sense together, and both sides read it whole.
+//
+// It exists at all because reading a release needs helm and changing one does.
+// A release is a Secret the app decodes itself, so the drawer works on a
+// machine with no helm at all; upgrading, rolling back and uninstalling are
+// Helm's own operations and are run by asking helm to do them. See
+// internal/helmcli.
+type Helm struct {
+	// Path is where helm is, when the user has said. Empty means "find it",
+	// which is what almost every Linux and Windows machine wants.
+	//
+	// It is a setting because of macOS specifically: an app launched from
+	// Finder inherits a PATH of four system directories, so a helm installed by
+	// Homebrew is invisible to it however well it works in a terminal. That is
+	// not a fault anything can repair on the user's behalf -- there is no
+	// reliable way to reconstruct a login shell's PATH -- so it is asked.
+	Path string `json:"path,omitzero"`
+	// Wait holds an upgrade, rollback or uninstall open until what it wrote
+	// reports ready, rather than returning once the API server has taken it.
+	//
+	// Off by default, matching helm's own default. On, a slow rollout means a
+	// button that stays busy for minutes, which is a thing to opt into rather
+	// than to discover.
+	Wait bool `json:"wait,omitzero"`
+	// Atomic rolls a failed upgrade back to where it was. It implies Wait --
+	// there is no knowing an upgrade failed without waiting for it -- and helm
+	// enforces that itself.
+	Atomic bool `json:"atomic,omitzero"`
+	// TimeoutSeconds bounds a command. Zero means never chosen and resolves to
+	// DefaultHelmTimeout.
+	TimeoutSeconds int `json:"timeoutSeconds,omitzero"`
+}
+
+// The bounds a hand-edited timeout is held to, and the default between them.
+// Five minutes is helm's own default for --wait; below the minimum an upgrade
+// that waits could not finish, and above the maximum a stuck command would hold
+// a button busy for most of an hour before saying so.
+const (
+	DefaultHelmTimeout = 300
+	MinHelmTimeout     = 30
+	MaxHelmTimeout     = 3600
+)
+
 // PortForward is one tunnel the user set up, remembered so the list survives a
 // restart.
 //
@@ -266,6 +312,9 @@ type Preferences struct {
 	// the user already has, which shell to try, and what a node shell is made
 	// of. See Terminal.
 	Terminal Terminal `json:"terminal"`
+	// Helm is where the helm binary is and how it is run, for the operations
+	// that change a release. See Helm.
+	Helm Helm `json:"helm"`
 }
 
 // Settings is the whole persisted file.
@@ -331,9 +380,16 @@ func Defaults() Settings {
 			Theme:    themes.DefaultID,
 			Density:  DensityComfortable,
 			Terminal: DefaultTerminal(),
+			Helm:     DefaultHelm(),
 		},
 		PortForwards: []PortForward{},
 	}
+}
+
+// DefaultHelm is the helm settings a fresh install starts with: find helm
+// wherever it is, and run it the way helm runs itself.
+func DefaultHelm() Helm {
+	return Helm{TimeoutSeconds: DefaultHelmTimeout}
 }
 
 // DefaultTerminal is the terminal settings a fresh install starts with: the
@@ -879,6 +935,7 @@ func normalise(s Settings) Settings {
 		s.Preferences.MetricsRange = 0
 	}
 	s.Preferences.Terminal = normaliseTerminal(s.Preferences.Terminal)
+	s.Preferences.Helm = normaliseHelm(s.Preferences.Helm)
 	if s.PortForwards == nil {
 		s.PortForwards = []PortForward{}
 	}
@@ -935,6 +992,29 @@ func normaliseTerminal(t Terminal) Terminal {
 		t.Scrollback = d.Scrollback
 	}
 	return t
+}
+
+// normaliseHelm repairs a timeout a settings file states impossibly, and tidies
+// the path.
+//
+// The path itself is deliberately not checked for existence here. This runs on
+// every read of the settings file, including on a machine the file was synced
+// to rather than written on, and a path that is not there today is still the
+// user's answer -- it is reported as missing at the point helm is looked for,
+// where there is somewhere to say so. See helmcli.Locate.
+func normaliseHelm(h Helm) Helm {
+	h.Path = strings.TrimSpace(h.Path)
+	if h.TimeoutSeconds < MinHelmTimeout || h.TimeoutSeconds > MaxHelmTimeout {
+		h.TimeoutSeconds = DefaultHelmTimeout
+	}
+	// Atomic without Wait is not a state helm has: --atomic waits, whatever
+	// else was asked for. Recording it as it will behave means the settings
+	// view shows the truth rather than a box that is off while the flag it
+	// implies is on.
+	if h.Atomic {
+		h.Wait = true
+	}
+	return h
 }
 
 func clone(s Settings) Settings {

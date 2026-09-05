@@ -4,6 +4,20 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 // bindings are stubbed. What is under test is which tabs survive a close and
 // where focus lands -- none of which involves a cluster.
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+    HelmService: {
+        Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
+        Detail: vi.fn().mockResolvedValue({
+            name: '', namespace: '', revision: 1, status: 'deployed',
+            chart: '', chartName: '', chartVersion: '', appVersion: '',
+            description: '', firstDeployed: '', updated: '', notes: '',
+            values: '', userValues: '', resources: [], revisions: [],
+        }),
+        Tool: vi.fn().mockResolvedValue({ found: true, path: '/usr/bin/helm', version: 'v3.16.2', configured: false, reason: '' }),
+        Upgrade: vi.fn().mockResolvedValue(''),
+        Rollback: vi.fn().mockResolvedValue(''),
+        Uninstall: vi.fn().mockResolvedValue(''),
+        ChartVersions: vi.fn().mockResolvedValue([]),
+    },
     KubeconfigService: {
         Sync: vi.fn().mockResolvedValue([]),
         Files: vi.fn().mockResolvedValue([]),
@@ -1129,6 +1143,7 @@ describe('preferences', () => {
                 fontSize: 12,
                 scrollback: 5000,
             },
+            helm: { path: '', wait: false, atomic: false, timeoutSeconds: 300 },
         };
     });
 

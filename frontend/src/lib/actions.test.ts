@@ -21,11 +21,21 @@ describe('what every object can do', () => {
         expect(ids(customKindFor('certificates.cert-manager.io'))).toEqual(['edit', 'delete']);
     });
 
-    // A Helm release is a Secret the backend decodes, not a Kubernetes object:
-    // there is nothing here to edit and nothing to delete that would mean what
-    // it looks like it means.
-    test('a Helm release offers nothing', () => {
-        expect(actionsFor(HELM_RELEASES)).toEqual([]);
+    // A Helm release is a Secret the backend decodes rather than a Kubernetes
+    // object, so it gets neither Edit nor Delete: deleting the Secret would
+    // leave every object the release installed running, with nothing left that
+    // knows they belong together. What it gets instead are Helm's own verbs.
+    test('a Helm release gets Helm verbs rather than object ones', () => {
+        expect(ids(HELM_RELEASES)).toEqual(['values', 'rollback', 'uninstall']);
+    });
+
+    // Reading a release needs nothing installed; changing one runs helm. The
+    // bar uses this to disable what it cannot do, with the reason.
+    test('the two that run helm say so, and the one that only reads does not', () => {
+        const needs = Object.fromEntries(
+            actionsFor(HELM_RELEASES).map((action) => [action.id, action.needsHelm === true]),
+        );
+        expect(needs).toEqual({ values: false, rollback: true, uninstall: true });
     });
 
     // The forwards view is a list of the app's own tunnels rather than a

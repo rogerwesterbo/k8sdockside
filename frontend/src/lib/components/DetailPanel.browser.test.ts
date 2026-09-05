@@ -24,6 +24,27 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Open: vi.fn().mockResolvedValue('logs-1'),
         Close: vi.fn(),
     },
+    HelmService: {
+        Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
+        Detail: vi.fn().mockResolvedValue({
+            name: 'ingress-nginx',
+            namespace: 'default',
+            revision: 7,
+            status: 'deployed',
+            chart: 'ingress-nginx-4.11.3',
+            chartName: 'ingress-nginx',
+            chartVersion: '4.11.3',
+            appVersion: '1.11.3',
+            description: 'Upgrade complete',
+            firstDeployed: '2026-06-01T09:00:00Z',
+            updated: '2026-08-05T11:27:04Z',
+            notes: '',
+            values: 'replicaCount: 2\n',
+            userValues: '',
+            resources: [],
+            revisions: [],
+        }),
+    },
     MetricsService: {
         Source: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
         SetEndpoint: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
@@ -74,7 +95,29 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 
 const { workspace } = await import('../state/workspace.svelte');
 const { changes } = await import('../state/changes.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+const { HelmService, ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+
+/** One release as the backend decodes it. See internal/kube/helmdetail.go. */
+function releaseDetail(name: string, chart: string, values: string) {
+    return {
+        name,
+        namespace: 'default',
+        revision: 7,
+        status: 'deployed',
+        chart,
+        chartName: name,
+        chartVersion: '4.11.3',
+        appVersion: '1.11.3',
+        description: 'Upgrade complete',
+        firstDeployed: '2026-06-01T09:00:00Z',
+        updated: '2026-08-05T11:27:04Z',
+        notes: '',
+        values,
+        userValues: '',
+        resources: [],
+        revisions: [],
+    };
+}
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
@@ -86,6 +129,9 @@ beforeEach(() => {
     workspace.closeAllDockTabs();
     workspace.closeDetail();
     vi.mocked(ResourceService.Describe).mockReset().mockResolvedValue('Name: web\nStatus: Running');
+    vi.mocked(HelmService.Detail)
+        .mockReset()
+        .mockResolvedValue(releaseDetail('ingress-nginx', 'ingress-nginx-4.11.3', 'replicaCount: 2\n'));
 });
 
 test('the panel offers to edit what it is describing', async () => {
@@ -112,6 +158,51 @@ test('a Helm release has no edit button', async () => {
 
     await expect.element(page.getByRole('heading', { name: 'ingress-nginx' })).toBeVisible();
     expect(page.getByRole('button', { name: 'Edit' }).elements()).toHaveLength(0);
+});
+
+// The bug this whole path exists for. A release has no Kubernetes kind, so the
+// describe call it used to make could only answer "unknown resource kind:
+// helmreleases" -- which is what the panel showed. It reads the release's own
+// record now, and must not make that call at all.
+test('a Helm release is described by its own record rather than by a describe call', async () => {
+    render(DetailPanel);
+    await workspace.openDetail({
+        contextId: PROD,
+        kind: 'helmreleases',
+        namespace: 'default',
+        name: 'ingress-nginx',
+    });
+
+    await expect.element(page.getByText('ingress-nginx-4.11.3')).toBeVisible();
+    await expect.element(page.getByText('replicaCount: 2')).toBeVisible();
+    expect(ResourceService.Describe).not.toHaveBeenCalled();
+});
+
+// Opening a second release must not leave the first one's values sitting under
+// the second one's name.
+test('opening another release re-reads the drawer', async () => {
+    render(DetailPanel);
+    await workspace.openDetail({
+        contextId: PROD,
+        kind: 'helmreleases',
+        namespace: 'default',
+        name: 'ingress-nginx',
+    });
+    await expect.element(page.getByText('replicaCount: 2')).toBeVisible();
+
+    vi.mocked(HelmService.Detail).mockResolvedValue(
+        releaseDetail('cert-manager', 'cert-manager-v1.16.1', 'installCRDs: true\n'),
+    );
+    await workspace.openDetail({
+        contextId: PROD,
+        kind: 'helmreleases',
+        namespace: 'default',
+        name: 'cert-manager',
+    });
+
+    await expect.element(page.getByText('installCRDs: true')).toBeVisible();
+    await expect.element(page.getByText('replicaCount: 2')).not.toBeInTheDocument();
+    expect(HelmService.Detail).toHaveBeenLastCalledWith(PROD, 'default', 'cert-manager');
 });
 
 // The bug this exists for: the panel is describing an object, the object is

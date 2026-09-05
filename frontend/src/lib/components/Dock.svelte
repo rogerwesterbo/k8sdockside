@@ -16,7 +16,7 @@
 <script lang="ts">
     import { singularFor } from '../catalogue';
     import { editors } from '../state/editor.svelte';
-    import { workspace } from '../state/workspace.svelte';
+    import { isDocumentView, workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
     import LogView from './LogView.svelte';
     import TabStrip, { type StripTab } from './TabStrip.svelte';
@@ -45,12 +45,19 @@
                 id: tab.id,
                 title: tab.title,
                 subtitle: contextName(tab.contextId),
-                icon: tab.view === 'logs' ? 'rows' : tab.view === 'shell' ? 'terminal' : 'edit',
+                icon:
+                    tab.view === 'logs'
+                        ? 'rows'
+                        : tab.view === 'shell'
+                          ? 'terminal'
+                          : tab.view === 'helmvalues'
+                            ? 'helm'
+                            : 'edit',
                 color: workspace.colorOf(tab.contextId),
                 hint: `${singularFor(tab.kind)} ${tab.name}${tab.namespace ? ` in ${tab.namespace}` : ''} — ${contextName(tab.contextId)}`,
                 // Only an editor has unsaved work; closing a log view loses
                 // nothing that was not already in the cluster.
-                modified: tab.view === 'edit' && editors.isDirty(tab.id),
+                modified: isDocumentView(tab.view) && editors.isDirty(tab.id),
             }),
         ),
     );

@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main starts the app: it opens the settings file, wires up the ten services
+// main starts the app: it opens the settings file, wires up the eleven services
 // the frontend calls, and shows the main window.
 func main() {
 	// The settings store holds the user's kubeconfig paths, context aliases and
@@ -48,6 +48,9 @@ func main() {
 	// long-lived streams rather than requests -- an exec and a forward each
 	// hold one connection open for as long as the window shows them -- so both
 	// keep their own registry of what is open, the way the log service does.
+	// Helm rides the same watcher for the same reason: reading a release is
+	// reading Secrets, through the connection the cluster's tabs already have.
+	charts := NewHelmService(configs, resources.watcher, settings)
 	shells := NewTerminalService(configs, resources.watcher, settings)
 	tunnels := NewPortForwardService(configs, resources.watcher, settings)
 
@@ -66,6 +69,7 @@ func main() {
 			application.NewService(NewThemeService(settings)),
 			application.NewService(solutions),
 			application.NewService(graphs),
+			application.NewService(charts),
 			application.NewService(shells),
 			application.NewService(tunnels),
 		},

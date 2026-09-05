@@ -15,6 +15,7 @@
     import { actionsFor, type Action, type ActionId } from '../actions';
     import { actions } from '../state/actions.svelte';
     import { forwards, type PortOption } from '../state/forwards.svelte';
+    import { helm } from '../state/helm.svelte';
     import { workspace, type DetailTarget } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
 
@@ -26,6 +27,23 @@
     let available = $derived(actionsFor(object.kind));
     let facts = $derived(actions.stateOf(object));
     let drain = $derived(actions.drainOf(object));
+
+    /**
+     * Whether the actions that run helm can be offered.
+     *
+     * Reading a release needs nothing installed -- it is a Secret the app
+     * decodes -- but rolling one back or uninstalling it is Helm's own
+     * operation. A button that cannot work is disabled with the reason on it
+     * rather than left to fail when it is pressed. See internal/helmcli.
+     */
+    let helmMissing = $derived(helm.probed && !helm.tool.found);
+
+    /** The release's revisions, for the rollback picker. */
+    let revisions = $derived(helm.stateOf(object).detail?.revisions ?? []);
+    /** Which revision the picker is on. Null until the release has been read. */
+    let revision = $state<number | null>(null);
+    /** Whether an uninstall keeps the release's records, so it can be rolled back. */
+    let keepHistory = $state(false);
 
     /** The action waiting on an answer -- a confirmation, a number, a port -- if any. */
     let asking = $state<ActionId | null>(null);
@@ -64,7 +82,23 @@
         asking = null;
         ports = [];
         portsError = '';
+        revision = null;
+        keepHistory = false;
         void actions.load(ref);
+    });
+
+    // Where helm is, asked once. Only the release bar needs it, so an object's
+    // never makes the call.
+    $effect(() => {
+        if (available.some((a) => a.needsHelm) && !helm.probed) void helm.probe();
+    });
+
+    // The revision to roll back to, defaulted to the one before the current --
+    // which is what "roll back" means when nobody says otherwise.
+    $effect(() => {
+        if (revision === null && revisions.length > 1) {
+            revision = revisions.find((r) => !r.current)?.revision ?? null;
+        }
     });
 
     // Focus the safe answer as soon as a question appears.
@@ -85,6 +119,20 @@
     function choose(action: Action): void {
         if (action.id === 'edit') {
             workspace.openEditor(object);
+            return;
+        }
+        if (action.id === 'values') {
+            workspace.openHelmValues(object);
+            return;
+        }
+        if (action.form === 'revision') {
+            asking = action.id;
+            // The revisions come from the drawer's read of the release, which
+            // is normally already done by the time anyone reaches this button.
+            // Normally is not always -- the bar and the drawer mount together
+            // and this is one click away -- so a picker with nothing in it asks
+            // for itself rather than claiming the release has no history.
+            if (revisions.length === 0) void helm.load(object);
             return;
         }
         if (action.id === 'logs') {
@@ -140,6 +188,16 @@
                 case 'drain':
                     await actions.drain(object);
                     break;
+                case 'rollback':
+                    await helm.rollback(object, value);
+                    workspace.inform(`${object.name} rolled back to revision ${value}`);
+                    break;
+                case 'uninstall':
+                    await helm.uninstall(object, keepHistory);
+                    workspace.inform(`${object.name} uninstalled`);
+                    // Nothing is left to describe, exactly as after a delete.
+                    workspace.closeDetail();
+                    return;
             }
             asking = null;
         } catch (err) {
@@ -222,7 +280,19 @@
     /** The question each asked-for action puts. */
     function question(id: ActionId): string {
         if (id === 'drain') return `Drain ${subject}? Everything running on it will be moved.`;
+        // One release is many objects, which is what makes this worth spelling
+        // out rather than asking "Uninstall X?".
+        if (id === 'uninstall') {
+            return `Uninstall ${object.name}? Everything the release installed will be removed.`;
+        }
         return `Delete ${subject}?`;
+    }
+
+    /** How one revision reads in the rollback picker. */
+    function revisionLabel(entry: (typeof revisions)[number]): string {
+        const parts = [`Revision ${entry.revision}`, entry.chart];
+        if (entry.description) parts.push(entry.description);
+        return parts.join(' · ');
     }
 
     let asked = $derived(available.find((a) => a.id === asking) ?? null);
@@ -234,6 +304,15 @@
     <div class="bar">
         {#if asked && asked.form === 'confirm'}
             <p class="question">{question(asked.id)}</p>
+            {#if asked.id === 'uninstall'}
+                <!-- Keeping the history leaves the release listed as
+                     "uninstalled" and still rollable-back, which is the only
+                     way an uninstall is undoable at all. -->
+                <label class="check">
+                    <input type="checkbox" bind:checked={keepHistory} />
+                    Keep the history, so it can be rolled back
+                </label>
+            {/if}
             <div class="answers">
                 <button bind:this={cancelEl} class="plain" onclick={() => (asking = null)}>Cancel</button>
                 <button class="go" class:danger={asked.tone === 'danger'} disabled={busy} onclick={() => perform(asked.id)}>
@@ -292,6 +371,33 @@
                     Forward
                 </button>
             </div>
+        {:else if asked && asked.form === 'revision'}
+            {#if revisions.length < 2}
+                <p class="question">
+                    {object.name} has only the revision it is on — there is nothing behind it to
+                    go back to.
+                </p>
+            {:else}
+                <label class="field">
+                    Roll back to
+                    <select bind:value={revision}>
+                        {#each revisions.filter((r) => !r.current) as entry (entry.revision)}
+                            <option value={entry.revision}>{revisionLabel(entry)}</option>
+                        {/each}
+                    </select>
+                </label>
+            {/if}
+
+            <div class="answers">
+                <button bind:this={cancelEl} class="plain" onclick={() => (asking = null)}>Cancel</button>
+                <button
+                    class="go"
+                    disabled={busy || revision === null}
+                    onclick={() => perform('rollback', revision ?? 0)}
+                >
+                    Rollback
+                </button>
+            </div>
         {:else if asked && asked.form === 'number'}
             <label class="scale">
                 Replicas
@@ -306,8 +412,8 @@
                 <button
                     class:danger={action.tone === 'danger'}
                     class:last={action.tone === 'danger'}
-                    disabled={busy}
-                    title={labelOf(action)}
+                    disabled={busy || (action.needsHelm === true && helmMissing)}
+                    title={action.needsHelm === true && helmMissing ? helm.tool.reason : labelOf(action)}
                     onclick={() => choose(action)}
                 >
                     <Icon name={action.icon} size={13} />

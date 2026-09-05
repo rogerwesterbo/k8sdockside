@@ -12,7 +12,8 @@
 // exception: it is a leaf that names objects the same way, and saying an object
 // changed is not the same as knowing who is looking at it.
 
-import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import { HelmService, ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import { HELM_RELEASES } from '../catalogue';
 import { changes } from './changes.svelte';
 
 /** What an editor is open on: enough to read one object and write it back. */
@@ -44,6 +45,21 @@ export interface EditorDoc {
     saving: boolean;
     /** True from a successful save until the next keystroke. */
     saved: boolean;
+    /**
+     * For a Helm release only: the chart an upgrade will fetch, and the version
+     * of it.
+     *
+     * They live on the document rather than in the component because they are
+     * part of the edit -- somebody who has typed a repo alias and then switched
+     * dock tabs has not finished, and must not have to type it again.
+     *
+     * The chart cannot be derived: Helm's release record stores the chart's
+     * name and version but not where it came from, so a repo alias, an OCI URL
+     * or a path is something only the user knows. It is pre-filled with the
+     * chart's bare name, which is the half that is known.
+     */
+    chart: string;
+    version: string;
 }
 
 const BLANK: EditorDoc = {
@@ -54,6 +70,8 @@ const BLANK: EditorDoc = {
     check: VALID,
     saving: false,
     saved: false,
+    chart: '',
+    version: '',
 };
 
 /**
@@ -105,18 +123,43 @@ class Editors {
         this.docs[id] = { ...BLANK, status: 'loading' };
 
         try {
-            const text = await ResourceService.ResourceYAML(
-                target.contextId,
-                target.kind,
-                target.namespace,
-                target.name,
-            );
+            const doc = await this.read(target);
             if (this.loads.get(id) !== attempt) return;
-            this.docs[id] = { ...BLANK, status: 'ready', original: text, text };
+            this.docs[id] = { ...BLANK, ...doc, status: 'ready' };
         } catch (err) {
             if (this.loads.get(id) !== attempt) return;
             this.docs[id] = { ...BLANK, status: 'error', error: message(err) };
         }
+    }
+
+    /**
+     * Reads whichever kind of document this target names.
+     *
+     * A Helm release is not an object, so there is no YAML of it to open: what
+     * an editor can usefully hold is the release's user-supplied values, which
+     * is the document somebody wrote and the only half an upgrade sends. The
+     * chart's own defaults are deliberately not included -- editing those would
+     * turn every default into an override, and pin the release to today's
+     * values of settings the chart is free to change.
+     */
+    private async read(target: EditTarget): Promise<Partial<EditorDoc>> {
+        if (target.kind === HELM_RELEASES) {
+            const release = await HelmService.Detail(target.contextId, target.namespace, target.name);
+            return {
+                original: release.userValues,
+                text: release.userValues,
+                chart: release.chartName,
+                version: release.chartVersion,
+            };
+        }
+
+        const text = await ResourceService.ResourceYAML(
+            target.contextId,
+            target.kind,
+            target.namespace,
+            target.name,
+        );
+        return { original: text, text };
     }
 
     /** Records a keystroke and schedules the check that follows it. */
@@ -160,15 +203,31 @@ class Editors {
         doc.saving = true;
         doc.error = '';
         try {
-            const saved = await ResourceService.ApplyYAML(
-                target.contextId,
-                target.kind,
-                target.namespace,
-                target.name,
-                doc.text,
-            );
-            doc.text = saved;
-            doc.original = saved;
+            if (target.kind === HELM_RELEASES) {
+                await HelmService.Upgrade(
+                    target.contextId,
+                    target.namespace,
+                    target.name,
+                    doc.chart,
+                    doc.version,
+                    doc.text,
+                );
+                // Unlike an object, a release does not answer with what it now
+                // holds: helm's reply is a report of the upgrade. What is on
+                // screen is what was sent, and what was sent is now the release's
+                // values, so the document is level with the cluster.
+                doc.original = doc.text;
+            } else {
+                const saved = await ResourceService.ApplyYAML(
+                    target.contextId,
+                    target.kind,
+                    target.namespace,
+                    target.name,
+                    doc.text,
+                );
+                doc.text = saved;
+                doc.original = saved;
+            }
             doc.check = VALID;
             doc.saved = true;
             changes.changed(target);
@@ -179,6 +238,15 @@ class Editors {
         } finally {
             doc.saving = false;
         }
+    }
+
+    /** Records the chart or version an upgrade will use. */
+    setChart(id: string, patch: { chart?: string; version?: string }): void {
+        const doc = this.docs[id];
+        if (!doc) return;
+        if (patch.chart !== undefined) doc.chart = patch.chart;
+        if (patch.version !== undefined) doc.version = patch.version;
+        doc.saved = false;
     }
 
     /** Drops a document, with the tab it belonged to. */

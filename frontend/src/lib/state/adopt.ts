@@ -40,6 +40,22 @@ export interface TerminalSettings {
     scrollback: number;
 }
 
+/**
+ * How helm is run, resolved. Every field has a value here for the same reason
+ * TerminalSettings does: the store fills in what the file does not say, and the
+ * fallbacks below only cover a service call that failed before it got there.
+ */
+export interface HelmSettings {
+    /** Where helm is, when the user has said. Empty means "find it". */
+    path: string;
+    /** Hold a change open until what it wrote reports ready. */
+    wait: boolean;
+    /** Roll a failed upgrade back. Implies wait, which the store enforces. */
+    atomic: boolean;
+    /** How long a command is given, in seconds. */
+    timeoutSeconds: number;
+}
+
 /** One forward the user set up, as it is remembered between sessions. */
 export interface SavedForward {
     id: string;
@@ -95,6 +111,8 @@ export interface Settings {
         metricsRange: number;
         /** How a shell opens, and what it opens with. */
         terminal: TerminalSettings;
+        /** Where helm is, and how it is run. */
+        helm: HelmSettings;
     };
     /**
      * The forwards the user set up. The live state of each lives in the
@@ -207,6 +225,19 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
                 nodeNamespace: settings.preferences?.terminal?.nodeNamespace || 'default',
                 fontSize: settings.preferences?.terminal?.fontSize || 12,
                 scrollback: settings.preferences?.terminal?.scrollback || 5000,
+            },
+            helm: {
+                // Empty is the right default rather than an omission: helm is
+                // normally on PATH, and a path guessed here would be wrong more
+                // often than the search is.
+                path: settings.preferences?.helm?.path ?? '',
+                // helm's own defaults, so a release changed from this app
+                // behaves the way the same command would from a shell.
+                wait: settings.preferences?.helm?.wait ?? false,
+                atomic: settings.preferences?.helm?.atomic ?? false,
+                // Zero from the store means never chosen. Five minutes is
+                // helm's own default for --wait.
+                timeoutSeconds: settings.preferences?.helm?.timeoutSeconds || 300,
             },
         },
         portForwards: (settings.portForwards ?? []).map((forward) => ({

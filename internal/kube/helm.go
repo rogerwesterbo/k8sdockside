@@ -39,14 +39,21 @@ const maxReleasePayload = 8 << 20
 
 // HelmRelease is the summary of one release: everything shown in the table, and
 // nothing else from the payload.
+//
+// Description is Helm's own one-line log entry for the revision -- "Upgrade
+// complete", "Rollback to 3" -- which the table has no column for and the
+// history in the detail drawer is largely made of. It is read here rather than
+// in a second decoder because it comes from info, alongside the status and the
+// timestamp, and not from the parts of the payload this decode exists to drop.
 type HelmRelease struct {
-	Name       string
-	Namespace  string
-	Revision   int64
-	Status     string
-	Chart      string
-	AppVersion string
-	Updated    string
+	Name        string
+	Namespace   string
+	Revision    int64
+	Status      string
+	Chart       string
+	AppVersion  string
+	Updated     string
+	Description string
 }
 
 // releaseJSON is the subset of Helm's release record worth reading. Every other
@@ -59,6 +66,7 @@ type releaseJSON struct {
 	Info      struct {
 		Status       string `json:"status"`
 		LastDeployed string `json:"last_deployed"`
+		Description  string `json:"description"`
 	} `json:"info"`
 	Chart struct {
 		Metadata struct {
@@ -69,21 +77,27 @@ type releaseJSON struct {
 	} `json:"chart"`
 }
 
-// decodeHelmRelease turns one release Secret into its summary.
-func decodeHelmRelease(u *unstructured.Unstructured) (HelmRelease, error) {
+// releasePayload unwraps one release Secret into the JSON Helm stored in it.
+//
+// Split out from the decode below because the detail drawer reads the same
+// wrapper for the opposite purpose: the summary here parses six fields out of
+// this JSON and drops it, while helmdetail.go parses the values, the notes and
+// the manifest out of it. One unwrapper means the two cannot disagree about
+// what a release Secret is.
+func releasePayload(u *unstructured.Unstructured) ([]byte, error) {
 	if nestedString(u, "type") != HelmReleaseSecretType {
-		return HelmRelease{}, errors.New("not a Helm release secret")
+		return nil, errors.New("not a Helm release secret")
 	}
 
 	encoded := nestedString(u, "data", "release")
 	if encoded == "" {
-		return HelmRelease{}, errors.New("release secret has no payload")
+		return nil, errors.New("release secret has no payload")
 	}
 
 	// Two layers of base64: the API server's, then Helm's own.
 	outer, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return HelmRelease{}, fmt.Errorf("decoding release: %w", err)
+		return nil, fmt.Errorf("decoding release: %w", err)
 	}
 	payload, err := base64.StdEncoding.DecodeString(string(outer))
 	if err != nil {
@@ -91,7 +105,12 @@ func decodeHelmRelease(u *unstructured.Unstructured) (HelmRelease, error) {
 		payload = outer
 	}
 
-	raw, err := gunzip(payload)
+	return gunzip(payload)
+}
+
+// decodeHelmRelease turns one release Secret into its summary.
+func decodeHelmRelease(u *unstructured.Unstructured) (HelmRelease, error) {
+	raw, err := releasePayload(u)
 	if err != nil {
 		return HelmRelease{}, err
 	}
@@ -111,13 +130,14 @@ func decodeHelmRelease(u *unstructured.Unstructured) (HelmRelease, error) {
 	}
 
 	return HelmRelease{
-		Name:       record.Name,
-		Namespace:  namespace,
-		Revision:   record.Version,
-		Status:     record.Info.Status,
-		Chart:      chart,
-		AppVersion: record.Chart.Metadata.AppVersion,
-		Updated:    record.Info.LastDeployed,
+		Name:        record.Name,
+		Namespace:   namespace,
+		Revision:    record.Version,
+		Status:      record.Info.Status,
+		Chart:       chart,
+		AppVersion:  record.Chart.Metadata.AppVersion,
+		Updated:     record.Info.LastDeployed,
+		Description: record.Info.Description,
 	}, nil
 }
 

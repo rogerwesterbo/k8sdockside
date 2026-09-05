@@ -159,20 +159,6 @@ func (s *ResourceService) Ping(contextID string) error {
 	return s.watcher.Ping(ctx)
 }
 
-// HelmReleases lists the Helm releases installed in a cluster.
-//
-// It is a plain call rather than a subscription because Helm releases are not a
-// watchable resource: they are Secrets whose payload has to be decoded, and
-// that payload is exactly what must not be kept in the informer cache. The
-// table is built and the payload dropped in the same breath.
-func (s *ResourceService) HelmReleases(contextID, namespace string) (kube.Table, error) {
-	ctx, err := s.resolve(contextID)
-	if err != nil {
-		return kube.Table{}, err
-	}
-	return s.watcher.HelmReleases(ctx, namespace)
-}
-
 // CustomResourceKinds lists what a cluster defines, grouped by API group, for
 // the definitions section of the sidebar.
 func (s *ResourceService) CustomResourceKinds(contextID string) ([]kube.CustomResourceGroup, error) {

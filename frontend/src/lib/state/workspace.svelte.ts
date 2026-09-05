@@ -27,6 +27,7 @@ import { terminals } from './terminals.svelte';
 import {
     DASHBOARD,
     DEFAULT_COLLAPSED_GROUPS,
+    HELM_RELEASES,
     NAV_GROUPS,
     PLUGIN_OVERVIEW,
     SETTINGS,
@@ -68,7 +69,19 @@ export interface DetailTarget {
  * the view rather than assuming it is what let the second and third arrive
  * without the strip, the store or the settings file changing shape.
  */
-export type DockView = 'edit' | 'logs' | 'shell';
+export type DockView = 'edit' | 'logs' | 'shell' | 'helmvalues';
+
+/**
+ * The dock views that are a document: an object's YAML, and a Helm release's
+ * values. They share an editor, a store and a dirty mark, and differ only in
+ * what is read and what a save means. See ./editor.svelte.ts.
+ */
+const DOCUMENT_VIEWS: DockView[] = ['edit', 'helmvalues'];
+
+/** Whether a dock view holds an editable document rather than a stream. */
+export function isDocumentView(view: DockView): boolean {
+    return DOCUMENT_VIEWS.includes(view);
+}
 
 /**
  * One tab in the bottom dock.
@@ -173,6 +186,7 @@ function defaultSettings(): Settings {
                 fontSize: 12,
                 scrollback: 5000,
             },
+            helm: { path: '', wait: false, atomic: false, timeoutSeconds: 300 },
         },
         portForwards: [],
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
@@ -999,10 +1013,13 @@ class Workspace {
 
         const known = new Set(this.contexts.map((c) => c.id));
         this.dockTabs = this.settings.dock.tabs
-            .filter((ref) => ref.type === 'edit' && known.has(ref.contextId))
+            // Only the document views come back. A log stream and a shell are
+            // connections rather than state, and reopening one at launch would
+            // mean dialling every cluster in the dock before the window is up.
+            .filter((ref) => isDocumentView(ref.type as DockView) && known.has(ref.contextId))
             .map((ref) => ({
-                id: dockTabId('edit', ref),
-                view: 'edit' as DockView,
+                id: dockTabId(ref.type as DockView, ref),
+                view: ref.type as DockView,
                 contextId: ref.contextId,
                 kind: ref.kind,
                 namespace: ref.namespace,
@@ -1062,6 +1079,20 @@ class Workspace {
     /** Opens the YAML editor for one object, or focuses it if it is open. */
     openEditor(target: DetailTarget): void {
         this.openDockTab('edit', target);
+    }
+
+    /**
+     * Opens a Helm release's values in the dock, or focuses them if they are
+     * open.
+     *
+     * The same editor an object's YAML gets, deliberately: it is the same
+     * gesture on the same document, and everything that editor already does --
+     * folding, search, the dirty mark, surviving a switch to another tab --
+     * is worth as much to a values file as to a manifest. What differs is what
+     * a save means, and that lives in the editor store rather than here.
+     */
+    openHelmValues(target: DetailTarget): void {
+        this.openDockTab('helmvalues', target);
     }
 
     /** Opens the log view for one object, or focuses it if it is open. */
@@ -1202,6 +1233,7 @@ class Workspace {
             if (tab.view === 'logs') logs.forget(tab.id);
             else if (tab.view === 'shell') terminals.forget(tab.id);
             else editors.forget(tab.id);
+
         }
 
         const stillActive = survivors.some((t) => t.id === this.activeDockTabId);
@@ -1529,6 +1561,21 @@ class Workspace {
      */
     private async describeInto(target: DetailTarget): Promise<void> {
         const attempt = ++this.detailLoad;
+
+        // A Helm release has no Kubernetes kind, so there is nothing here for
+        // the REST mapper to resolve and Describe can only answer "unknown
+        // resource kind: helmreleases" -- correctly, since there is no such
+        // kind. The drawer renders the release's own record instead, read by
+        // HelmRelease.svelte, so this leaves the report empty rather than
+        // filling the panel with a complaint about a call that should not have
+        // been made.
+        if (target.kind === HELM_RELEASES) {
+            this.detailText = '';
+            this.detailError = null;
+            this.detailLoading = false;
+            return;
+        }
+
         try {
             const text = await ResourceService.Describe(
                 target.contextId,
@@ -1912,6 +1959,26 @@ class Workspace {
      */
     setTerminal(patch: Partial<Settings['preferences']['terminal']>): void {
         this.updatePreferences({ terminal: { ...this.settings.preferences.terminal, ...patch } });
+    }
+
+    // ----- helm -----------------------------------------------------------
+
+    /** Where helm is, and how it is run when a release is changed. */
+    helm = $derived(this.settings.preferences.helm);
+
+    /**
+     * Changes part of the helm settings. A patch, for the reason setTerminal
+     * takes one: the settings view edits a field at a time through one writer.
+     *
+     * --atomic waits whether or not waiting was asked for, so turning it on
+     * turns waiting on here too. The Go store enforces the same thing on read;
+     * doing it here as well is what stops the checkbox sitting visibly off
+     * beside the flag that implies it until the settings are next loaded.
+     */
+    setHelm(patch: Partial<Settings['preferences']['helm']>): void {
+        const next = { ...this.settings.preferences.helm, ...patch };
+        if (next.atomic) next.wait = true;
+        this.updatePreferences({ helm: next });
     }
 
     /** Sets the window every chart on screen covers, in minutes. */

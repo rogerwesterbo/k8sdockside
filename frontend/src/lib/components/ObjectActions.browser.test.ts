@@ -19,6 +19,20 @@ vi.mock('@wailsio/runtime', async (importOriginal) => {
 });
 const deliver = (event: { data: unknown }) => drainEvents.handler(event);
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+    HelmService: {
+        Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
+        Detail: vi.fn().mockResolvedValue({
+            name: '', namespace: '', revision: 1, status: 'deployed',
+            chart: '', chartName: '', chartVersion: '', appVersion: '',
+            description: '', firstDeployed: '', updated: '', notes: '',
+            values: '', userValues: '', resources: [], revisions: [],
+        }),
+        Tool: vi.fn().mockResolvedValue({ found: true, path: '/usr/bin/helm', version: 'v3.16.2', configured: false, reason: '' }),
+        Upgrade: vi.fn().mockResolvedValue(''),
+        Rollback: vi.fn().mockResolvedValue(''),
+        Uninstall: vi.fn().mockResolvedValue(''),
+        ChartVersions: vi.fn().mockResolvedValue([]),
+    },
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue('Name: web'),
@@ -89,7 +103,8 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 
 const { workspace } = await import('../state/workspace.svelte');
 const { actions } = await import('../state/actions.svelte');
-const { ActionService, PortForwardService, TerminalService } = await import(
+const { helm } = await import('../state/helm.svelte');
+const { ActionService, HelmService, PortForwardService, TerminalService } = await import(
     '../../../bindings/github.com/rogerwesterbo/k8sdockside'
 );
 
@@ -98,13 +113,35 @@ const POD = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' }
 const NODE = { contextId: PROD, kind: 'nodes', namespace: '', name: 'wrkr01' };
 const DEPLOYMENT = { contextId: PROD, kind: 'deployments', namespace: 'default', name: 'web' };
 const SERVICE = { contextId: PROD, kind: 'services', namespace: 'web', name: 'api' };
+const RELEASE = { contextId: PROD, kind: 'helmreleases', namespace: 'default', name: 'ingress-nginx' };
 
 const settle = () => new Promise((r) => setTimeout(r, 60));
 
-beforeEach(() => {
-    for (const ref of [POD, NODE, DEPLOYMENT, SERVICE]) actions.forget(ref);
+beforeEach(async () => {
+    for (const ref of [POD, NODE, DEPLOYMENT, SERVICE, RELEASE]) actions.forget(ref);
     workspace.closeDetail();
+    // A test that opened something in the dock has to have it taken away again,
+    // and the write that goes with it has to land before the next test starts.
+    // The store replaces its whole settings object with whatever the backend
+    // answers, so a dock write still in flight arrives in the middle of the
+    // next test and takes with it anything that test had set directly.
+    if (workspace.dockTabs.length > 0) {
+        workspace.closeAllDockTabs();
+        await new Promise((r) => setTimeout(r, 320));
+    }
     workspace.notice = null;
+    helm.forget(RELEASE);
+    // Where helm is, re-answered per test: one of them takes it away.
+    helm.probed = false;
+    vi.mocked(HelmService.Tool).mockReset().mockResolvedValue({
+        found: true,
+        path: '/usr/bin/helm',
+        version: 'v3.16.2',
+        configured: false,
+        reason: '',
+    });
+    vi.mocked(HelmService.Uninstall).mockReset().mockResolvedValue('');
+    vi.mocked(HelmService.Rollback).mockReset().mockResolvedValue('');
     vi.mocked(ActionService.ObjectState).mockReset().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] });
     vi.mocked(ActionService.Delete).mockReset().mockResolvedValue(undefined);
     vi.mocked(ActionService.Scale).mockReset().mockResolvedValue(undefined);
@@ -317,15 +354,76 @@ test('a drain in flight can be called off', async () => {
     expect(ActionService.CancelDrain).toHaveBeenCalledWith('drain-1');
 });
 
-// A Helm release is a decoded Secret, not an object: there is nothing here that
-// would do what its button appeared to promise.
-test('a Helm release gets no bar at all', async () => {
-    render(ObjectActions, {
-        object: { contextId: PROD, kind: 'helmreleases', namespace: 'default', name: 'ingress-nginx' },
-    });
+// A Helm release is a decoded Secret rather than an object, so it gets none of
+// the object verbs -- an Edit would open a Secret full of gzipped base64, and a
+// Delete would leave everything the release installed running.
+test('a Helm release gets Helm verbs rather than object ones', async () => {
+    render(ObjectActions, { object: RELEASE });
     await settle();
 
-    expect(page.getByRole('button').elements()).toHaveLength(0);
+    const labels = page.getByRole('button').elements().map((b) => b.textContent?.trim());
+    expect(labels).toEqual(['Values', 'Rollback', 'Uninstall']);
+});
+
+// The way in to the values editor. Without this the whole upgrade path is code
+// nothing reaches.
+test('a release opens its values in the dock', async () => {
+    render(ObjectActions, { object: RELEASE });
+    await settle();
+
+    await page.getByRole('button', { name: 'Values' }).click();
+
+    expect(
+        workspace.dockTabs.some((t) => t.view === 'helmvalues' && t.name === 'ingress-nginx'),
+    ).toBe(true);
+    expect(workspace.dockOpen).toBe(true);
+});
+
+// One release is many objects, which is what makes this worth spelling out
+// rather than asking "Uninstall X?".
+test('uninstalling asks first, and says what it will take with it', async () => {
+    render(ObjectActions, { object: RELEASE });
+    await settle();
+
+    await page.getByRole('button', { name: 'Uninstall' }).click();
+
+    await expect.element(page.getByText(/Everything the release installed will be removed/)).toBeVisible();
+    expect(HelmService.Uninstall).not.toHaveBeenCalled();
+});
+
+// The only way an uninstall is undoable at all.
+test('an uninstall can keep the history so the release can be rolled back', async () => {
+    render(ObjectActions, { object: RELEASE });
+    await settle();
+
+    await page.getByRole('button', { name: 'Uninstall' }).click();
+    await page.getByRole('checkbox', { name: /Keep the history/ }).click();
+    await page.getByRole('button', { name: 'Uninstall' }).click();
+
+    await vi.waitFor(() =>
+        expect(HelmService.Uninstall).toHaveBeenCalledWith(PROD, 'default', 'ingress-nginx', true),
+    );
+});
+
+// A button that cannot work says why on itself rather than failing when it is
+// pressed. Reading the release still works -- that needs no helm at all.
+test('without helm the two that need it are disabled, with the reason', async () => {
+    vi.mocked(HelmService.Tool).mockResolvedValue({
+        found: false,
+        path: '',
+        version: '',
+        configured: false,
+        reason: 'helm was not found on your PATH',
+    });
+    helm.probed = false;
+
+    render(ObjectActions, { object: RELEASE });
+    await settle();
+
+    await expect.element(page.getByRole('button', { name: 'Rollback' })).toBeDisabled();
+    await expect.element(page.getByRole('button', { name: 'Uninstall' })).toBeDisabled();
+    // Values reads the release, which the app does itself.
+    await expect.element(page.getByRole('button', { name: 'Values' })).toBeEnabled();
 });
 
 // The way in to the logs. Without this the log view is code nothing reaches.
