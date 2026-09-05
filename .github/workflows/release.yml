@@ -197,19 +197,53 @@ jobs:
         shell: bash
         run: .github/scripts/stamp-version.sh "${{ needs.setup.outputs.version }}" "${{ needs.setup.outputs.numeric }}"
 
-      # The runner image ships NSIS, but installing it when absent is cheaper
-      # than a release that fails at the last step.
+      # The windows-2025 image does not ship NSIS, so this install is the
+      # normal path rather than a fallback.
       - name: Ensure NSIS is available
         shell: pwsh
         run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis -y --no-progress
+          $ErrorActionPreference = 'Stop'
+
+          function Find-MakeNSIS {
+              $cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+              if ($cmd) { return $cmd.Source }
+              # Chocolatey installs under Program Files and shims into its own
+              # bin; which of the two exists varies with the package version.
+              # Roots are filtered first because Join-Path throws on a null
+              # one, and $ErrorActionPreference is Stop.
+              $roots = @(${env:ProgramFiles(x86)}, $env:ProgramFiles) | Where-Object { $_ }
+              $candidates = @()
+              foreach ($root in $roots) {
+                  $candidates += (Join-Path $root 'NSIS\makensis.exe')
+              }
+              $candidates += 'C:\ProgramData\chocolatey\bin\makensis.exe'
+              foreach ($candidate in $candidates) {
+                  if ($candidate -and (Test-Path $candidate)) { return $candidate }
+              }
+              return $null
           }
-          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
-          if (Test-Path $nsis) {
-            $nsis | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          $exe = Find-MakeNSIS
+          if (-not $exe) {
+              choco install nsis -y --no-progress
+              $exe = Find-MakeNSIS
           }
-          makensis /VERSION
+          if (-not $exe) { throw 'makensis.exe not found after installing NSIS' }
+
+          $dir = Split-Path -Parent $exe
+          # Two different things. GITHUB_PATH is read between steps, so it is
+          # what puts makensis on PATH for the packaging step below. It does
+          # nothing for the step writing it -- which is why the version check
+          # on the next line used to fail with CommandNotFoundException even
+          # when the install had just succeeded.
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$dir;$env:PATH"
+
+          Write-Host "makensis: $exe"
+          & $exe /VERSION
+          # /VERSION is a sanity check, not a gate: its exit code is not
+          # documented to be 0 and must not decide whether this step passed.
+          exit 0
 
       # Builds k8sdockside.exe, fetches the WebView2 bootstrapper and produces
       # the NSIS installer.
