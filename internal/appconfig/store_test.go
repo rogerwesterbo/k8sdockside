@@ -59,7 +59,9 @@ func TestSettingsSurviveAReopen(t *testing.T) {
 	if _, err := store.AddManualFile("/srv/kubeconfig"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SetTabOrder([]TabRef{{ContextID: "cfg::prod", Kind: "pods"}}); err != nil {
+	if _, err := store.SetPanes(Panes{
+		Main: PaneState{Tabs: []PaneTabRef{{Type: ViewResource, ContextID: "cfg::prod", Kind: "pods"}}, Open: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SetLayout(Layout{DetailDock: "bottom", DetailSize: 340, SidebarWidth: 300}); err != nil {
@@ -78,8 +80,8 @@ func TestSettingsSurviveAReopen(t *testing.T) {
 	if len(got.ManualFiles) != 1 || got.ManualFiles[0] != "/srv/kubeconfig" {
 		t.Errorf("manual files = %v", got.ManualFiles)
 	}
-	if len(got.TabOrder) != 1 || got.TabOrder[0].Kind != "pods" {
-		t.Errorf("tab order = %+v", got.TabOrder)
+	if main := got.Panes.Main.Tabs; len(main) != 1 || main[0].Kind != "pods" {
+		t.Errorf("main pane = %+v", main)
 	}
 	if got.Layout.DetailDock != "bottom" || got.Layout.DetailSize != 340 {
 		t.Errorf("layout = %+v", got.Layout)
@@ -647,43 +649,45 @@ func TestPreferencesCopyThePointerField(t *testing.T) {
 	}
 }
 
-func TestTheDockRoundTrips(t *testing.T) {
+func TestTheBottomPaneRoundTrips(t *testing.T) {
 	path := tempSettings(t)
 
 	store, err := openAt(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SetDock(Dock{
-		Open: true,
-		Size: 420,
-		Tabs: []DockTabRef{
-			{Type: "edit", ContextID: "cfg::prod", Kind: "pods", Namespace: "default", Name: "web"},
-			{Type: "edit", ContextID: "cfg::stage", Kind: "nodes", Name: "node-1"},
+	if _, err := store.SetPanes(Panes{
+		Bottom: PaneState{
+			Open: true,
+			Size: 420,
+			Tabs: []PaneTabRef{
+				{Type: ViewEdit, ContextID: "cfg::prod", Kind: "pods", Namespace: "default", Name: "web"},
+				{Type: ViewEdit, ContextID: "cfg::stage", Kind: "nodes", Name: "node-1"},
+			},
 		},
 	}); err != nil {
-		t.Fatalf("SetDock: %v", err)
+		t.Fatalf("SetPanes: %v", err)
 	}
 
 	reopened, err := openAt(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dock := reopened.Get().Dock
-	if !dock.Open || dock.Size != 420 {
-		t.Errorf("dock = %+v, want it open at 420", dock)
+	bottom := reopened.Get().Panes.Bottom
+	if !bottom.Open || bottom.Size != 420 {
+		t.Errorf("bottom pane = %+v, want it open at 420", bottom)
 	}
-	got := dock.Tabs
+	got := bottom.Tabs
 	if len(got) != 2 {
-		t.Fatalf("dock tabs = %d, want 2", len(got))
+		t.Fatalf("bottom pane tabs = %d, want 2", len(got))
 	}
-	if got[0].Namespace != "default" || got[0].Name != "web" || got[0].Type != "edit" {
-		t.Errorf("first dock tab = %+v, want the namespaced pod it was given", got[0])
+	if got[0].Namespace != "default" || got[0].Name != "web" || got[0].Type != ViewEdit {
+		t.Errorf("first tab = %+v, want the namespaced pod it was given", got[0])
 	}
 	// A cluster-scoped object has no namespace, and that has to survive as the
 	// empty string rather than becoming the tab's undoing on the way back.
 	if got[1].Namespace != "" || got[1].Name != "node-1" {
-		t.Errorf("second dock tab = %+v, want the cluster-scoped node", got[1])
+		t.Errorf("second tab = %+v, want the cluster-scoped node", got[1])
 	}
 }
 
@@ -702,9 +706,11 @@ func TestTheDockHasAListOfTabsEvenWhenTheFileHasNone(t *testing.T) {
 	}
 }
 
-// The dock's height has the same problem the zoom did: a file written before
-// the field existed unmarshals to 0, which is a dock with no editor in it.
-func TestAnUnusableDockHeightFallsBackToTheDefault(t *testing.T) {
+// A pane's size has the same problem the zoom did: a file written before the
+// field existed unmarshals to 0, which is a pane with no view in it. This one
+// comes in through the legacy dock, so it checks the repair and the migration
+// in the same breath.
+func TestAnUnusablePaneSizeFallsBackToTheDefault(t *testing.T) {
 	path := tempSettings(t)
 
 	if err := os.WriteFile(path, []byte(`{"contexts":{},"dock":{"size":12,"open":true}}`), 0o600); err != nil {
@@ -714,13 +720,57 @@ func TestAnUnusableDockHeightFallsBackToTheDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dock := store.Get().Dock
-	if dock.Size != Defaults().Dock.Size {
-		t.Errorf("dock size = %d, want the default %d", dock.Size, Defaults().Dock.Size)
+	bottom := store.Get().Panes.Bottom
+	if bottom.Size != Defaults().Panes.Bottom.Size {
+		t.Errorf("bottom pane size = %d, want the default %d", bottom.Size, Defaults().Panes.Bottom.Size)
 	}
-	// Repairing the height must not close a dock the user left open.
-	if !dock.Open {
-		t.Error("the dock was closed by the repair")
+	// Repairing the height must not close a pane the user left open.
+	if !bottom.Open {
+		t.Error("the bottom pane was closed by the repair")
+	}
+}
+
+// An upgrade must land the user's session where they left it: what was in the
+// strip along the top belongs to the main pane, and what was in the dock at the
+// foot belongs to the bottom one.
+func TestASettingsFileFromBeforePanesKeepsItsSession(t *testing.T) {
+	path := tempSettings(t)
+
+	legacy := `{"contexts":{},` +
+		`"tabOrder":[{"contextId":"cfg::prod","kind":"pods"},{"contextId":"cfg::prod","kind":"nodes"}],` +
+		`"dock":{"open":true,"size":380,"tabs":[` +
+		`{"type":"edit","contextId":"cfg::prod","kind":"pods","namespace":"default","name":"web"}]}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store.Get()
+
+	main := got.Panes.Main.Tabs
+	if len(main) != 2 || main[0].Kind != "pods" || main[1].Kind != "nodes" {
+		t.Fatalf("main pane = %+v, want the two tabs the strip had, in order", main)
+	}
+	// Everything the old strip held was a collection, so everything that comes
+	// across from it is a resource view.
+	if main[0].Type != ViewResource {
+		t.Errorf("main tab type = %q, want %q", main[0].Type, ViewResource)
+	}
+
+	bottom := got.Panes.Bottom
+	if len(bottom.Tabs) != 1 || bottom.Tabs[0].Name != "web" || bottom.Tabs[0].Type != ViewEdit {
+		t.Fatalf("bottom pane = %+v, want the editor the dock had", bottom.Tabs)
+	}
+	// The dock's own two answers come across with its tabs.
+	if !bottom.Open || bottom.Size != 380 {
+		t.Errorf("bottom pane = open %v at %d, want open at 380", bottom.Open, bottom.Size)
+	}
+	// Read once and then cleared: two records of one session with nothing
+	// keeping them honest is a bug waiting for the day they disagree.
+	if len(got.TabOrder) != 0 || len(got.Dock.Tabs) != 0 {
+		t.Errorf("the legacy fields survived the migration: tabOrder=%+v dock=%+v", got.TabOrder, got.Dock.Tabs)
 	}
 }
 
@@ -772,19 +822,19 @@ func TestTurningLineNumbersOffSurvivesAReopen(t *testing.T) {
 	}
 }
 
-// The dock is written as one value precisely so that the frontend's two
-// concerns -- what is open, and whether it is showing -- cannot reach the file
-// through separate calls and undo each other.
-func TestSetDockKeepsTheCallersSliceOutOfTheStore(t *testing.T) {
+// The panes are written as one value precisely so that the frontend's concerns
+// -- what is open where, and whether each pane is showing it -- cannot reach the
+// file through separate calls and undo each other.
+func TestSetPanesKeepsTheCallersSliceOutOfTheStore(t *testing.T) {
 	store := openIn(t)
 
-	tabs := []DockTabRef{{Type: "edit", ContextID: "cfg::prod", Kind: "pods", Name: "web"}}
-	if _, err := store.SetDock(Dock{Open: true, Size: 320, Tabs: tabs}); err != nil {
-		t.Fatalf("SetDock: %v", err)
+	tabs := []PaneTabRef{{Type: ViewEdit, ContextID: "cfg::prod", Kind: "pods", Name: "web"}}
+	if _, err := store.SetPanes(Panes{Bottom: PaneState{Open: true, Size: 320, Tabs: tabs}}); err != nil {
+		t.Fatalf("SetPanes: %v", err)
 	}
 
 	tabs[0].Name = "elsewhere"
-	if got := store.Get().Dock.Tabs[0].Name; got != "web" {
+	if got := store.Get().Panes.Bottom.Tabs[0].Name; got != "web" {
 		t.Errorf("tab name = %q, want the store to hold its own copy", got)
 	}
 }

@@ -12,6 +12,35 @@
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/appconfig/models.js';
 import { DEFAULT_THEME_ID } from '../theme/apply';
+import type { PaneId } from './panes';
+
+/** One pane as the settings file holds it. See ./panes.ts for what a pane is. */
+export interface SavedPane {
+    tabs: { type: string; contextId: string; kind: string; namespace: string; name: string }[];
+    open: boolean;
+    size: number;
+}
+
+/**
+ * One pane out of the bindings, with the nulls resolved.
+ *
+ * The store normalises all of this, so the fallbacks here only cover a service
+ * call that failed before it reached the store -- and the `open` default
+ * differs per pane, which is why it is passed in rather than assumed.
+ */
+function adoptPane(pane: appconfig.PaneState | undefined | null, open: boolean, size: number): SavedPane {
+    return {
+        tabs: (pane?.tabs ?? []).map((tab) => ({
+            type: tab.type,
+            contextId: tab.contextId,
+            kind: tab.kind,
+            namespace: tab.namespace ?? '',
+            name: tab.name ?? '',
+        })),
+        open: pane?.open ?? open,
+        size: pane?.size || size,
+    };
+}
 
 /** A kubeconfig file and the contexts parsed out of it. */
 export interface ConfigFile {
@@ -79,16 +108,12 @@ export interface Settings {
     /** Extra folders solution plugins are read from, on top of the default one. */
     pluginFolders: string[];
     contexts: Record<string, { alias: string; color: string; metrics: string; collapsedGroups: string[] | null }>;
-    tabOrder: { contextId: string; kind: string }[];
     /**
-     * The bottom dock: what it has open, whether it is showing it, and how tall
-     * it stands. One record with one writer -- see appconfig.Dock for why.
+     * Where every open view sits: which pane holds it, in what order, whether
+     * each pane is showing its contents and how much room it takes. All three
+     * panes are written by one writer -- see appconfig.Panes for why.
      */
-    dock: {
-        open: boolean;
-        size: number;
-        tabs: { type: string; contextId: string; kind: string; namespace: string; name: string }[];
-    };
+    panes: Record<PaneId, SavedPane>;
     /**
      * The app-wide preferences the settings view edits. Unlike `layout`, every
      * field here is resolved: `restoreTabs` arrives nullable from Go and is
@@ -179,19 +204,12 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
                 },
             ]),
         ),
-        tabOrder: (settings.tabOrder ?? []).map((tab) => ({ contextId: tab.contextId, kind: tab.kind })),
-        dock: {
-            // Closed until an editor is opened, which is what an older file
-            // reads as too.
-            open: settings.dock?.open ?? false,
-            size: settings.dock?.size || 320,
-            tabs: (settings.dock?.tabs ?? []).map((tab) => ({
-                type: tab.type,
-                contextId: tab.contextId,
-                kind: tab.kind,
-                namespace: tab.namespace,
-                name: tab.name,
-            })),
+        panes: {
+            main: adoptPane(settings.panes?.main, true, 0),
+            right: adoptPane(settings.panes?.right, true, 420),
+            // Folded until something is opened in it, which is what an older
+            // file's dock reads as too.
+            bottom: adoptPane(settings.panes?.bottom, false, 320),
         },
         preferences: {
             // The store normalises these, so the fallbacks only cover a

@@ -78,15 +78,14 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
-        SetTabOrder: vi.fn().mockResolvedValue({}),
-        SetDock: vi.fn().mockResolvedValue({}),
+        SetPanes: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
         SetPreferences: vi.fn().mockResolvedValue({}),
         SetContextPrefs: vi.fn().mockResolvedValue({}),
     },
 }));
 
-const { workspace, isSettingsTab } = await import('./workspace.svelte');
+const { workspace, isSettingsTab, resourceTabId } = await import('./workspace.svelte');
 const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
@@ -96,6 +95,16 @@ const { ResourceService, KubeconfigService, SettingsService, ThemeService, Plugi
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const STAGING = '/home/u/.kube/staging::admin@staging';
+
+/** One saved collection tab, as the settings file holds it. */
+function resource(contextId: string, kind: string) {
+    return { type: 'resource', contextId, kind, namespace: '', name: '' };
+}
+
+/** One saved editor tab, as the settings file holds it. */
+function document(contextId: string, name: string, namespace = 'default', kind = 'pods') {
+    return { type: 'edit', contextId, kind, namespace, name };
+}
 
 /** Opens tabs in order and returns their ids. */
 function open(...pairs: [string, string][]): string[] {
@@ -258,7 +267,7 @@ describe('openTab placement', () => {
 
         workspace.openTab(PROD, 'services');
         // Deactivate without closing, the state a restored session starts in.
-        workspace.activeTabId = null;
+        workspace.panes.main.activeId = null;
         workspace.openTab(PROD, 'events');
 
         expect(workspace.tabs.map((t) => t.kind)).toEqual(['services', 'events']);
@@ -513,7 +522,7 @@ describe('revealing the context a tab belongs to', () => {
         open([PROD, 'pods']);
         workspace.openTab(STAGING, 'nodes');
 
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         expect(workspace.reveal?.contextId).toBe(PROD);
     });
@@ -522,10 +531,10 @@ describe('revealing the context a tab belongs to', () => {
     // cluster?", so it has to reveal again rather than do nothing.
     test('re-activating the same tab reveals again', () => {
         open([PROD, 'pods']);
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
         const first = workspace.reveal?.nonce;
 
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         expect(workspace.reveal?.nonce).not.toBe(first);
         expect(workspace.reveal?.contextId).toBe(PROD);
@@ -545,7 +554,11 @@ describe('revealing the context a tab belongs to', () => {
         open([PROD, 'pods'], [STAGING, 'pods']);
         const seen = new Set<number>();
 
-        for (const tab of [`${PROD}#pods`, `${STAGING}#pods`, `${PROD}#pods`]) {
+        for (const tab of [
+            resourceTabId(PROD, 'pods'),
+            resourceTabId(STAGING, 'pods'),
+            resourceTabId(PROD, 'pods'),
+        ]) {
             workspace.activateTab(tab);
             seen.add(workspace.reveal!.nonce);
         }
@@ -770,7 +783,7 @@ describe('showing the section an activated tab lives in', () => {
         workspace.toggleGroup(PROD, 'Admission');
         expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(true);
 
-        workspace.activateTab(`${PROD}#mutatingwebhookconfigurations`);
+        workspace.activateTab(resourceTabId(PROD, 'mutatingwebhookconfigurations'));
 
         expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(false);
     });
@@ -780,7 +793,7 @@ describe('showing the section an activated tab lives in', () => {
         workspace.openTab(PROD, 'pods');
         workspace.toggleGroup(PROD, 'Admission');
 
-        workspace.activateTab(`${PROD}#mutatingwebhookconfigurations`);
+        workspace.activateTab(resourceTabId(PROD, 'mutatingwebhookconfigurations'));
 
         expect(workspace.isGroupCollapsed(STAGING, 'Admission')).toBe(true);
     });
@@ -790,7 +803,7 @@ describe('showing the section an activated tab lives in', () => {
     test('a tab in an open section leaves the folding alone', () => {
         workspace.openTab(PROD, 'pods');
 
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
@@ -798,7 +811,7 @@ describe('showing the section an activated tab lives in', () => {
     test('a custom resource tab is harmless, having no section', () => {
         workspace.openTab(PROD, 'crd:certificates.cert-manager.io');
 
-        expect(() => workspace.activateTab(`${PROD}#crd:certificates.cert-manager.io`)).not.toThrow();
+        expect(() => workspace.activateTab(resourceTabId(PROD, 'crd:certificates.cert-manager.io'))).not.toThrow();
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
 
@@ -808,7 +821,7 @@ describe('showing the section an activated tab lives in', () => {
         workspace.openTab(PROD, 'dashboard');
         workspace.openTab(PROD, 'pods');
 
-        workspace.activateTab(`${PROD}#dashboard`);
+        workspace.activateTab(resourceTabId(PROD, 'dashboard'));
 
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
@@ -1184,10 +1197,7 @@ describe('restoring tabs at launch', () => {
     });
 
     test('reopens last session, settings tab included', async () => {
-        workspace.settings.tabOrder = [
-            { contextId: PROD, kind: 'pods' },
-            { contextId: '', kind: SETTINGS },
-        ];
+        workspace.settings.panes.main.tabs = [resource(PROD, 'pods'), resource('', SETTINGS)];
         workspace.settings.preferences.restoreTabs = true;
 
         await workspace.sync({ restoreTabs: true });
@@ -1196,10 +1206,7 @@ describe('restoring tabs at launch', () => {
     });
 
     test('drops a remembered tab whose cluster has gone, but keeps settings', async () => {
-        workspace.settings.tabOrder = [
-            { contextId: STAGING, kind: 'pods' },
-            { contextId: '', kind: SETTINGS },
-        ];
+        workspace.settings.panes.main.tabs = [resource(STAGING, 'pods'), resource('', SETTINGS)];
         workspace.settings.preferences.restoreTabs = true;
 
         await workspace.sync({ restoreTabs: true });
@@ -1208,8 +1215,8 @@ describe('restoring tabs at launch', () => {
     });
 
     test('turned off, it starts empty but leaves the remembered order alone', async () => {
-        const order = [{ contextId: PROD, kind: 'pods' }];
-        workspace.settings.tabOrder = order;
+        const order = [resource(PROD, 'pods')];
+        workspace.settings.panes.main.tabs = order;
         workspace.settings.preferences.restoreTabs = false;
 
         await workspace.sync({ restoreTabs: true });
@@ -1217,11 +1224,11 @@ describe('restoring tabs at launch', () => {
         expect(workspace.tabs).toHaveLength(0);
         // The order is what turning it back on has to restore, so the launch
         // that skipped it must not have overwritten it.
-        expect(workspace.settings.tabOrder).toEqual(order);
+        expect(workspace.settings.panes.main.tabs).toEqual(order);
     });
 
     test('a settings tab restored first does not select a context', async () => {
-        workspace.settings.tabOrder = [{ contextId: '', kind: SETTINGS }];
+        workspace.settings.panes.main.tabs = [resource('', SETTINGS)];
         workspace.settings.preferences.restoreTabs = true;
         workspace.selectedContextId = null;
 
@@ -1242,7 +1249,7 @@ describe('the dock', () => {
 
     beforeEach(() => {
         workspace.closeAllDockTabs();
-        workspace.settings.dock.open = false;
+        workspace.settings.panes.bottom.open = false;
         expect(workspace.dockTabs).toHaveLength(0);
     });
 
@@ -1403,9 +1410,7 @@ describe('restoring the dock at launch', () => {
     });
 
     test('reopens the editors from last session', async () => {
-        workspace.settings.dock.tabs = [
-            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
-        ];
+        workspace.settings.panes.bottom.tabs = [document(PROD, 'web')];
 
         await workspace.sync({ restoreTabs: true });
 
@@ -1414,10 +1419,10 @@ describe('restoring the dock at launch', () => {
     });
 
     test('skips a tab whose cluster has gone, and a view this build does not have', async () => {
-        workspace.settings.dock.tabs = [
-            { type: 'edit', contextId: STAGING, kind: 'pods', namespace: 'default', name: 'gone' },
-            { type: 'terminal', contextId: PROD, kind: 'pods', namespace: 'default', name: 'future' },
-            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
+        workspace.settings.panes.bottom.tabs = [
+            document(STAGING, 'gone'),
+            { ...document(PROD, 'future'), type: 'terminal' },
+            document(PROD, 'web'),
         ];
 
         await workspace.sync({ restoreTabs: true });
@@ -1426,60 +1431,61 @@ describe('restoring the dock at launch', () => {
     });
 
     test('turned off, the dock starts empty but the remembered tabs are left alone', async () => {
-        const remembered = [
-            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
-        ];
-        workspace.settings.dock.tabs = remembered;
+        const remembered = [document(PROD, 'web')];
+        workspace.settings.panes.bottom.tabs = remembered;
         workspace.settings.preferences.restoreTabs = false;
 
         await workspace.sync({ restoreTabs: true });
 
         expect(workspace.dockTabs).toHaveLength(0);
-        expect(workspace.settings.dock.tabs).toEqual(remembered);
+        expect(workspace.settings.panes.bottom.tabs).toEqual(remembered);
     });
 });
 
 describe('saving settings', () => {
-    // The bug this guards against: opening an editor adds a dock tab and
-    // unfolds the dock, and any other settings write already on its way answers
-    // with the file as it was before either happened. Adopting that answer
-    // whole shut the dock again a quarter of a second after it opened.
+    // The bug this guards against: opening an editor fills the bottom pane and
+    // unfolds it, and a settings write from another section already on its way
+    // answers with the file as it was before either happened. Adopting that
+    // answer whole shut the pane again a quarter of a second after it opened.
+    //
+    // Putting every pane in one section removed the version of this that had
+    // two of them racing each other. What is left is the cross-section case,
+    // which is the one adopt()'s pending guard exists for.
     test('an answer from a write in flight does not roll back a later change', async () => {
         vi.useFakeTimers();
         let landed: (saved: unknown) => void = () => {};
         try {
-            // The tab-order call answers with a file that predates the dock
-            // being opened, which is what one in flight really carries...
-            vi.mocked(SettingsService.SetTabOrder).mockResolvedValue({} as never);
-            // ...while the dock's own call is still out, so its answer cannot
+            // The layout call answers with a file that predates the pane being
+            // filled, which is what one in flight really carries...
+            vi.mocked(SettingsService.SetLayout).mockResolvedValue({} as never);
+            // ...while the panes' own call is still out, so its answer cannot
             // be what puts things right.
-            vi.mocked(SettingsService.SetDock).mockReturnValue(
+            vi.mocked(SettingsService.SetPanes).mockReturnValue(
                 new Promise((resolve) => {
                     landed = resolve;
                 }) as never,
             );
 
-            workspace.openTab(PROD, 'pods');
-            const tab = workspace.activeTabId!;
-            await vi.advanceTimersByTimeAsync(1000);
-
-            // One gesture, two sections: the strip above loses a tab and the
-            // dock below gains one.
-            workspace.closeTab(tab);
+            workspace.setSidebarWidth(300);
             workspace.openEditor({ contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' });
             await vi.advanceTimersByTimeAsync(1000);
 
             expect(workspace.dockTabs.map((t) => t.name)).toEqual(['web']);
             expect(workspace.dockOpen).toBe(true);
-            // And what was sent is the dock as it actually stood.
-            expect(SettingsService.SetDock).toHaveBeenCalledWith(
-                expect.objectContaining({ open: true, tabs: [expect.objectContaining({ name: 'web' })] }),
+            // And what was sent is the pane as it actually stood.
+            expect(SettingsService.SetPanes).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    bottom: expect.objectContaining({
+                        open: true,
+                        tabs: [expect.objectContaining({ name: 'web' })],
+                    }),
+                }),
             );
         } finally {
             landed({});
             vi.useRealTimers();
-            vi.mocked(SettingsService.SetTabOrder).mockReset().mockResolvedValue({} as never);
-            vi.mocked(SettingsService.SetDock).mockReset().mockResolvedValue({} as never);
+            vi.mocked(SettingsService.SetLayout).mockReset().mockResolvedValue({} as never);
+            vi.mocked(SettingsService.SetPanes).mockReset().mockResolvedValue({} as never);
         }
     });
 });
@@ -1951,5 +1957,125 @@ describe('solution plugins', () => {
         workspace.openPluginOverview(PROD, 'argocd');
 
         expect(workspace.activeTab?.kind).toBe('plugin:argocd/overview');
+    });
+});
+
+// The point of panes: which one a view lives in is the user's answer, not the
+// view type's. A pod list can sit at the foot and an editor can fill the middle.
+describe('moving a view between panes', () => {
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    beforeEach(() => {
+        workspace.closeAllTabsIn('main');
+        workspace.closeAllTabsIn('right');
+        workspace.closeAllTabsIn('bottom');
+    });
+
+    test('a collection opens in the middle and a document at the foot', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+
+        expect(workspace.panes.main.tabs.map((t) => t.kind)).toEqual(['pods']);
+        expect(workspace.panes.bottom.tabs.map((t) => t.name)).toEqual(['web']);
+    });
+
+    test('a tab dragged to another pane leaves the first and lands focused', () => {
+        workspace.openEditor(WEB);
+        const id = workspace.panes.bottom.tabs[0].id;
+
+        workspace.moveTabToPane(id, 'right');
+
+        expect(workspace.panes.bottom.tabs).toHaveLength(0);
+        expect(workspace.panes.right.tabs.map((t) => t.id)).toEqual([id]);
+        expect(workspace.panes.right.activeId).toBe(id);
+    });
+
+    // The reason a tab id says what it shows rather than which one it is: an
+    // editor moved across the window is the same editor, with the same buffer.
+    test('a moved tab keeps its id, so what is open in it survives the move', () => {
+        workspace.openEditor(WEB);
+        const before = workspace.panes.bottom.tabs[0].id;
+
+        workspace.moveTabToPane(before, 'main');
+
+        expect(workspace.panes.main.tabs.map((t) => t.id)).toEqual([before]);
+        // And it is still the tab the editor's own state is filed under.
+        expect(workspace.isEditing(WEB)).toBe(true);
+    });
+
+    test('reopening a view that has been moved focuses it where it was put', () => {
+        workspace.openEditor(WEB);
+        workspace.moveTabToPane(workspace.panes.bottom.tabs[0].id, 'right');
+        workspace.panes.right.activeId = null;
+
+        workspace.openEditor(WEB);
+
+        expect(workspace.panes.bottom.tabs).toHaveLength(0);
+        expect(workspace.panes.right.activeId).toBe(workspace.panes.right.tabs[0].id);
+    });
+
+    test('a tab dropped at a position lands there rather than at the end', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openTab(PROD, 'nodes');
+        workspace.openEditor(WEB);
+        const editor = workspace.panes.bottom.tabs[0].id;
+
+        workspace.moveTabToPane(editor, 'main', 0);
+
+        expect(workspace.panes.main.tabs.map((t) => t.id)[0]).toBe(editor);
+    });
+
+    test('emptying the bottom pane by dragging its last tab out folds it', () => {
+        workspace.openEditor(WEB);
+        expect(workspace.dockOpen).toBe(true);
+
+        workspace.moveTabToPane(workspace.panes.bottom.tabs[0].id, 'main');
+
+        expect(workspace.panes.bottom.open).toBe(false);
+    });
+
+    test('moving a tab to the pane it is already in only reorders it', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openTab(PROD, 'nodes');
+        const [pods, nodes] = workspace.panes.main.tabs.map((t) => t.id);
+
+        workspace.moveTabToPane(nodes, 'main', 0);
+
+        expect(workspace.panes.main.tabs.map((t) => t.id)).toEqual([nodes, pods]);
+    });
+
+    test('closing a tab in one pane leaves the others alone', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+        const editor = workspace.panes.bottom.tabs[0].id;
+
+        workspace.closeAllTabsIn('main');
+
+        expect(workspace.panes.bottom.tabs.map((t) => t.id)).toEqual([editor]);
+    });
+
+    test('every pane is written as one section, so a move cannot half-save', async () => {
+        vi.useFakeTimers();
+        try {
+            workspace.openEditor(WEB);
+            await vi.advanceTimersByTimeAsync(1000);
+            vi.mocked(SettingsService.SetPanes).mockClear();
+
+            workspace.moveTabToPane(workspace.panes.bottom.tabs[0].id, 'right');
+            // The write is debounced, because a drag moves a tab on every
+            // pointer move and one drag should cost one save.
+            await vi.advanceTimersByTimeAsync(1000);
+
+            // The call carries both halves of the move: the pane it left is
+            // empty in the same value that shows the pane it arrived in.
+            const sent = vi.mocked(SettingsService.SetPanes).mock.lastCall?.[0] as unknown as {
+                right: { tabs: unknown[] };
+                bottom: { tabs: unknown[] };
+            };
+            expect(sent.bottom.tabs).toHaveLength(0);
+            expect(sent.right.tabs).toHaveLength(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

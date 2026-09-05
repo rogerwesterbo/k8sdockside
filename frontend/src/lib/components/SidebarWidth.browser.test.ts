@@ -122,7 +122,7 @@ test('the describe panel leaves the table something to be', async () => {
     // Enough to be a table rather than a column of ellipses. The stylesheet
     // reserves a little more than this; what is asserted is the requirement,
     // not the constant that satisfies it.
-    const content = document.querySelector('.content') as HTMLElement;
+    const content = document.querySelector('.pane.main > .body') as HTMLElement;
     expect(content.getBoundingClientRect().width).toBeGreaterThanOrEqual(300);
 });
 

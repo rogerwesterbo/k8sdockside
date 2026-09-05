@@ -1,7 +1,16 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
-import TabBar from './TabBar.svelte';
+import Pane from './Pane.svelte';
+
+// The main pane: the strip of tabs above the view, and the view under it.
+
+// A pane renders the view its active tab names, so a strip test now mounts a
+// real table with it. Stubbing the subscription is what lets that table exist
+// without a cluster behind it; these tests are about the strip, not the rows.
+vi.mock('../state/subscriptions', () => ({
+    subscribe: vi.fn(() => ({ setNamespace: vi.fn(), close: vi.fn() })),
+}));
 
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     HelmService: {
@@ -19,7 +28,10 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         ChartVersions: vi.fn().mockResolvedValue([]),
     },
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
-    ResourceService: { Describe: vi.fn().mockResolvedValue('') },
+    ResourceService: {
+        Describe: vi.fn().mockResolvedValue(''),
+        Namespaces: vi.fn().mockResolvedValue(['default']),
+    },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
         Open: vi.fn().mockResolvedValue('logs-1'),
@@ -68,7 +80,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         // Activating a tab unfolds the section its resource is listed under,
         // and that folding is a per-context preference, so it is written here.
         SetContextPrefs: vi.fn().mockResolvedValue({}),
-        SetTabOrder: vi.fn().mockResolvedValue({}),
+        SetPanes: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
     },
 }));
@@ -114,7 +126,7 @@ beforeEach(() => {
 
 test('right-clicking a tab opens the menu', async () => {
     workspace.openTab(PROD, 'pods');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').element());
 
@@ -126,7 +138,7 @@ test('right-clicking a tab opens the menu', async () => {
 test('the cluster-scoped items stay hidden while only one cluster has tabs', async () => {
     workspace.openTab(PROD, 'pods');
     workspace.openTab(PROD, 'nodes');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').first().element());
 
@@ -138,7 +150,7 @@ test('the cluster-scoped items name the cluster once a second one has tabs', asy
     withClusters();
     workspace.openTab(PROD, 'pods');
     workspace.openTab(STAGING, 'pods');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').first().element());
 
@@ -150,7 +162,7 @@ test('right-clicking activates the tab before acting on it', async () => {
     workspace.openTab(PROD, 'pods');
     workspace.openTab(PROD, 'nodes');
     workspace.activateTab(workspace.tabs[0].id);
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').nth(1).element());
 
@@ -161,7 +173,7 @@ test('Close Others leaves the tab it was opened on', async () => {
     workspace.openTab(PROD, 'pods');
     workspace.openTab(PROD, 'nodes');
     workspace.openTab(PROD, 'services');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').nth(1).element());
     await page.getByRole('menuitem', { name: 'Close Others' }).click();
@@ -174,7 +186,7 @@ test('Close All in a cluster spares the other cluster', async () => {
     workspace.openTab(PROD, 'pods');
     workspace.openTab(PROD, 'nodes');
     workspace.openTab(STAGING, 'pods');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').first().element());
     await page.getByRole('menuitem', { name: 'Close All in admin@prod' }).click();
@@ -185,7 +197,7 @@ test('Close All in a cluster spares the other cluster', async () => {
 test('Escape dismisses the menu without closing anything', async () => {
     workspace.openTab(PROD, 'pods');
     workspace.openTab(PROD, 'nodes');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     rightClick(await page.getByRole('tab').first().element());
     await expect.element(page.getByRole('menuitem', { name: 'Close All' })).toBeVisible();
@@ -230,7 +242,7 @@ function arrows(direction: 'left' | 'right'): number {
 test('neither arrow shows while every tab fits', async () => {
     workspace.openTab(PROD, 'pods');
     workspace.openTab(PROD, 'nodes');
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     await expect.element(page.getByRole('tab').first()).toBeVisible();
     // A hidden arrow is out of the accessibility tree entirely, not merely
@@ -241,7 +253,7 @@ test('neither arrow shows while every tab fits', async () => {
 
 test('the right arrow appears once the tabs overflow', async () => {
     openMany();
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     await expect.element(page.getByRole('button', { name: 'Scroll tabs right' })).toBeVisible();
 
@@ -253,7 +265,7 @@ test('the right arrow appears once the tabs overflow', async () => {
 
 test('the arrow scrolls the strip, and the left one then appears', async () => {
     openMany();
-    render(TabBar);
+    render(Pane, { pane: 'main' });
     await scrollToStart();
 
     await page.getByRole('button', { name: 'Scroll tabs right' }).click();
@@ -264,7 +276,7 @@ test('the arrow scrolls the strip, and the left one then appears', async () => {
 
 test('a vertical wheel scrolls the strip sideways', async () => {
     openMany();
-    render(TabBar);
+    render(Pane, { pane: 'main' });
     await scrollToStart();
 
     strip().dispatchEvent(new WheelEvent('wheel', { deltaY: 240, bubbles: true, cancelable: true }));
@@ -274,7 +286,7 @@ test('a vertical wheel scrolls the strip sideways', async () => {
 
 test('selecting a tab that is scrolled out of sight brings it back', async () => {
     openMany();
-    render(TabBar);
+    render(Pane, { pane: 'main' });
 
     const first = workspace.tabs[0].id;
     strip().scrollLeft = strip().scrollWidth;

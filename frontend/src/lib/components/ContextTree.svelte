@@ -33,7 +33,10 @@
     let health = $derived(workspace.healthOf(context.id));
     let expanded = $derived(workspace.isExpanded(context.id));
     let selected = $derived(workspace.selectedContextId === context.id);
-    let activeTab = $derived(workspace.activeTab);
+    // The focused tab rather than the main pane's: a list dragged into another
+    // panel is still what the user is looking at, and this row is how the tree
+    // says where it is.
+    let activeTab = $derived(workspace.focusedTab);
 
     function isOpen(kind: string): boolean {
         return activeTab?.contextId === context.id && activeTab.kind === kind;

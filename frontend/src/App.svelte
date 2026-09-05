@@ -1,20 +1,20 @@
 <!--
-  The application shell: sidebar, tab strip, the active view, and the docked
-  detail panel. All of the state it renders lives in the workspace store.
+  The application shell: the sidebar, the panes the user's views are arranged
+  into, and the docked detail panel. All of the state it renders lives in the
+  workspace store.
+
+  The three panes are fixed places rather than a tree of splits, and what goes
+  in each of them is the user's choice -- see lib/state/panes.ts. Main fills
+  what the others leave; the right panel is there when it holds something; the
+  bottom one is always there, because a place has to be visible before anything
+  can be put in it.
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { DASHBOARD, PORT_FORWARDS, SETTINGS, isPluginOverview } from './lib/catalogue';
-    import Dashboard from './lib/components/Dashboard.svelte';
     import DetailPanel from './lib/components/DetailPanel.svelte';
-    import Dock from './lib/components/Dock.svelte';
     import Icon from './lib/components/Icon.svelte';
-    import PluginOverview from './lib/components/PluginOverview.svelte';
-    import PortForwards from './lib/components/PortForwards.svelte';
-    import ResourceTable from './lib/components/ResourceTable.svelte';
-    import SettingsView from './lib/components/settings/SettingsView.svelte';
+    import Pane from './lib/components/Pane.svelte';
     import Sidebar from './lib/components/Sidebar.svelte';
-    import TabBar from './lib/components/TabBar.svelte';
     import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
     import { applyTheme } from './lib/theme/apply';
@@ -172,64 +172,50 @@
         ></div>
 
         <main>
-            <TabBar />
-
-            <div class="stage" class:stack={workspace.dock === 'bottom'}>
-                <div class="content">
-                    {#if workspace.activeTab}
-                        {#key workspace.activeTab.id}
-                            {#if workspace.activeTab.kind === SETTINGS}
-                                <SettingsView />
-                            {:else if workspace.activeTab.kind === DASHBOARD}
-                                <Dashboard contextId={workspace.activeTab.contextId} />
-                            {:else if workspace.activeTab.kind === PORT_FORWARDS}
-                                <PortForwards contextId={workspace.activeTab.contextId} />
-                            {:else if isPluginOverview(workspace.activeTab.kind)}
-                                <PluginOverview
-                                    contextId={workspace.activeTab.contextId}
-                                    kind={workspace.activeTab.kind}
-                                />
-                            {:else}
-                                <ResourceTable
-                                    contextId={workspace.activeTab.contextId}
-                                    kind={workspace.activeTab.kind}
-                                />
-                            {/if}
-                        {/key}
-                    {:else}
-                        <div class="welcome-stage">
-                            <div class="welcome">
-                            <h1>K8s Dockside</h1>
-                            {#if workspace.contexts.length > 0}
-                                <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
-                                <p class="hint">
-                                    Tabs take the colour of their context, so you always know which cluster you are
-                                    looking at. Drag them to reorder.
-                                </p>
-                            {:else if workspace.loaded}
-                                <p>No kubeconfig contexts yet.</p>
-                                <p class="hint">
-                                    Nothing turned up in <code>~/.kube</code> or <code>$KUBECONFIG</code>. Use the
-                                    sidebar to add kubeconfig files, or point it at a folder and it will take every
-                                    one in there, whatever they are named.
-                                </p>
-                            {:else}
-                                <p>Looking for kubeconfig files…</p>
-                            {/if}
-                            </div>
-                        </div>
-                    {/if}
+            <div class="upper">
+                <!-- The detail panel docks against the main pane rather than
+                     the window: it describes an object in the list you are
+                     looking at, and the side panel beside it may be showing
+                     something else entirely. -->
+                <div class="stage" class:stack={workspace.dock === 'bottom'}>
+                    <Pane pane="main" empty={welcome} />
+                    <DetailPanel />
                 </div>
 
-                <DetailPanel />
+                <Pane pane="right" />
             </div>
 
-            <!-- Under the view rather than beside the sidebar: it is about the
-                 object you were just looking at, and it keeps the sidebar
-                 whole-height so the context list is never shortened by it. -->
-            <Dock />
+            <!-- Under the view rather than beside the sidebar: it keeps the
+                 sidebar whole-height, so the context list is never shortened
+                 by whatever is open at the foot of the window. -->
+            <Pane pane="bottom" />
         </main>
     </div>
+
+    {#snippet welcome()}
+        <div class="welcome-stage">
+            <div class="welcome">
+                <h1>K8s Dockside</h1>
+                {#if workspace.contexts.length > 0}
+                    <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
+                    <p class="hint">
+                        Tabs take the colour of their context, so you always know which cluster you are
+                        looking at. Drag them to reorder, or into another panel to keep two views side by
+                        side.
+                    </p>
+                {:else if workspace.loaded}
+                    <p>No kubeconfig contexts yet.</p>
+                    <p class="hint">
+                        Nothing turned up in <code>~/.kube</code> or <code>$KUBECONFIG</code>. Use the
+                        sidebar to add kubeconfig files, or point it at a folder and it will take every
+                        one in there, whatever they are named.
+                    </p>
+                {:else}
+                    <p>Looking for kubeconfig files…</p>
+                {/if}
+            </div>
+        </div>
+    {/snippet}
 
     <footer class="statusbar">
         {#if workspace.notice}
@@ -300,22 +286,23 @@
         min-height: 0;
     }
 
-    .stage {
+    /* Main and the right panel share the room above the bottom one. */
+    .upper {
         display: flex;
         flex: 1 1 auto;
         min-height: 0;
         min-width: 0;
     }
 
-    .stage.stack {
-        flex-direction: column;
+    .stage {
+        display: flex;
+        flex: 1 1 0;
+        min-height: 0;
+        min-width: 0;
     }
 
-    .content {
-        flex: 1 1 auto;
-        min-width: 0;
-        min-height: 0;
-        overflow: hidden;
+    .stage.stack {
+        flex-direction: column;
     }
 
     /* The logo as a watermark behind the idle screen. It fills the empty

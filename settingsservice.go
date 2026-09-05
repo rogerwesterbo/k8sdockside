@@ -124,14 +124,14 @@ func (s *SettingsService) SetPreferences(prefs appconfig.Preferences) (appconfig
 	return s.store.SetPreferences(prefs)
 }
 
-// SetTabOrder saves the order the user dragged their tabs into.
-func (s *SettingsService) SetTabOrder(order []appconfig.TabRef) (appconfig.Settings, error) {
-	return s.store.SetTabOrder(order)
-}
-
-// SetDock saves the bottom dock: its tabs in order, whether it is open, and how
-// tall it stands. It is a separate call from SetTabOrder because the two strips
-// are dragged independently and each writes on its own.
-func (s *SettingsService) SetDock(dock appconfig.Dock) (appconfig.Settings, error) {
-	return s.store.SetDock(dock)
+// SetPanes saves where every open view sits: which pane holds it, in what order
+// the user dragged them, whether each pane is showing its contents and how much
+// room it takes.
+//
+// One call for all three panes rather than one per pane. Moving a tab between
+// them is a single gesture that changes two, and this store answers every write
+// with the whole settings file for the frontend to adopt -- so two calls over
+// one move would race, and the slower would undo the other's half of it.
+func (s *SettingsService) SetPanes(panes appconfig.Panes) (appconfig.Settings, error) {
+	return s.store.SetPanes(panes)
 }

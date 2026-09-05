@@ -1,11 +1,17 @@
 // The whole application state lives here: which kubeconfig files were found,
-// what the user renamed and coloured each context, which tabs are open and in
-// what order, and what the slide-in detail panel is showing.
+// what the user renamed and coloured each context, which views are open and in
+// which pane, and what the slide-in detail panel is showing.
 //
 // It is one object rather than several stores because nearly every action
 // touches more than one of those things -- opening a tab selects a context,
 // closing one may change the active tab, dragging tabs persists settings -- and
 // splitting them would only move the coordination somewhere less obvious.
+//
+// Tabs live in panes. There used to be two separate models here -- a strip of
+// resource tabs along the top and a dock of documents at the foot, each with its
+// own open/close/reorder/restore -- and which of the two a view was decided
+// where on screen it could ever appear. They are one model now, and where a view
+// sits is the user's choice: see ./panes.ts for the vocabulary.
 
 import {
     KubeconfigService,
@@ -24,6 +30,20 @@ import { editors } from './editor.svelte';
 import { forwards } from './forwards.svelte';
 import { logs } from './logs.svelte';
 import { terminals } from './terminals.svelte';
+import {
+    PANE_IDS,
+    defaultPanes,
+    isDocumentView,
+    isPaneId,
+    isTabView,
+    resourceTabId,
+    tabIdFor,
+    type PaneId,
+    type PaneState,
+    type Tab,
+    type TabTarget,
+    type TabView,
+} from './panes';
 import {
     DASHBOARD,
     DEFAULT_COLLAPSED_GROUPS,
@@ -47,14 +67,38 @@ import { DEFAULT_THEME_ID, pickTheme, type Theme, type ThemeCatalogue, type Them
 
 export type DockSide = 'right' | 'bottom' | 'left';
 
-/** One open tab. A tab is a resource kind viewed against one context. */
-export interface Tab {
-    /** `${contextId}#${kind}` -- a key for keyed each blocks, never parsed back. */
-    id: string;
-    contextId: string;
-    kind: string;
-    title: string;
-}
+// The pane model is the app's vocabulary for "what is open and where", and it
+// is re-exported here so that a component reaching for the store gets the types
+// that go with it from the same place.
+export {
+    PANE_IDS,
+    PANE_LABELS,
+    isDocumentView,
+    isPaneId,
+    isTabView,
+    iconForView,
+    resourceTabId,
+    tabIdFor,
+    beginTabDrag,
+    currentTabDrag,
+    endTabDrag,
+    MIN_PANE_SIZE,
+    PANE_HEADROOM,
+} from './panes';
+export type { PaneId, PaneState, Tab, TabTarget, TabView, TabDrag } from './panes';
+
+/**
+ * One tab in a pane, under the name the document views knew it by.
+ *
+ * Kept as an alias rather than renamed at every call site: LogView, TerminalView
+ * and YamlEditor each take one as a prop, and what they do with it -- read its
+ * object, key their own state by its id -- is unchanged by the tab having become
+ * something that can sit anywhere.
+ */
+export type DockTab = Tab;
+
+/** What a dock tab shows. The document views, under their old name. */
+export type DockView = TabView;
 
 /** The object the detail panel is describing. */
 export interface DetailTarget {
@@ -62,45 +106,6 @@ export interface DetailTarget {
     kind: string;
     namespace: string;
     name: string;
-}
-
-/**
- * What a dock tab shows: an object as YAML, its logs, or a shell in it. Naming
- * the view rather than assuming it is what let the second and third arrive
- * without the strip, the store or the settings file changing shape.
- */
-export type DockView = 'edit' | 'logs' | 'shell' | 'helmvalues';
-
-/**
- * The dock views that are a document: an object's YAML, and a Helm release's
- * values. They share an editor, a store and a dirty mark, and differ only in
- * what is read and what a save means. See ./editor.svelte.ts.
- */
-const DOCUMENT_VIEWS: DockView[] = ['edit', 'helmvalues'];
-
-/** Whether a dock view holds an editable document rather than a stream. */
-export function isDocumentView(view: DockView): boolean {
-    return DOCUMENT_VIEWS.includes(view);
-}
-
-/**
- * One tab in the bottom dock.
- *
- * Where a Tab is a kind viewed against a context -- the pods of a cluster -- a
- * dock tab is a view onto one object, so it carries that object's identity. It
- * is otherwise the same animal: coloured by its context, dragged into order,
- * closed, and reopened next launch.
- */
-export interface DockTab {
-    /** `${view}:${contextId}#${kind}#${namespace}#${name}` -- a key, never parsed back. */
-    id: string;
-    view: DockView;
-    contextId: string;
-    kind: string;
-    namespace: string;
-    name: string;
-    /** The object's own name, which is what the strip shows. */
-    title: string;
 }
 
 /**
@@ -159,6 +164,56 @@ export interface Notice {
     tone: 'info' | 'error';
 }
 
+/**
+ * Whether one saved tab can come back.
+ *
+ * A view this build has never heard of is skipped rather than guessed at, and
+ * so are logs and shells: they are connections rather than state, and dialling
+ * every cluster in the window before it is up is not a session being restored.
+ */
+function canRestore(known: Set<string>) {
+    return (ref: { type: string; contextId: string; kind: string }): boolean => {
+        if (!isTabView(ref.type)) return false;
+        if (ref.type === 'resource') return ref.kind === SETTINGS || known.has(ref.contextId);
+        return isDocumentView(ref.type) && known.has(ref.contextId);
+    };
+}
+
+/** One saved tab, as the store holds it. */
+function tabFromRef(ref: {
+    type: string;
+    contextId: string;
+    kind: string;
+    namespace: string;
+    name: string;
+}): Tab {
+    const view = ref.type as TabView;
+    const title =
+        view === 'resource'
+            ? ref.kind === DASHBOARD
+                ? 'Dashboard'
+                : labelFor(ref.kind)
+            : ref.name;
+    return {
+        id: tabIdFor(view, ref),
+        view,
+        contextId: ref.contextId,
+        kind: ref.kind,
+        namespace: ref.namespace,
+        name: ref.name,
+        title,
+    };
+}
+
+/** The panes of a settings file nothing has been opened in yet. */
+function defaultPaneSettings(): Settings['panes'] {
+    return {
+        main: { tabs: [], open: true, size: 0 },
+        right: { tabs: [], open: true, size: 420 },
+        bottom: { tabs: [], open: false, size: 320 },
+    };
+}
+
 function defaultSettings(): Settings {
     return {
         manualFiles: [],
@@ -167,8 +222,7 @@ function defaultSettings(): Settings {
         themeFolders: [],
         pluginFolders: [],
         contexts: {},
-        tabOrder: [],
-        dock: { open: false, size: 320, tabs: [] },
+        panes: defaultPaneSettings(),
         preferences: {
             theme: DEFAULT_THEME_ID,
             density: 'comfortable',
@@ -236,18 +290,6 @@ function apiGroupKey(contextId: string, group: string): string {
     return `${contextId}\u0000${group}`;
 }
 
-function tabId(contextId: string, kind: string): string {
-    return `${contextId}#${kind}`;
-}
-
-/**
- * The key one dock tab is held under. Two views of the same object are two
- * tabs, so the view is part of it; the namespace is too, because a name alone
- * is not unique across namespaces.
- */
-function dockTabId(view: DockView, target: DetailTarget): string {
-    return `${view}:${target.contextId}#${target.kind}#${target.namespace}#${target.name}`;
-}
 
 /**
  * Whether a tab is the app-wide settings view rather than a look at a cluster.
@@ -262,7 +304,7 @@ export function isSettingsTab(tab: { kind: string }): boolean {
 }
 
 /** The id the settings tab always has: one per window, belonging to nothing. */
-const SETTINGS_TAB_ID = tabId('', SETTINGS);
+const SETTINGS_TAB_ID = resourceTabId('', SETTINGS);
 
 function message(err: unknown): string {
     if (err instanceof Error) return err.message;
@@ -287,23 +329,22 @@ function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (.
  * debounced writer, and each is what a stale answer can roll back -- see
  * Workspace.writer.
  */
-type Section = 'contexts' | 'tabOrder' | 'dock' | 'layout' | 'preferences';
+type Section = 'contexts' | 'panes' | 'layout' | 'preferences';
 
 class Workspace {
     /** Kubeconfig files from the last sync, each with its parsed contexts. */
     files = $state<ConfigFile[]>([]);
     /** Persisted user preferences, replaced wholesale by every backend write. */
     settings = $state<Settings>(defaultSettings());
-    tabs = $state<Tab[]>([]);
-    activeTabId = $state<string | null>(null);
     /**
-     * The bottom dock's tabs. They belong to the window rather than to a
-     * cluster: selecting another context, or closing every tab above them,
-     * leaves the dock exactly as it was, because what is open in it is a
-     * document you are part way through editing.
+     * Every open view, by the pane it is in.
+     *
+     * Tabs belong to the window rather than to a cluster: selecting another
+     * context, or closing every other tab there is, leaves a pane exactly as it
+     * was, because what is open in it may be a document you are part way
+     * through editing.
      */
-    dockTabs = $state<DockTab[]>([]);
-    activeDockTabId = $state<string | null>(null);
+    panes = $state<Record<PaneId, PaneState>>(defaultPanes());
     /** The context whose resource tree is showing, and whose settings the bottom panel edits. */
     selectedContextId = $state<string | null>(null);
     /** Contexts whose resource tree is expanded in the sidebar. */
@@ -380,8 +421,36 @@ class Workspace {
     folders = $derived(this.settings.manualFolders);
     /** Files the user has hidden, so the sidebar can offer to show them again. */
     excluded = $derived(this.settings.excludedFiles);
-    activeTab = $derived(this.tabs.find((t) => t.id === this.activeTabId) ?? null);
-    activeDockTab = $derived(this.dockTabs.find((t) => t.id === this.activeDockTabId) ?? null);
+    /** Every open tab, in every pane. */
+    allTabs = $derived(PANE_IDS.flatMap((pane) => this.panes[pane].tabs));
+    /**
+     * The main pane, under the names the app used before there were panes.
+     *
+     * They are kept because "the tabs" and "the dock" are still what most of
+     * the app means: a resource view opens in the middle and a document at the
+     * foot unless the user has moved it. Anything that has to be right about
+     * *every* pane uses `allTabs` or asks by pane id.
+     */
+    tabs = $derived(this.panes.main.tabs);
+    activeTabId = $derived(this.panes.main.activeId);
+    activeTab = $derived(this.panes.main.tabs.find((t) => t.id === this.panes.main.activeId) ?? null);
+    dockTabs = $derived(this.panes.bottom.tabs);
+    activeDockTabId = $derived(this.panes.bottom.activeId);
+    activeDockTab = $derived(
+        this.panes.bottom.tabs.find((t) => t.id === this.panes.bottom.activeId) ?? null,
+    );
+    /**
+     * The tab last brought forward, in whichever pane it lives.
+     *
+     * Distinct from `activeTab`, which is the main pane's: a pod list dragged
+     * into the right panel is still the thing you are looking at, and the
+     * sidebar has to be able to say so. What is *showing* is per pane; what has
+     * the user's attention is one answer for the window.
+     */
+    focusedTabId = $state<string | null>(null);
+    focusedTab = $derived(
+        (this.focusedTabId === null ? null : this.tabFor(this.focusedTabId)) ?? this.activeTab,
+    );
     selectedContext = $derived(this.contexts.find((c) => c.id === this.selectedContextId) ?? null);
     /** Files that could not be parsed, surfaced in the sidebar rather than dropped. */
     brokenFiles = $derived(this.files.filter((f) => f.error !== ''));
@@ -397,14 +466,14 @@ class Workspace {
     dock = $derived((this.settings.layout.detailDock || 'right') as DockSide);
     detailSize = $derived(this.settings.layout.detailSize || 520);
     sidebarWidth = $derived(this.settings.layout.sidebarWidth || 260);
-    /** How tall the dock stands when it is open, in px. */
-    dockSize = $derived(this.settings.dock.size || 320);
+    /** How tall the bottom pane stands when it is open, in px. */
+    dockSize = $derived(this.panes.bottom.size);
     /**
-     * Whether the dock is showing its contents rather than just its tabs. The
-     * strip itself is always on screen -- that is what makes it a dock and not
-     * a panel -- so this only decides whether the editor under it is drawn.
+     * Whether the bottom pane is showing its contents rather than just its
+     * tabs. Its strip is always on screen -- that is what makes it a place
+     * things can be put -- so this only decides whether the view is drawn.
      */
-    dockOpen = $derived(this.settings.dock.open && this.dockTabs.length > 0);
+    dockOpen = $derived(this.panes.bottom.open && this.panes.bottom.tabs.length > 0);
     /**
      * The folded groups, falling back to the catalogue's defaults only while
      * the user has never chosen. `?? ` rather than `||` is load-bearing: an
@@ -561,10 +630,9 @@ class Workspace {
             this.pruneHealth();
             this.pruneCustomKinds();
             if (restoreTabs) {
-                this.restoreTabs();
+                this.restorePanes();
             } else {
                 this.dropTabsForMissingContexts();
-                this.dropDockTabsForMissingContexts();
                 this.recheckHealth();
                 this.recheckCustomKinds();
                 // Only for a sync the user asked for: a rescan that finds
@@ -793,29 +861,54 @@ class Workspace {
         this.expanded = [];
     }
 
-    // ----- tabs ----------------------------------------------------------
+    // ----- tabs and panes ------------------------------------------------
+    //
+    // One set of operations for every pane. Which pane a tab is in is a
+    // property of the tab, not of the code that opens or closes it, so the only
+    // thing that differs between "close this editor" and "close this pod list"
+    // is which pane the predicate runs over.
+
+    /** The pane a tab is in, or null if no pane holds it. */
+    paneOf(id: string): PaneId | null {
+        return PANE_IDS.find((pane) => this.panes[pane].tabs.some((t) => t.id === id)) ?? null;
+    }
+
+    /** One tab, wherever it is. */
+    tabFor(id: string): Tab | null {
+        for (const pane of PANE_IDS) {
+            const tab = this.panes[pane].tabs.find((t) => t.id === id);
+            if (tab) return tab;
+        }
+        return null;
+    }
+
+    /** The tab a pane is showing. */
+    activeTabIn(pane: PaneId): Tab | null {
+        const state = this.panes[pane];
+        return state.tabs.find((t) => t.id === state.activeId) ?? null;
+    }
 
     /**
-     * Opens a tab, or focuses it if this context/kind pair is already open.
+     * Opens a tab, or focuses it if this context/kind pair is already open --
+     * in whichever pane the user has put it.
      *
-     * A new tab lands immediately right of the selected one rather than at the
-     * far end of the strip: it was almost always opened from the view you were
-     * looking at, so that is where you will look for it, and a long strip means
-     * the end of it may not even be on screen. With nothing selected there is
-     * no "beside", so it goes last.
+     * A new tab lands immediately right of the pane's active one rather than at
+     * the far end of the strip: it was almost always opened from the view you
+     * were looking at, so that is where you will look for it, and a long strip
+     * means the end of it may not even be on screen.
      */
     openTab(contextId: string, kind: string): void {
-        const id = tabId(contextId, kind);
-        if (!this.tabs.some((t) => t.id === id)) {
-            const title = kind === DASHBOARD ? 'Dashboard' : labelFor(kind);
-            const tab: Tab = { id, contextId, kind, title };
-            const at = this.tabs.findIndex((t) => t.id === this.activeTabId);
-
-            this.tabs =
-                at === -1
-                    ? [...this.tabs, tab]
-                    : [...this.tabs.slice(0, at + 1), tab, ...this.tabs.slice(at + 1)];
-            this.persistTabOrder();
+        const id = resourceTabId(contextId, kind);
+        if (this.paneOf(id) === null) {
+            this.insertTab('main', {
+                id,
+                view: 'resource',
+                contextId,
+                kind,
+                namespace: '',
+                name: '',
+                title: kind === DASHBOARD ? 'Dashboard' : labelFor(kind),
+            });
         }
         this.activateTab(id);
     }
@@ -829,23 +922,74 @@ class Workspace {
      * grouping the user built by hand.
      */
     openSettings(): void {
-        if (!this.tabs.some((t) => t.id === SETTINGS_TAB_ID)) {
-            this.tabs = [...this.tabs, { id: SETTINGS_TAB_ID, contextId: '', kind: SETTINGS, title: 'Settings' }];
-            this.persistTabOrder();
+        if (this.paneOf(SETTINGS_TAB_ID) === null) {
+            this.insertTab(
+                'main',
+                {
+                    id: SETTINGS_TAB_ID,
+                    view: 'resource',
+                    contextId: '',
+                    kind: SETTINGS,
+                    namespace: '',
+                    name: '',
+                    title: 'Settings',
+                },
+                { atEnd: true },
+            );
         }
         this.activateTab(SETTINGS_TAB_ID);
     }
 
-    /** Focuses a tab and selects the context it belongs to. */
-    activateTab(id: string): void {
-        const changed = this.activeTabId !== id;
-        this.activeTabId = id;
+    /**
+     * Puts a tab into a pane, beside whatever that pane is showing.
+     *
+     * Nothing here activates it or opens the pane: the callers differ on both --
+     * restoring a session opens nothing, and moving a tab between panes must not
+     * re-run the "opened from here" placement.
+     */
+    private insertTab(pane: PaneId, tab: Tab, { atEnd = false, index }: { atEnd?: boolean; index?: number } = {}): void {
+        const state = this.panes[pane];
+        const at =
+            index !== undefined
+                ? Math.max(0, Math.min(index, state.tabs.length))
+                : atEnd
+                  ? state.tabs.length
+                  : state.tabs.findIndex((t) => t.id === state.activeId) + 1 || state.tabs.length;
 
-        const tab = this.tabs.find((t) => t.id === id);
-        // The settings tab has no cluster to select, no tree section to unfold
-        // and nothing to scroll to. Left unguarded it would deselect whatever
-        // context the sidebar was showing every time you looked at settings.
-        if (tab && !isSettingsTab(tab)) {
+        state.tabs = [...state.tabs.slice(0, at), tab, ...state.tabs.slice(at)];
+        this.persistPanes();
+    }
+
+    /**
+     * Focuses a tab, and gives the room back when it is the one already showing
+     * in a pane that can fold.
+     *
+     * The second click is the point, as it is for a context in the sidebar:
+     * clicking the tab you are on has to do something, and in the bottom panel
+     * what it should do is hand the space back to the view above.
+     */
+    activateTab(id: string): void {
+        const pane = this.paneOf(id);
+        if (pane === null) return;
+
+        const state = this.panes[pane];
+        const tab = state.tabs.find((t) => t.id === id);
+        if (!tab) return;
+
+        if (pane === 'bottom' && state.activeId === id && state.open) {
+            this.setPaneOpen('bottom', false);
+            return;
+        }
+
+        const changed = state.activeId !== id;
+        state.activeId = id;
+        this.focusedTabId = id;
+        if (!state.open) this.setPaneOpen(pane, true);
+
+        // A collection tab says which cluster it is looking at, and the sidebar
+        // follows it there. A document or a stream does not: it is one object,
+        // and you opened it from wherever you already were.
+        if (tab.view === 'resource' && !isSettingsTab(tab)) {
             this.selectContext(tab.contextId);
             this.showSectionFor(tab);
             // Asked for here rather than in selectContext, which the sidebar
@@ -853,10 +997,11 @@ class Workspace {
             // pointer, and scrolling it would move it out from under them.
             this.reveal = { contextId: tab.contextId, kind: tab.kind, nonce: ++this.revealCount };
         }
-        // Only when the view actually changed: the panel describes an object in
-        // the tab we just left, so keeping it open over a different one would
-        // be misleading. Re-clicking the tab you are on should leave it alone.
-        if (changed) {
+        // Only when the view actually changed, and only for a collection: the
+        // panel describes an object in the list we just left, so keeping it open
+        // over a different one would be misleading. Bringing an editor forward
+        // is not leaving that list.
+        if (changed && tab.view === 'resource') {
             this.closeDetail();
         }
     }
@@ -875,60 +1020,96 @@ class Workspace {
         this.toggleGroup(tab.contextId, group);
     }
 
-    /** Closes a tab, moving focus to its neighbour so the view is never blank. */
+    /** Closes a tab, moving focus to its neighbour so the pane is never blank. */
     closeTab(id: string): void {
-        this.retainTabs((tab) => tab.id !== id);
+        const pane = this.paneOf(id);
+        if (pane === null) return;
+        this.retain(pane, (tab) => tab.id !== id);
     }
 
     /**
-     * Closes every tab but one. Pass a context to spare the tabs belonging to
-     * other clusters -- "clear out staging, leave prod alone".
+     * Closes every tab in a pane but one. Pass a context to spare the tabs
+     * belonging to other clusters -- "clear out staging, leave prod alone".
      */
-    closeOtherTabs(id: string, withinContextId?: string): void {
-        this.retainTabs(
+    closeOtherTabsIn(pane: PaneId, id: string, withinContextId?: string): void {
+        this.retain(
+            pane,
             (tab) => tab.id === id || (withinContextId !== undefined && tab.contextId !== withinContextId),
         );
     }
 
-    /** Closes every tab, or every tab belonging to one context. */
+    /** Closes every tab in a pane, or every one belonging to one context. */
+    closeAllTabsIn(pane: PaneId, withinContextId?: string): void {
+        this.retain(pane, (tab) => withinContextId !== undefined && tab.contextId !== withinContextId);
+    }
+
+    /** Closes every tab in the main pane but one. */
+    closeOtherTabs(id: string, withinContextId?: string): void {
+        this.closeOtherTabsIn(this.paneOf(id) ?? 'main', id, withinContextId);
+    }
+
+    /** Closes every tab in the main pane, or every one belonging to a context. */
     closeAllTabs(withinContextId?: string): void {
-        this.retainTabs((tab) => withinContextId !== undefined && tab.contextId !== withinContextId);
+        this.closeAllTabsIn('main', withinContextId);
     }
 
     /**
-     * Keeps the tabs matching `keep` and drops the rest, which is every closing
-     * operation there is. Closing one tab and closing nine differ only in the
-     * predicate; what they share -- where focus lands, that the detail panel
-     * describes an object that may no longer be on screen, and that the order
-     * is written once -- is the part worth having in one place.
+     * Keeps the tabs in one pane matching `keep` and drops the rest, which is
+     * every closing operation there is. Closing one tab and closing nine differ
+     * only in the predicate; what they share -- where focus lands, that the
+     * state behind a closed view goes with it, and that the panes are written
+     * once -- is the part worth having in one place.
      */
-    private retainTabs(keep: (tab: Tab) => boolean): void {
-        const survivors = this.tabs.filter(keep);
-        if (survivors.length === this.tabs.length) return;
+    private retain(pane: PaneId, keep: (tab: Tab) => boolean): void {
+        const state = this.panes[pane];
+        const survivors = state.tabs.filter(keep);
+        if (survivors.length === state.tabs.length) return;
 
-        const hadActive = this.activeTabId !== null;
-        const stillActive = survivors.some((t) => t.id === this.activeTabId);
-        const successor =
-            hadActive && !stillActive ? this.successorFor(this.tabs, this.activeTabId, keep) : null;
+        const closing = state.tabs.filter((tab) => !keep(tab));
+        for (const tab of closing) this.forget(tab);
 
-        this.tabs = survivors;
+        const active = state.tabs.find((t) => t.id === state.activeId) ?? null;
+        const stillActive = survivors.some((t) => t.id === state.activeId);
+        const successor = stillActive ? null : this.successorFor(state.tabs, state.activeId, keep);
 
-        if (hadActive && !stillActive) {
-            this.activeTabId = successor?.id ?? null;
-            if (successor) this.selectContext(successor.contextId);
-            this.closeDetail();
+        state.tabs = survivors;
+        if (this.focusedTabId !== null && closing.some((t) => t.id === this.focusedTabId)) {
+            this.focusedTabId = null;
         }
-        this.persistTabOrder();
+        if (!stillActive) {
+            state.activeId = successor?.id ?? null;
+            if (successor && successor.view === 'resource') this.selectContext(successor.contextId);
+            // Only when the list the panel was describing has gone. Closing an
+            // editor leaves the object it was editing on screen above it, and
+            // taking the description away with it would be gratuitous.
+            if (active && active.view === 'resource') this.closeDetail();
+        }
+        // A pane showing nothing is a blank panel taking up a third of the
+        // window. The bottom one keeps its strip and hands the room back; the
+        // others simply stop being drawn.
+        if (survivors.length === 0 && pane === 'bottom') state.open = false;
+        this.persistPanes();
+    }
+
+    /**
+     * Drops whatever a closed tab was holding: an editor's buffer, a log
+     * stream's scrollback, a shell.
+     *
+     * A reopened tab must not come back holding an edit made against a version
+     * of the object the cluster has moved past, or scrollback from a stream that
+     * closed hours ago. Moving a tab between panes deliberately does not go
+     * through here -- see moveTabToPane.
+     */
+    private forget(tab: Tab): void {
+        if (tab.view === 'logs') logs.forget(tab.id);
+        else if (tab.view === 'shell') terminals.forget(tab.id);
+        else if (isDocumentView(tab.view)) editors.forget(tab.id);
     }
 
     /**
      * The tab that takes over when the active one closes: the first survivor to
      * its right, else the nearest to its left, so focus moves the short way and
      * lands where the eye already is.
-     *
-     * Written over any strip of tabs rather than over `tabs`, because the dock
-     * below closes its own the same way and there is no second answer to where
-     * focus should land.
      */
     private successorFor<T extends { id: string }>(
         tabs: T[],
@@ -947,150 +1128,87 @@ class Workspace {
         return null;
     }
 
-    /** Reorders tabs after a drag. Both indices are positions in `tabs`. */
-    moveTab(from: number, to: number): void {
-        const next = moved(this.tabs, from, to);
+    /** Reorders tabs within one pane. Both indices are positions in that pane. */
+    reorderTab(pane: PaneId, from: number, to: number): void {
+        const next = moved(this.panes[pane].tabs, from, to);
         if (!next) return;
-        this.tabs = next;
-        this.persistTabOrder();
+        this.panes[pane].tabs = next;
+        this.persistPanes();
+    }
+
+    /** Reorders the main pane's tabs after a drag. */
+    moveTab(from: number, to: number): void {
+        this.reorderTab('main', from, to);
     }
 
     /**
-     * Debounced because dragging a tab reorders on every pointer move; without
-     * it a single drag would write the settings file dozens of times.
-     */
-    private saveTabOrder = this.writer(
-        'tabOrder',
-        (order: appconfig.TabRef[]) => SettingsService.SetTabOrder(order),
-        'Could not save tab order',
-        250,
-    );
-
-    private persistTabOrder(): void {
-        this.saveTabOrder($state.snapshot(this.tabs.map((t) => ({ contextId: t.contextId, kind: t.kind }))));
-    }
-
-    /**
-     * Reopens the tabs from the previous session, skipping any whose context is
-     * no longer in a kubeconfig.
-     */
-    private restoreTabs(): void {
-        // Turned off, the strip starts empty -- but the *order* is left on disk
-        // untouched, so switching restore back on brings back the session it
-        // was switched off during rather than nothing.
-        if (!this.settings.preferences.restoreTabs) {
-            this.tabs = [];
-            this.activeTabId = null;
-            return;
-        }
-
-        const known = new Set(this.contexts.map((c) => c.id));
-        this.tabs = this.settings.tabOrder
-            // The settings tab has no context, so it can never be "known" --
-            // it is kept on its own terms.
-            .filter((ref) => ref.kind === SETTINGS || known.has(ref.contextId))
-            .map((ref) => ({
-                id: tabId(ref.contextId, ref.kind),
-                contextId: ref.contextId,
-                kind: ref.kind,
-                title: ref.kind === DASHBOARD ? 'Dashboard' : labelFor(ref.kind),
-            }));
-        this.activeTabId = this.tabs[0]?.id ?? null;
-        if (this.tabs[0] && !isSettingsTab(this.tabs[0])) {
-            this.selectContext(this.tabs[0].contextId);
-        }
-        this.restoreDockTabs();
-    }
-
-    /**
-     * Reopens the dock's tabs from the previous session, skipping any whose
-     * context has gone and any view this build does not know about -- a
-     * hand-edited file, or one written by a later version.
+     * Moves a tab into another pane, at a position in it.
      *
-     * The documents themselves are not restored, only the tabs: an editor
-     * reopens on what the cluster says now, because a draft written against a
-     * fortnight-old resourceVersion could not be saved anyway.
+     * The tab keeps its id, and that is the whole point: an id says what a tab
+     * shows, so a half-written manifest, a shell's session and a log stream's
+     * scrollback all survive the move. Dragging a view somewhere else rearranges
+     * the window; it does not restart what is in it.
      */
-    private restoreDockTabs(): void {
-        if (!this.settings.preferences.restoreTabs) {
-            this.dockTabs = [];
-            this.activeDockTabId = null;
+    moveTabToPane(id: string, to: PaneId, index?: number): void {
+        const from = this.paneOf(id);
+        if (from === null) return;
+
+        const tab = this.panes[from].tabs.find((t) => t.id === id);
+        if (!tab) return;
+
+        if (from === to) {
+            const at = this.panes[to].tabs.findIndex((t) => t.id === id);
+            if (index !== undefined && index !== at) this.reorderTab(to, at, index);
             return;
         }
 
-        const known = new Set(this.contexts.map((c) => c.id));
-        this.dockTabs = this.settings.dock.tabs
-            // Only the document views come back. A log stream and a shell are
-            // connections rather than state, and reopening one at launch would
-            // mean dialling every cluster in the dock before the window is up.
-            .filter((ref) => isDocumentView(ref.type as DockView) && known.has(ref.contextId))
-            .map((ref) => ({
-                id: dockTabId(ref.type as DockView, ref),
-                view: ref.type as DockView,
-                contextId: ref.contextId,
-                kind: ref.kind,
-                namespace: ref.namespace,
-                name: ref.name,
-                title: ref.name,
-            }));
-        this.activeDockTabId = this.dockTabs[0]?.id ?? null;
+        const source = this.panes[from];
+        const wasActive = source.activeId === id;
+        const survivors = source.tabs.filter((t) => t.id !== id);
+        const successor = wasActive
+            ? this.successorFor(source.tabs, id, (t) => t.id !== id)
+            : null;
+
+        source.tabs = survivors;
+        if (wasActive) source.activeId = successor?.id ?? null;
+        if (survivors.length === 0 && from === 'bottom') source.open = false;
+
+        this.insertTab(to, tab, { index, atEnd: index === undefined });
+        this.panes[to].activeId = id;
+        this.panes[to].open = true;
+        this.persistPanes();
     }
 
-    /** Drops tabs whose context disappeared from disk between syncs. */
-    private dropTabsForMissingContexts(): void {
-        const known = new Set(this.contexts.map((c) => c.id));
-        // The settings tab survives every sync: it does not depend on a
-        // kubeconfig, so losing every cluster must not close it.
-        const kept = this.tabs.filter((t) => isSettingsTab(t) || known.has(t.contextId));
-        if (kept.length === this.tabs.length) return;
-
-        this.tabs = kept;
-        if (!kept.some((t) => t.id === this.activeTabId)) {
-            this.activeTabId = kept[0]?.id ?? null;
-            this.closeDetail();
-        }
-        this.persistTabOrder();
+    /** Whether a pane is showing its contents rather than just its tabs. */
+    isPaneOpen(pane: PaneId): boolean {
+        return this.panes[pane].open && this.panes[pane].tabs.length > 0;
     }
 
-    /**
-     * Drops dock tabs whose context disappeared from disk. Called from sync
-     * beside dropTabsForMissingContexts rather than from inside it: an editor
-     * open on an object in a kubeconfig that has gone cannot be saved, but that
-     * is the only reason the dock ever loses a tab it was not asked to.
-     */
-    private dropDockTabsForMissingContexts(): void {
-        const known = new Set(this.contexts.map((c) => c.id));
-        this.retainDockTabs((tab) => known.has(tab.contextId));
+    /** Shows or folds away a pane's contents. Its strip, where it has one, stays. */
+    setPaneOpen(pane: PaneId, open: boolean): void {
+        if (this.panes[pane].open === open) return;
+        this.panes[pane].open = open;
+        this.persistPanes();
     }
 
-    /** Keeps a context selected if there is one, so the sidebar is never idle. */
-    private ensureSelection(): void {
-        if (this.selectedContextId && this.contexts.some((c) => c.id === this.selectedContextId)) {
-            return;
-        }
-        const current = this.contexts.find((c) => c.current) ?? this.contexts[0];
-        this.selectedContextId = current?.id ?? null;
-        if (current) {
-            this.selectContext(current.id);
-        }
+    togglePane(pane: PaneId): void {
+        this.setPaneOpen(pane, !this.isPaneOpen(pane));
     }
 
-    // ----- the dock ------------------------------------------------------
-    //
-    // The strip at the foot of the window. It is deliberately not tied to the
-    // selected context or to the tab above it: an object you are part way
-    // through editing has to still be there after you have gone to look at
-    // something else, which is the whole reason it is a dock rather than
-    // another panel inside the view.
+    setPaneSize(pane: PaneId, px: number): void {
+        this.panes[pane].size = Math.round(px);
+        this.persistPanes();
+    }
+
+    // ----- the bottom pane, under the names the dock had ------------------
 
     /** Opens the YAML editor for one object, or focuses it if it is open. */
     openEditor(target: DetailTarget): void {
-        this.openDockTab('edit', target);
+        this.openObjectTab('edit', target);
     }
 
     /**
-     * Opens a Helm release's values in the dock, or focuses them if they are
-     * open.
+     * Opens a Helm release's values, or focuses them if they are open.
      *
      * The same editor an object's YAML gets, deliberately: it is the same
      * gesture on the same document, and everything that editor already does --
@@ -1099,16 +1217,16 @@ class Workspace {
      * a save means, and that lives in the editor store rather than here.
      */
     openHelmValues(target: DetailTarget): void {
-        this.openDockTab('helmvalues', target);
+        this.openObjectTab('helmvalues', target);
     }
 
     /** Opens the log view for one object, or focuses it if it is open. */
     openLogs(target: DetailTarget): void {
-        this.openDockTab('logs', target);
+        this.openObjectTab('logs', target);
     }
 
     /**
-     * Opens a shell on one object -- in the dock, or in the user's own terminal
+     * Opens a shell on one object -- in a pane, or in the user's own terminal
      * if that is what they have chosen.
      *
      * The choice is read here rather than at the button, so that every way of
@@ -1120,7 +1238,7 @@ class Workspace {
             void this.openExternalShell(target);
             return;
         }
-        this.openDockTab('shell', target);
+        this.openObjectTab('shell', target);
     }
 
     /**
@@ -1151,16 +1269,18 @@ class Workspace {
     }
 
     /**
-     * Opens one view onto an object in the dock, or focuses it if it is there.
+     * Opens one view onto an object, or focuses it where it already is.
      *
      * The view is part of a tab's id, so an object's YAML and its logs are two
-     * tabs rather than one that changes what it shows.
+     * tabs rather than one that changes what it shows. A view that has never
+     * been opened lands in the bottom pane; one the user has since dragged
+     * elsewhere is focused there, because that is where they put it.
      */
-    private openDockTab(view: DockView, target: DetailTarget): void {
-        const id = dockTabId(view, target);
+    private openObjectTab(view: TabView, target: DetailTarget): void {
+        const id = tabIdFor(view, target);
 
-        if (!this.dockTabs.some((t) => t.id === id)) {
-            const tab: DockTab = {
+        if (this.paneOf(id) === null) {
+            this.insertTab('bottom', {
                 id,
                 view,
                 contextId: target.contextId,
@@ -1168,162 +1288,167 @@ class Workspace {
                 namespace: target.namespace,
                 name: target.name,
                 title: target.name,
-            };
-            // Beside the tab you were on rather than at the far end, for the
-            // reason openTab does the same: that is where you will look for it.
-            const at = this.dockTabs.findIndex((t) => t.id === this.activeDockTabId);
-            this.dockTabs =
-                at === -1
-                    ? [...this.dockTabs, tab]
-                    : [...this.dockTabs.slice(0, at + 1), tab, ...this.dockTabs.slice(at + 1)];
-            this.persistDock();
-        }
-
-        // Not through activateDockTab: opening something is never a request to
-        // fold the dock away, which is what that does on a second click.
-        this.activeDockTabId = id;
-        this.setDockOpen(true);
-    }
-
-    /**
-     * Focuses a dock tab, or folds the dock away when it is the one already
-     * showing.
-     *
-     * The second click is the point, as it is for a context in the sidebar:
-     * clicking the tab you are on has to do something, and what it should do is
-     * give the room back to the view above.
-     */
-    activateDockTab(id: string): void {
-        if (this.activeDockTabId === id && this.dockOpen) {
-            this.setDockOpen(false);
+            });
+            // Not through activateTab: opening something is never a request to
+            // fold the pane away, which is what that does on a second click.
+            this.panes.bottom.activeId = id;
+            this.focusedTabId = id;
+            this.setPaneOpen('bottom', true);
             return;
         }
-        this.activeDockTabId = id;
-        this.setDockOpen(true);
+        const pane = this.paneOf(id) as PaneId;
+        this.panes[pane].activeId = id;
+        this.focusedTabId = id;
+        this.setPaneOpen(pane, true);
     }
 
-    /** Closes one dock tab, discarding whatever was unsaved in it. */
+    /** Focuses a tab in the bottom pane, or folds it away if it is showing. */
+    activateDockTab(id: string): void {
+        this.activateTab(id);
+    }
+
+    /** Closes one tab in the bottom pane, discarding whatever was unsaved in it. */
     closeDockTab(id: string): void {
-        this.retainDockTabs((tab) => tab.id !== id);
+        this.closeTab(id);
     }
 
-    /** Closes every dock tab but one, optionally sparing the other clusters'. */
+    /** Closes every tab in the bottom pane but one, optionally sparing other clusters'. */
     closeOtherDockTabs(id: string, withinContextId?: string): void {
-        this.retainDockTabs(
-            (tab) => tab.id === id || (withinContextId !== undefined && tab.contextId !== withinContextId),
-        );
+        this.closeOtherTabsIn('bottom', id, withinContextId);
     }
 
-    /** Closes every dock tab, or every one belonging to a context. */
+    /** Closes every tab in the bottom pane, or every one belonging to a context. */
     closeAllDockTabs(withinContextId?: string): void {
-        this.retainDockTabs((tab) => withinContextId !== undefined && tab.contextId !== withinContextId);
+        this.closeAllTabsIn('bottom', withinContextId);
     }
 
-    /**
-     * Keeps the dock tabs matching `keep` and drops the rest.
-     *
-     * The documents of the tabs that go are dropped with them: an editor's
-     * contents belong to its tab, and keeping them would mean a tab reopened on
-     * the same object came back holding an edit made against a version of it
-     * the cluster has long since moved past.
-     */
-    private retainDockTabs(keep: (tab: DockTab) => boolean): void {
-        const survivors = this.dockTabs.filter(keep);
-        if (survivors.length === this.dockTabs.length) return;
-
-        for (const tab of this.dockTabs) {
-            if (keep(tab)) continue;
-            // Whichever view it was, its state goes with it: a reopened tab
-            // must not come back holding an edit made against a version of the
-            // object the cluster has moved past, or scrollback from a stream
-            // that closed hours ago.
-            if (tab.view === 'logs') logs.forget(tab.id);
-            else if (tab.view === 'shell') terminals.forget(tab.id);
-            else editors.forget(tab.id);
-
-        }
-
-        const stillActive = survivors.some((t) => t.id === this.activeDockTabId);
-        const successor = stillActive
-            ? null
-            : this.successorFor(this.dockTabs, this.activeDockTabId, keep);
-
-        this.dockTabs = survivors;
-        if (!stillActive) {
-            this.activeDockTabId = successor?.id ?? null;
-        }
-        // An open dock with nothing in it is a blank panel taking up a third of
-        // the window. The strip stays; the room goes back.
-        if (survivors.length === 0) {
-            this.setDockOpen(false);
-        }
-        this.persistDock();
-    }
-
-    /** Reorders dock tabs after a drag. Both indices are positions in `dockTabs`. */
+    /** Reorders the bottom pane's tabs after a drag. */
     moveDockTab(from: number, to: number): void {
-        const next = moved(this.dockTabs, from, to);
-        if (!next) return;
-        this.dockTabs = next;
-        this.persistDock();
+        this.reorderTab('bottom', from, to);
     }
 
-    /** Whether one object already has an editor open on it. */
+    /** Whether one object already has an editor open on it, in any pane. */
     isEditing(target: DetailTarget): boolean {
-        const id = dockTabId('edit', target);
-        return this.dockTabs.some((t) => t.id === id);
+        return this.paneOf(tabIdFor('edit', target)) !== null;
     }
 
-    /** Shows or folds away the dock's contents. The strip itself always stays. */
+    /** Shows or folds away the bottom pane's contents. Its strip always stays. */
     setDockOpen(open: boolean): void {
-        if (this.settings.dock.open === open) return;
-        this.settings.dock.open = open;
-        this.persistDock();
+        this.setPaneOpen('bottom', open);
     }
 
     toggleDock(): void {
-        this.setDockOpen(!this.dockOpen);
+        this.togglePane('bottom');
     }
 
     setDockSize(px: number): void {
-        this.settings.dock.size = Math.round(px);
-        this.persistDock();
+        this.setPaneSize('bottom', px);
     }
 
+    // ----- restoring and persisting --------------------------------------
+
     /**
-     * Writes the whole dock: its tabs, whether it is open, and its height.
+     * Writes every pane: what each holds, in what order, whether it is showing
+     * it and how big it is.
      *
-     * One writer for all three, which is what stops them undoing each other.
-     * Opening an editor adds a tab *and* unfolds the dock, and every settings
-     * call answers with the whole file for the store to adopt -- so two
-     * debounced writers over that one gesture would race, and whichever
-     * answered second would carry the other's change back to what it was.
+     * One writer for all of it, which is what stops the parts undoing each
+     * other. Dragging a tab from the bottom panel into the right one empties one
+     * pane and fills, opens and sizes another in a single gesture, and every
+     * settings call answers with the whole file for the store to adopt -- so two
+     * debounced writers over that gesture would race, and whichever answered
+     * second would carry the other's half back.
      *
-     * Debounced like the tab order, and for the same reason: dragging a tab
-     * through the strip reorders on every pointer move, and so does dragging
-     * the dock's edge.
+     * Debounced because dragging reorders on every pointer move, and so does
+     * dragging a pane's edge; without it one drag would write the file dozens
+     * of times.
      */
-    private saveDock = this.writer(
-        'dock',
-        (dock: appconfig.Dock) => SettingsService.SetDock(dock),
-        'Could not save the dock',
+    private savePanes = this.writer(
+        'panes',
+        (panes: appconfig.Panes) => SettingsService.SetPanes(panes),
+        'Could not save the layout',
         250,
     );
 
-    private persistDock(): void {
-        this.saveDock(
+    private persistPanes(): void {
+        this.savePanes(
             $state.snapshot({
-                open: this.settings.dock.open,
-                size: this.settings.dock.size,
-                tabs: this.dockTabs.map((t) => ({
-                    type: t.view,
-                    contextId: t.contextId,
-                    kind: t.kind,
-                    namespace: t.namespace,
-                    name: t.name,
-                })),
-            }),
+                main: this.paneRef('main'),
+                right: this.paneRef('right'),
+                bottom: this.paneRef('bottom'),
+            }) as appconfig.Panes,
         );
+    }
+
+    /** One pane in the shape the settings file holds it. */
+    private paneRef(pane: PaneId): appconfig.PaneState {
+        const state = this.panes[pane];
+        return {
+            open: state.open,
+            size: state.size,
+            tabs: state.tabs.map((t) => ({
+                type: t.view,
+                contextId: t.contextId,
+                kind: t.kind,
+                namespace: t.namespace,
+                name: t.name,
+            })),
+        } as appconfig.PaneState;
+    }
+
+    /**
+     * Reopens the views from the previous session, skipping any whose context
+     * is no longer in a kubeconfig and any view this build does not know about
+     * -- a hand-edited file, or one written by a later version.
+     *
+     * The documents themselves are not restored, only the tabs: an editor
+     * reopens on what the cluster says now, because a draft written against a
+     * fortnight-old resourceVersion could not be saved anyway. Logs and shells
+     * do not come back at all -- they are connections rather than state, and
+     * reopening one at launch would mean dialling every cluster in the window
+     * before it is up.
+     */
+    private restorePanes(): void {
+        // Turned off, every pane starts empty -- but what was in them is left
+        // on disk untouched, so switching restore back on brings back the
+        // session it was switched off during rather than nothing.
+        const restoring = this.settings.preferences.restoreTabs;
+        const known = new Set(this.contexts.map((c) => c.id));
+
+        for (const pane of PANE_IDS) {
+            const saved = this.settings.panes[pane];
+            const tabs = restoring ? saved.tabs.filter(canRestore(known)).map(tabFromRef) : [];
+            this.panes[pane] = {
+                tabs,
+                activeId: tabs[0]?.id ?? null,
+                open: saved.open,
+                size: saved.size,
+            };
+        }
+
+        const first = this.panes.main.tabs[0];
+        if (first && !isSettingsTab(first)) this.selectContext(first.contextId);
+    }
+
+    /** Drops tabs whose context disappeared from disk between syncs. */
+    private dropTabsForMissingContexts(): void {
+        const known = new Set(this.contexts.map((c) => c.id));
+        for (const pane of PANE_IDS) {
+            // The settings tab survives every sync: it does not depend on a
+            // kubeconfig, so losing every cluster must not close it.
+            this.retain(pane, (tab) => isSettingsTab(tab) || known.has(tab.contextId));
+        }
+    }
+
+    /** Keeps a context selected if there is one, so the sidebar is never idle. */
+    private ensureSelection(): void {
+        if (this.selectedContextId && this.contexts.some((c) => c.id === this.selectedContextId)) {
+            return;
+        }
+        const current = this.contexts.find((c) => c.current) ?? this.contexts[0];
+        this.selectedContextId = current?.id ?? null;
+        if (current) {
+            this.selectContext(current.id);
+        }
     }
 
     // ----- custom resources ----------------------------------------------
@@ -2206,8 +2331,7 @@ class Workspace {
 
         const next = adoptSettings(saved);
         if (this.isPending('contexts')) next.contexts = this.settings.contexts;
-        if (this.isPending('tabOrder')) next.tabOrder = this.settings.tabOrder;
-        if (this.isPending('dock')) next.dock = this.settings.dock;
+        if (this.isPending('panes')) next.panes = this.settings.panes;
         if (this.isPending('layout')) next.layout = this.settings.layout;
         if (this.isPending('preferences')) next.preferences = this.settings.preferences;
         this.settings = next;

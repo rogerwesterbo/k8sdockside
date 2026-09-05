@@ -98,7 +98,7 @@ test('the title bar keeps its real height when zoomed out, so the traffic lights
     expect(bar.height).toBeGreaterThanOrEqual(43);
 });
 
-// A short window is the case that actually clips: .content hides its overflow
+// A short window is the case that actually clips: the pane body hides its overflow
 // and the welcome panel has none of its own, so its lower half becomes
 // unreachable. Zooming in produces the same squeeze, which is what makes this
 // an accessibility problem rather than a cosmetic one.
@@ -106,7 +106,7 @@ test('the welcome panel stays reachable in a window too short for it', async () 
     await page.viewport(900, 260);
     await settle();
 
-    const content = document.querySelector('.content') as HTMLElement;
+    const content = document.querySelector('.pane.main > .body') as HTMLElement;
     const welcome = content.querySelector('.welcome') as HTMLElement | null;
     expect(welcome).not.toBeNull();
 

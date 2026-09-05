@@ -1,0 +1,215 @@
+// Where a view sits, and what a view is.
+//
+// The app used to have two kinds of tab: a strip along the top holding resource
+// kinds, and a dock at the foot holding documents. They did the same things --
+// opened, closed, reordered, restored -- through two parallel sets of code, and
+// each was nailed to its own end of the window. A YAML editor could only ever
+// be at the bottom, a pod list could only ever be in the middle.
+//
+// This is the one model both became. A tab names what it shows; a pane is a
+// place tabs go; and which pane a tab is in is the user's to decide, not the
+// view type's. Everything that used to be "the dock" is now the bottom pane,
+// which is a pane like the others that happens to start out holding documents.
+//
+// Nothing here touches Svelte state or the backend: it is the vocabulary the
+// store is written in, so it can be reasoned about -- and tested -- on its own.
+
+/**
+ * The places a tab can be.
+ *
+ * Three fixed containers rather than a tree of splits. That is a deliberate
+ * ceiling: it covers what people actually reach for -- a list here, its logs
+ * under it, an editor beside it -- while keeping the layout a flat record that
+ * can be written to the settings file and read back without a migration every
+ * time the shape grows a case.
+ */
+export type PaneId = 'main' | 'right' | 'bottom';
+
+/** Every pane, in the order the drop menu and the settings file list them. */
+export const PANE_IDS: PaneId[] = ['main', 'right', 'bottom'];
+
+/** Whether a string names a pane, for reading a settings file we did not write. */
+export function isPaneId(value: string): value is PaneId {
+    return (PANE_IDS as string[]).includes(value);
+}
+
+/**
+ * What a tab shows.
+ *
+ * `resource` is a collection -- the pods of a cluster, a plugin's view, the
+ * dashboard, the settings. The other four are views onto one object, and carry
+ * that object's namespace and name.
+ */
+export type TabView = 'resource' | 'edit' | 'helmvalues' | 'logs' | 'shell';
+
+/** Every view, used to reject a type a hand-edited settings file made up. */
+export const TAB_VIEWS: TabView[] = ['resource', 'edit', 'helmvalues', 'logs', 'shell'];
+
+export function isTabView(value: string): value is TabView {
+    return (TAB_VIEWS as string[]).includes(value);
+}
+
+/**
+ * The views that are an editable document. They share an editor, a store and a
+ * dirty mark, and differ only in what is read and what a save means.
+ * See ../state/editor.svelte.ts.
+ */
+const DOCUMENT_VIEWS: TabView[] = ['edit', 'helmvalues'];
+
+/** Whether a view holds an editable document rather than a stream or a list. */
+export function isDocumentView(view: TabView): boolean {
+    return DOCUMENT_VIEWS.includes(view);
+}
+
+/** What a tab is opened against: a kind, and for the object views an object. */
+export interface TabTarget {
+    contextId: string;
+    kind: string;
+    namespace: string;
+    name: string;
+}
+
+/**
+ * One tab, wherever it happens to live.
+ *
+ * A resource tab leaves `namespace` and `name` empty, which is what makes one
+ * id scheme serve both: `resource:prod#pods##` and `edit:prod#pods#default#web`
+ * are the same shape and neither is ever parsed back.
+ */
+export interface Tab {
+    /** `${view}:${contextId}#${kind}#${namespace}#${name}` -- a key, never parsed back. */
+    id: string;
+    view: TabView;
+    contextId: string;
+    kind: string;
+    namespace: string;
+    name: string;
+    /** What the strip shows: the kind's label, or the object's own name. */
+    title: string;
+}
+
+/** One pane's contents. Which pane it is lives in the record's key. */
+export interface PaneState {
+    tabs: Tab[];
+    activeId: string | null;
+    /**
+     * Whether the pane is showing its contents rather than just its tabs.
+     *
+     * Only the bottom pane can be folded shut while keeping its strip -- that
+     * is what makes it a dock and not a panel, and it is the one pane that is
+     * on screen with nothing in it. The others are simply absent when empty.
+     */
+    open: boolean;
+    /** How much room the pane takes along its own axis, in px. */
+    size: number;
+}
+
+/**
+ * The tab id for one view of one thing.
+ *
+ * Content-addressed on purpose: a tab *is* what it shows, so opening the same
+ * thing twice focuses the one that is open rather than making a second. That
+ * also means dragging a tab from one pane to another keeps its id, and so keeps
+ * its editor buffer, its scrollback and its shell -- moving a view does not
+ * restart it.
+ */
+export function tabIdFor(view: TabView, target: TabTarget): string {
+    return `${view}:${target.contextId}#${target.kind}#${target.namespace}#${target.name}`;
+}
+
+/** The id of the tab listing one kind in one context. */
+export function resourceTabId(contextId: string, kind: string): string {
+    return tabIdFor('resource', { contextId, kind, namespace: '', name: '' });
+}
+
+/**
+ * Where a view opens when nothing says otherwise: a collection in the middle,
+ * a document or a stream at the foot.
+ *
+ * Only ever consulted for a tab that is not already open somewhere. Once the
+ * user has moved one, that is where its kind of thing goes as far as they are
+ * concerned, and reopening it must not drag it back.
+ */
+export function defaultPaneFor(view: TabView): PaneId {
+    return view === 'resource' ? 'main' : 'bottom';
+}
+
+/** The icon a view's tab wears, before the resource catalogue has its say. */
+export function iconForView(view: TabView): string {
+    switch (view) {
+        case 'logs':
+            return 'rows';
+        case 'shell':
+            return 'terminal';
+        case 'helmvalues':
+            return 'helm';
+        default:
+            return 'edit';
+    }
+}
+
+/** How a pane names itself to a screen reader, and in its own drop hint. */
+export const PANE_LABELS: Record<PaneId, string> = {
+    main: 'Main',
+    right: 'Right panel',
+    bottom: 'Bottom panel',
+};
+
+/** An empty pane, at the size it takes the first time something lands in it. */
+export function emptyPane(size: number): PaneState {
+    return { tabs: [], activeId: null, open: true, size };
+}
+
+/** The default sizes, matching appconfig.Defaults on the Go side. */
+export const DEFAULT_PANE_SIZE: Record<PaneId, number> = {
+    main: 0, // fills what is left; never read
+    right: 420,
+    bottom: 320,
+};
+
+/** The panes of a window nothing has been opened in yet. */
+export function defaultPanes(): Record<PaneId, PaneState> {
+    return {
+        main: emptyPane(DEFAULT_PANE_SIZE.main),
+        right: emptyPane(DEFAULT_PANE_SIZE.right),
+        // The one pane that starts folded: it is on screen from launch, and an
+        // open one with nothing in it is a third of the window showing nothing.
+        bottom: { ...emptyPane(DEFAULT_PANE_SIZE.bottom), open: false },
+    };
+}
+
+/**
+ * The smallest each pane may be dragged to, and the room it must leave the rest
+ * of the window. Below these a pane shows its strip and three lines of content,
+ * which is not a view of anything.
+ */
+export const MIN_PANE_SIZE: Record<PaneId, number> = { main: 0, right: 260, bottom: 160 };
+export const PANE_HEADROOM: Record<PaneId, number> = { main: 0, right: 420, bottom: 220 };
+
+/**
+ * The tab being dragged, for the moment it is in the air.
+ *
+ * Held here rather than in the drag's own dataTransfer because a dragover
+ * handler is only allowed to see the *types* a drag carries, never its values --
+ * and which pane a tab came from is exactly what the pane under the pointer
+ * needs to know to decide whether this is a reorder or a move. The drag never
+ * leaves the window, so a module-level note of it is the whole of the problem.
+ */
+export interface TabDrag {
+    id: string;
+    from: PaneId;
+}
+
+let inFlight: TabDrag | null = null;
+
+export function beginTabDrag(drag: TabDrag): void {
+    inFlight = drag;
+}
+
+export function currentTabDrag(): TabDrag | null {
+    return inFlight;
+}
+
+export function endTabDrag(): void {
+    inFlight = null;
+}

@@ -87,6 +87,53 @@ type Dock struct {
 	Tabs []DockTabRef `json:"tabs"`
 }
 
+// PaneTabRef identifies one tab, wherever it is. It is the union of what TabRef
+// and DockTabRef each said: Type names the view, and the object fields are
+// empty for a "resource" tab, which names a collection rather than an object.
+//
+// One shape for both because a tab is no longer tied to a place. The user
+// decides which pane a view lives in, so a file that recorded "these are the
+// top tabs and these are the dock's" could not say what they can now say.
+type PaneTabRef struct {
+	// Type is the view: resource, edit, helmvalues, logs or shell. Stored
+	// rather than assumed, as DockTabRef.Type was, so a pane holding a view
+	// this build has never heard of can be read and skipped rather than
+	// misread as something else.
+	Type      string `json:"type"`
+	ContextID string `json:"contextId"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace,omitzero"`
+	Name      string `json:"name,omitzero"`
+}
+
+// PaneState is one pane: what it holds, whether it is showing it, and how much
+// room it takes.
+//
+// Open and Size are per pane rather than in Layout for the reason Dock kept its
+// own: everything about a pane changes in one gesture -- dropping a tab into the
+// right panel fills it, opens it and gives it a width at once -- and every
+// mutator here answers with the whole settings for the frontend to adopt, so a
+// second writer over the same gesture would carry the first's change back.
+type PaneState struct {
+	Tabs []PaneTabRef `json:"tabs"`
+	Open bool         `json:"open"`
+	// Size is the pane's extent along its own axis in px: a width for the
+	// right panel, a height for the bottom one. Meaningless for main, which
+	// takes whatever the other two leave.
+	Size int `json:"size"`
+}
+
+// Panes is where every open view sits.
+//
+// A fixed record rather than a tree of splits, and that is the whole design: it
+// covers a list here, its logs under it and an editor beside it, while staying a
+// shape that can be written and read back without the file learning recursion.
+type Panes struct {
+	Main   PaneState `json:"main"`
+	Right  PaneState `json:"right"`
+	Bottom PaneState `json:"bottom"`
+}
+
 // Layout is the arrangement the user last left the window in.
 type Layout struct {
 	DetailDock   string `json:"detailDock"`   // right | bottom | left
@@ -352,7 +399,12 @@ type Settings struct {
 	// into it: the two strips are reordered independently and hold different
 	// things, and one list would have to carry a discriminator to be split
 	// back apart on read.
-	Dock        Dock        `json:"dock"`
+	Dock Dock `json:"dock"`
+	// Panes is where every open view sits, and it supersedes TabOrder and Dock
+	// above. It is a pointer so that "this file predates panes" is a state the
+	// store can see: nil means migrate from the two old fields, which normalise
+	// does once, after which it is never nil again.
+	Panes       *Panes      `json:"panes"`
 	Layout      Layout      `json:"layout"`
 	Preferences Preferences `json:"preferences"`
 	// PortForwards are the tunnels the user set up, remembered as requests
@@ -374,7 +426,15 @@ func Defaults() Settings {
 		DisabledPlugins: []string{},
 		Contexts:        map[string]ContextPrefs{},
 		TabOrder:        []TabRef{},
-		Dock:            Dock{Size: 320, Tabs: []DockTabRef{}},
+		Dock:            Dock{Tabs: []DockTabRef{}},
+		Panes: &Panes{
+			Main:  PaneState{Tabs: []PaneTabRef{}, Open: true},
+			Right: PaneState{Tabs: []PaneTabRef{}, Size: 420},
+			// The one pane that starts folded. It is on screen from launch --
+			// that is what makes it a place things can be put -- and an open
+			// one with nothing in it is a third of the window showing nothing.
+			Bottom: PaneState{Tabs: []PaneTabRef{}, Size: 320},
+		},
 		Layout:          Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
 		Preferences: Preferences{
 			Theme:    themes.DefaultID,
@@ -488,6 +548,17 @@ func openAt(path string) (*Store, error) {
 	loaded := Defaults()
 	if err := json.Unmarshal(raw, &loaded); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	// Whether this file predates panes, which is what decides if the session in
+	// it has to be brought across from TabOrder and Dock. Unmarshalling over
+	// Defaults cannot answer that -- the defaults have already filled the field
+	// in, so an absent key and an empty one look identical afterwards -- so the
+	// question is put to the file itself.
+	var probe struct {
+		Panes *Panes `json:"panes"`
+	}
+	if err := json.Unmarshal(raw, &probe); err == nil && probe.Panes == nil {
+		loaded.Panes = nil
 	}
 	s.data = normalise(loaded)
 	return s, nil
@@ -769,19 +840,22 @@ func (s *Store) SetPreferences(p Preferences) (Settings, error) {
 	})
 }
 
-// SetTabOrder records the order the user dragged their tabs into.
-func (s *Store) SetTabOrder(order []TabRef) (Settings, error) {
-	return s.update(func(d *Settings) { d.TabOrder = slices.Clone(order) })
-}
-
-// SetDock records the whole state of the bottom dock. It is written as one
-// value for the reason Dock is one -- see there.
-func (s *Store) SetDock(dock Dock) (Settings, error) {
+// SetPanes records where every open view sits: which pane holds it, in what
+// order, and how much room each pane takes.
+//
+// All three panes are written together rather than one at a time, for the
+// reason the dock it replaces was written whole. One gesture moves a tab out of
+// a pane and into another, filling and opening the second; two writers over
+// that would each answer with the whole settings, and the slower would carry
+// the other's half of the move back.
+func (s *Store) SetPanes(panes Panes) (Settings, error) {
 	return s.update(func(d *Settings) {
 		// Cloned on the way in for the same reason clone copies it on the way
-		// out: the caller's slice must not become the store's.
-		dock.Tabs = slices.Clone(dock.Tabs)
-		d.Dock = dock
+		// out: the caller's slices must not become the store's.
+		panes.Main.Tabs = slices.Clone(panes.Main.Tabs)
+		panes.Right.Tabs = slices.Clone(panes.Right.Tabs)
+		panes.Bottom.Tabs = slices.Clone(panes.Bottom.Tabs)
+		d.Panes = &panes
 	})
 }
 
@@ -891,6 +965,7 @@ func normalise(s Settings) Settings {
 	if s.Dock.Tabs == nil {
 		s.Dock.Tabs = []DockTabRef{}
 	}
+	s = migratePanes(s)
 	d := Defaults().Layout
 	switch s.Layout.DetailDock {
 	case "right", "bottom", "left":
@@ -944,6 +1019,79 @@ func normalise(s Settings) Settings {
 	// resolves each to true.
 	return s
 }
+
+// migratePanes brings a settings file up to the pane model, and repairs one
+// that is already there.
+//
+// A file written before panes existed says where its views were in two separate
+// fields: TabOrder held the strip along the top, Dock held the strip at the
+// foot. Those map exactly onto the main and bottom panes, so an upgrade lands
+// the user's session where they left it rather than in an empty window.
+//
+// The two old fields are cleared once they have been read. Leaving them would
+// put the same session in the file twice with nothing keeping the copies
+// honest, which is the sort of thing that is only ever noticed once one of them
+// is wrong. The cost is that downgrading loses the arrangement, not the data.
+func migratePanes(s Settings) Settings {
+	if s.Panes == nil {
+		main := make([]PaneTabRef, 0, len(s.TabOrder))
+		for _, ref := range s.TabOrder {
+			main = append(main, PaneTabRef{Type: ViewResource, ContextID: ref.ContextID, Kind: ref.Kind})
+		}
+		// A straight conversion: a dock tab already named a view onto one
+		// object, which is exactly what a PaneTabRef is. If the two ever stop
+		// agreeing this stops compiling, which is the right way to find out.
+		bottom := make([]PaneTabRef, 0, len(s.Dock.Tabs))
+		for _, ref := range s.Dock.Tabs {
+			bottom = append(bottom, PaneTabRef(ref))
+		}
+		s.Panes = &Panes{
+			Main:   PaneState{Tabs: main, Open: true},
+			Right:  PaneState{Tabs: []PaneTabRef{}},
+			Bottom: PaneState{Tabs: bottom, Open: s.Dock.Open, Size: s.Dock.Size},
+		}
+	}
+	s.TabOrder = []TabRef{}
+	s.Dock = Dock{Tabs: []DockTabRef{}}
+
+	def := Defaults().Panes
+	s.Panes.Main = normalisePane(s.Panes.Main, def.Main)
+	s.Panes.Right = normalisePane(s.Panes.Right, def.Right)
+	s.Panes.Bottom = normalisePane(s.Panes.Bottom, def.Bottom)
+	// Main is not a panel that can be folded away: it is what the window is,
+	// and the other two are arranged around it.
+	s.Panes.Main.Open = true
+	return s
+}
+
+// normalisePane fills in what one pane's record does not say. The minimum size
+// is the point: below it a pane shows its tab strip and three lines of whatever
+// is in it, which is not a view of anything.
+func normalisePane(p PaneState, def PaneState) PaneState {
+	if p.Tabs == nil {
+		p.Tabs = []PaneTabRef{}
+	}
+	if p.Size < minPaneSize {
+		p.Size = def.Size
+	}
+	return p
+}
+
+// The views a tab may hold. They are the frontend's TabView, named here because
+// the store writes one into every PaneTabRef and has to be able to say which
+// ones it wrote.
+const (
+	ViewResource   = "resource"
+	ViewEdit       = "edit"
+	ViewHelmValues = "helmvalues"
+	ViewLogs       = "logs"
+	ViewShell      = "shell"
+)
+
+// minPaneSize is the smallest a pane may be recorded at, below which the size is
+// taken to be missing rather than chosen. A file written before panes existed
+// has 0 for the right panel and lands here.
+const minPaneSize = 160
 
 // normaliseTerminal fills in what a settings file does not say and repairs what
 // it says wrongly.
@@ -1027,6 +1175,15 @@ func clone(s Settings) Settings {
 	out.DisabledPlugins = slices.Clone(s.DisabledPlugins)
 	out.TabOrder = slices.Clone(s.TabOrder)
 	out.Dock.Tabs = slices.Clone(s.Dock.Tabs)
+	// A copy of the struct shares the pointer, and every pane behind it shares
+	// its slice. Both have to be broken for the result to be the caller's.
+	if s.Panes != nil {
+		panes := *s.Panes
+		panes.Main.Tabs = slices.Clone(s.Panes.Main.Tabs)
+		panes.Right.Tabs = slices.Clone(s.Panes.Right.Tabs)
+		panes.Bottom.Tabs = slices.Clone(s.Panes.Bottom.Tabs)
+		out.Panes = &panes
+	}
 	// slices.Clone keeps nil as nil, which is what preserves "never chosen".
 	out.Layout.CollapsedGroups = slices.Clone(s.Layout.CollapsedGroups)
 	// A copy of the struct shares the pointer; the whole point of clone is that
