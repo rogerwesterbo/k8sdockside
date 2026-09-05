@@ -521,7 +521,14 @@ class Workspace {
         // The forwards from last session, as rows waiting to be reconnected.
         // Nothing is dialled here: see PortForwardService for why launching the
         // app must not open every tunnel in the list.
-        void forwards.load();
+        //
+        // Not awaited -- the window should not wait on the forward list to come
+        // up -- but the failure is still caught: an unhandled rejection here is
+        // reported as an error against whatever happens to be running, and the
+        // user is told nothing about the one read that actually failed.
+        void forwards.load().catch((err: unknown) => {
+            this.fail(`Could not read the port forwards: ${message(err)}`);
+        });
         await this.sync({ restoreTabs: true });
         this.loaded = true;
     }

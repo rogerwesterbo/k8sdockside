@@ -129,7 +129,7 @@ fmt: ## Run go fmt against code.
 	@printf "$(GREEN)✓ Code formatted$(RESET)\n"
 
 .PHONY: vet
-vet: ## Run go vet against code.
+vet: frontend-dist-stub ## Run go vet against code.
 	@printf "$(CYAN)Running go vet...$(RESET)\n"
 	@go vet ./...
 	@printf "$(GREEN)✓ Vet complete$(RESET)\n"
