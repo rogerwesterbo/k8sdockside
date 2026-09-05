@@ -15,7 +15,7 @@ vi.mock('@wailsio/runtime', () => ({
         }),
     },
 }));
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     TerminalService: { Containers, Open, OpenNode, Send, Resize, Close },
 }));
 

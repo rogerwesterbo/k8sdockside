@@ -11,7 +11,7 @@ vi.mock('../state/subscriptions', () => ({
         return { setNamespace: vi.fn(), close: vi.fn() };
     }),
 }));
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
         Namespaces: vi.fn().mockResolvedValue(['default']),

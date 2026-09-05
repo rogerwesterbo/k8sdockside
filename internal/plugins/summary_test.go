@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/roger/k8sdockside/internal/kube"
+	"github.com/rogerwesterbo/k8sdockside/internal/kube"
 )
 
 // fakeCluster answers the two questions Summarise asks, so the wording and

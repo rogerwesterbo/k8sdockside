@@ -1,0 +1,80 @@
+name: Setup build environment
+description: >-
+  Installs everything a k8sdockside build needs: the Linux GUI headers Wails
+  links against, Go from go.mod, the wails3 CLI pinned to the version go.mod
+  requires, and optionally Node.
+
+inputs:
+  node-version:
+    description: Node version to install. Set to "none" to skip Node entirely.
+    required: false
+    default: '24'
+  wails:
+    description: Install the wails3 CLI. Set to "false" to skip it.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    # Wails links against GTK 4 and WebKitGTK 6 on Linux, and the wails3 CLI is
+    # a Go program in the same module, so it needs the headers too -- not only
+    # the app. Without these, nothing here compiles.
+    - name: Install Linux GUI build dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential \
+          pkg-config \
+          libgtk-4-dev \
+          libwebkitgtk-6.0-dev
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+        cache: true
+        cache-dependency-path: go.sum
+
+    - name: Set up Node
+      if: inputs.node-version != 'none'
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
+    # Pin the CLI to the exact wails version the module depends on. A CLI newer
+    # than the library generates bindings the app cannot compile against, and
+    # the beta line moves often enough for that to be a real risk.
+    - name: Resolve wails3 version
+      if: inputs.wails == 'true'
+      id: wails-version
+      shell: bash
+      run: |
+        {
+          echo "version=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)"
+          echo "gobin=$(go env GOPATH)/bin"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Cache wails3 CLI
+      if: inputs.wails == 'true'
+      id: wails-cache
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.wails-version.outputs.gobin }}
+        key: ${{ runner.os }}-${{ runner.arch }}-wails3-${{ steps.wails-version.outputs.version }}
+
+    - name: Install wails3 CLI
+      if: inputs.wails == 'true' && steps.wails-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: go install github.com/wailsapp/wails/v3/cmd/wails3@${{ steps.wails-version.outputs.version }}
+
+    # setup-go generally puts GOPATH/bin on the PATH already; doing it here too
+    # is harmless and makes this action self-contained.
+    - name: Add Go bin to PATH
+      if: inputs.wails == 'true'
+      shell: bash
+      run: echo "${{ steps.wails-version.outputs.gobin }}" >> "$GITHUB_PATH"

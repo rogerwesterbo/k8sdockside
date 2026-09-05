@@ -6,8 +6,8 @@
   with a way to open it, rather than being a path in a tooltip.
 -->
 <script lang="ts">
-    import { SettingsService } from '../../../../bindings/github.com/roger/k8sdockside';
-    import type { About } from '../../../../bindings/github.com/roger/k8sdockside/models.js';
+    import { SettingsService } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside';
+    import type { About } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside/models.js';
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';
     import SettingsSection from './SettingsSection.svelte';

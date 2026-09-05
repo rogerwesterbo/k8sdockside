@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/roger/k8sdockside/internal/kube"
-	"github.com/roger/k8sdockside/internal/plugins"
+	"github.com/rogerwesterbo/k8sdockside/internal/kube"
+	"github.com/rogerwesterbo/k8sdockside/internal/plugins"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 

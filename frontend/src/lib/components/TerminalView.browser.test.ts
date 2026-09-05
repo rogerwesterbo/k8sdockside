@@ -18,7 +18,7 @@ vi.mock('@wailsio/runtime', async (importOriginal) => {
         },
     };
 });
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue('') },
     ActionService: {
@@ -68,7 +68,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 }));
 
 const { terminals } = await import('../state/terminals.svelte');
-const { TerminalService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { TerminalService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 

@@ -5,7 +5,7 @@ import SettingsView from './SettingsView.svelte';
 
 // The About section asks the backend what this build is the moment it mounts,
 // and the sources section reads the file list; neither is what is under test.
-vi.mock('../../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue('') },
     LogService: {

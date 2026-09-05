@@ -15,7 +15,7 @@ vi.mock('@wailsio/runtime', async (importOriginal) => {
         },
     };
 });
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue('') },
     ActionService: {
@@ -65,7 +65,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 }));
 
 const { forwards } = await import('../state/forwards.svelte');
-const { PortForwardService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { PortForwardService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 

@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import Sidebar from './Sidebar.svelte';
 
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue(''), Ping: vi.fn().mockResolvedValue(undefined) },
     LogService: {

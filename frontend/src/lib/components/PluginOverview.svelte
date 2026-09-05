@@ -11,7 +11,7 @@
   reader wanted, which is "Argo CD is not in this cluster".
 -->
 <script lang="ts">
-    import { PluginService } from '../../../bindings/github.com/roger/k8sdockside';
+    import { PluginService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
     import { pluginKindFor } from '../catalogue';
     import { classify } from '../errors';
     import { adoptPluginSummary } from '../plugins/adopt';

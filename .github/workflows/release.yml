@@ -1,0 +1,408 @@
+name: Release
+
+# Two ways in, one code path.
+#
+#   * `git tag v1.2.3 && git push origin v1.2.3`
+#   * Releases -> Draft a new release on github.com, with a new tag
+#
+# Publishing a release on the website creates the tag, which fires this same
+# push event -- so both routes run this workflow exactly once. The final job
+# creates the release if the tag got here first, or fills in the assets and
+# appends the install notes if the release did.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release, e.g. v1.2.3'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      numeric: ${{ steps.version.outputs.numeric }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Extract version info
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          VERSION="${TAG#v}"
+          # NSIS and CFBundleVersion want dotted numbers only, so a
+          # v1.2.3-rc.1 tag ships as 1.2.3 in the metadata and keeps its full
+          # name on the files.
+          NUMERIC="${VERSION%%-*}"
+
+          if [[ ! "$NUMERIC" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' does not look like vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+
+          # A tag with a suffix is a pre-release: v1.2.3-rc.1, v1.2.3-beta.
+          PRERELEASE=false
+          [[ "$VERSION" == *-* ]] && PRERELEASE=true
+
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "numeric=$NUMERIC"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Releasing $TAG (version $VERSION, metadata $NUMERIC, prerelease $PRERELEASE)"
+
+  linux:
+    name: Package (linux/${{ matrix.arch }})
+    needs: setup
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      GOARCH: ${{ matrix.arch }}
+      # nfpm reads both of these out of the environment for the package's
+      # maintainer field. A noreply address rather than a personal one.
+      GIT_COMMITTER_NAME: Roger Westerbø
+      GIT_COMMITTER_EMAIL: rogerwesterbo@users.noreply.github.com
+      # linuxdeploy ships as an AppImage and mounting one needs FUSE, which CI
+      # containers do not have. This makes it unpack and run itself instead.
+      APPIMAGE_EXTRACT_AND_RUN: 1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.setup.outputs.tag }}
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+
+      - name: Stamp version
+        run: .github/scripts/stamp-version.sh "${{ needs.setup.outputs.version }}" "${{ needs.setup.outputs.numeric }}"
+
+      # Builds the app, then the AppImage, .deb, .rpm and Arch package from it.
+      - name: Package
+        run: wails3 task linux:package ARCH=${{ matrix.arch }}
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          NAME="k8sdockside-${{ needs.setup.outputs.version }}-linux-${{ matrix.arch }}"
+          mkdir -p dist
+
+          # The bare binary, for people who want to drop it somewhere themselves.
+          tar -czf "dist/${NAME}.tar.gz" -C bin k8sdockside
+
+          shopt -s nullglob
+          for f in bin/*.AppImage; do cp "$f" "dist/${NAME}.AppImage"; done
+          for f in bin/*.deb;      do cp "$f" "dist/${NAME}.deb"; done
+          for f in bin/*.rpm;      do cp "$f" "dist/${NAME}.rpm"; done
+          for f in bin/*.pkg.tar.zst; do cp "$f" "dist/${NAME}.pkg.tar.zst"; done
+
+          echo "Built:"
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: Package (darwin/${{ matrix.arch }})
+    needs: setup
+    # Both architectures build on Apple Silicon: the macOS SDK is universal and
+    # clang cross-targets x86_64 natively, which is exactly what Wails' own
+    # darwin:build:universal task relies on. One runner label, no dependence on
+    # the Intel runner images still existing.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.setup.outputs.tag }}
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+
+      - name: Stamp version
+        run: .github/scripts/stamp-version.sh "${{ needs.setup.outputs.version }}" "${{ needs.setup.outputs.numeric }}"
+
+      # Builds the binary, wraps it in k8sdockside.app (ad-hoc signed, see the
+      # release notes) and lays out the styled .dmg.
+      - name: Package
+        run: wails3 task darwin:package:dmg ARCH=${{ matrix.arch }}
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          NAME="k8sdockside-${{ needs.setup.outputs.version }}-darwin-${{ matrix.arch }}"
+          mkdir -p dist
+
+          shopt -s nullglob
+          for f in bin/*.dmg; do cp "$f" "dist/${NAME}.dmg"; done
+
+          # ditto rather than zip: it preserves the bundle's symlinks and the
+          # extended attributes the ad-hoc signature lives in.
+          ditto -c -k --sequesterRsrc --keepParent "bin/k8sdockside.app" "dist/${NAME}-app.zip"
+
+          echo "Built:"
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-darwin-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Package (windows/amd64)
+    needs: setup
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.setup.outputs.tag }}
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+
+      - name: Stamp version
+        shell: bash
+        run: .github/scripts/stamp-version.sh "${{ needs.setup.outputs.version }}" "${{ needs.setup.outputs.numeric }}"
+
+      # The runner image ships NSIS, but installing it when absent is cheaper
+      # than a release that fails at the last step.
+      - name: Ensure NSIS is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          if (Test-Path $nsis) {
+            $nsis | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+          makensis /VERSION
+
+      # Builds k8sdockside.exe, fetches the WebView2 bootstrapper and produces
+      # the NSIS installer.
+      - name: Package
+        run: wails3 task windows:package ARCH=amd64
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="k8sdockside-${{ needs.setup.outputs.version }}-windows-amd64"
+          mkdir -p dist
+
+          shopt -s nullglob
+          for f in bin/*installer.exe; do cp "$f" "dist/${NAME}-installer.exe"; done
+
+          # Portable: the bare .exe for anyone who would rather not run an installer.
+          powershell -Command "Compress-Archive -Path 'bin/k8sdockside.exe' -DestinationPath 'dist/${NAME}.zip' -Force"
+
+          echo "Built:"
+          ls -la dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist-windows-amd64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish Release
+    needs: [setup, linux, macos, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      # Both signing mechanisms below are keyless: they exchange this job's
+      # short-lived OIDC token for a certificate rather than using a stored
+      # private key, so there is no signing secret to leak or rotate.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.setup.outputs.tag }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/k8sdockside-${{ needs.setup.outputs.version }}-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > checksums.txt
+          echo "Release assets:"
+          cat checksums.txt
+
+      # Signs the checksum file rather than each artifact: checksums.txt already
+      # names every asset by SHA-256, so one signature covers all of them and
+      # verification is two commands instead of fifteen.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksums with cosign
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature checksums.txt.sig \
+            --output-certificate checksums.txt.pem \
+            checksums.txt
+          echo "Signed checksums.txt"
+
+      # SLSA build provenance, recorded in GitHub's attestation store rather
+      # than as a release asset. Answers "which workflow, from which commit,
+      # produced this exact file" for anyone running `gh attestation verify`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.setup.outputs.tag }}
+          files: dist/*
+          draft: false
+          prerelease: ${{ needs.setup.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          # Appended, so notes written on the website when the release was
+          # drafted there survive.
+          append_body: true
+          body: |
+            ## Install
+
+            ### macOS
+
+            Download the `.dmg` for your Mac — `darwin-arm64` for Apple Silicon,
+            `darwin-amd64` for Intel — open it and drag **K8s Dockside** to
+            Applications.
+
+            The app is ad-hoc signed rather than notarised, so on first launch
+            macOS will say it cannot be checked. Either right-click the app and
+            choose **Open**, or clear the quarantine flag:
+
+            ```sh
+            xattr -dr com.apple.quarantine "/Applications/k8sdockside.app"
+            ```
+
+            ### Windows
+
+            Run `k8sdockside-${{ needs.setup.outputs.version }}-windows-amd64-installer.exe`.
+            The installer is unsigned, so SmartScreen will warn once —
+            **More info → Run anyway**. The `.zip` holds the bare `.exe` if you
+            would rather not install anything.
+
+            ### Linux
+
+            Needs GTK 4 and WebKitGTK 6 at runtime; the `.deb`, `.rpm` and Arch
+            packages declare them, the AppImage expects them present.
+
+            ```sh
+            # Debian / Ubuntu
+            sudo apt install ./k8sdockside-${{ needs.setup.outputs.version }}-linux-amd64.deb
+
+            # Fedora / RHEL
+            sudo dnf install ./k8sdockside-${{ needs.setup.outputs.version }}-linux-amd64.rpm
+
+            # Arch
+            sudo pacman -U ./k8sdockside-${{ needs.setup.outputs.version }}-linux-amd64.pkg.tar.zst
+
+            # Anywhere else
+            chmod +x k8sdockside-${{ needs.setup.outputs.version }}-linux-amd64.AppImage
+            ./k8sdockside-${{ needs.setup.outputs.version }}-linux-amd64.AppImage
+            ```
+
+            ### Verifying a download
+
+            Every asset is listed in `checksums.txt`:
+
+            ```sh
+            sha256sum -c --ignore-missing checksums.txt
+            ```
+
+            `checksums.txt` is itself signed with
+            [cosign](https://docs.sigstore.dev/), keylessly — there is no
+            private key, only a certificate tying the signature to this
+            workflow and this tag:
+
+            ```sh
+            cosign verify-blob \
+              --certificate checksums.txt.pem \
+              --signature checksums.txt.sig \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ needs.setup.outputs.tag }}" \
+              checksums.txt
+            ```
+
+            Each asset also carries SLSA build provenance:
+
+            ```sh
+            gh attestation verify <file> --repo ${{ github.repository }}
+            ```
+
+            An SPDX SBOM of the build is attached as
+            `k8sdockside-${{ needs.setup.outputs.version }}-sbom.spdx.json`.
+
+            > These prove *where the file came from*. They are not code
+            > signing: macOS and Windows will still warn on first launch, as
+            > described above.
+
+      - name: Release summary
+        run: |
+          {
+            echo "# ${{ needs.setup.outputs.tag }} published"
+            echo
+            echo "| Asset | Size |"
+            echo "|---|---|"
+            for f in dist/*; do
+              printf '| `%s` | %s |\n' "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

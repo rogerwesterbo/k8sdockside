@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
     import { untrack } from 'svelte';
-    import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
+    import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
     import { type Row, type Table } from '../state/adopt';
     import { subscribe, type Subscription } from '../state/subscriptions';
     import { customKindFor, labelFor } from '../catalogue';

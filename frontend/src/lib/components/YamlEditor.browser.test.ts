@@ -9,7 +9,7 @@ import YamlEditor from './YamlEditor.svelte';
 // every other statement in the file, and it needs this string.
 const { LIVE } = vi.hoisted(() => ({ LIVE: 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\n' }));
 
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue(''),
@@ -72,7 +72,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 
 const { workspace } = await import('../state/workspace.svelte');
 const { editors } = await import('../state/editor.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
 
 /**
  * The editor is CodeMirror now, so its text is not an input's value. The view
@@ -247,7 +247,13 @@ test('the find panel opens on the editor and marks what it finds', async () => {
     await vi.waitFor(() => expect(text()).toBe(LIVE));
 
     editor().focus();
-    await userEvent.keyboard('{Meta>}f{/Meta}');
+    // CodeMirror binds the search panel to Mod-f and resolves Mod the way the
+    // browser it is running in does -- Cmd on a Mac, Ctrl everywhere else, via
+    // the same /Mac/.test(navigator.platform) check used here. Pressing Meta
+    // unconditionally opened the panel only on a Mac, so this passed on a
+    // developer's laptop and failed on every Linux and Windows runner.
+    const mod = /Mac/.test(navigator.platform) ? 'Meta' : 'Control';
+    await userEvent.keyboard(`{${mod}>}f{/${mod}}`);
 
     const find = document.querySelector('.cm-panel.cm-search input') as HTMLInputElement;
     expect(find).toBeTruthy();

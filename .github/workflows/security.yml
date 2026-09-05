@@ -1,0 +1,138 @@
+name: Security Scan
+
+# The deep scan. CI already gates every push on gosec and govulncheck failing
+# the build; this one runs the same tools in reporting mode, adds a filesystem
+# scan and a full npm audit, and files what it finds under Security ->
+# Code scanning rather than only in a log.
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Mondays, 03:00 UTC
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/security.yml'
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (gosec, govulncheck)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          node-version: none
+          wails: 'false'
+
+      - name: Install scanners
+        run: make install-security-scanner install-govulncheck
+
+      # Reporting pass first, so the SARIF is written even when there are
+      # findings; the gate below is what actually fails the job.
+      - name: Run gosec (SARIF report)
+        run: bin/tools/gosec -exclude-dir=build -no-fail -fmt sarif -out gosec.sarif ./...
+
+      # Code scanning upload needs a public repo, or Advanced Security on a
+      # private one. Skipped rather than failed while the repo is private.
+      - name: Upload gosec results
+        if: ${{ !github.event.repository.private }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gosec.sarif
+          category: gosec
+
+      - name: Run gosec (gate)
+        run: make gosec
+
+      - name: Run govulncheck
+        run: make govulncheck
+
+  filesystem:
+    name: Filesystem (Trivy)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Covers what the Go and npm scanners do not: committed secrets, and
+      # misconfiguration in the Dockerfiles and CI config under build/.
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH,MEDIUM
+          skip-dirs: frontend/node_modules,bin
+          timeout: 10m
+
+      - name: Upload Trivy results
+        if: ${{ !github.event.repository.private }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+  frontend:
+    name: Frontend (npm audit)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Everything, at every severity -- this is the audit `make npm-audit`
+      # runs, reported rather than gated so the weekly run stays readable.
+      # Only high and critical fail the job.
+      - name: Run npm audit
+        working-directory: frontend
+        run: |
+          npm audit --json > audit.json || true
+          npm audit || true
+
+          if ! jq -e . audit.json > /dev/null 2>&1; then
+            echo "::warning::npm audit produced no parseable report"
+            exit 0
+          fi
+
+          {
+            echo "## npm audit"
+            echo
+            echo "| severity | count |"
+            echo "|---|---|"
+            jq -r '.metadata.vulnerabilities | to_entries[] | "| \(.key) | \(.value) |"' audit.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          COUNT=$(jq -r '.metadata.vulnerabilities | (.critical + .high)' audit.json)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::error::$COUNT high or critical advisories in the frontend dependency tree"
+            exit 1
+          fi

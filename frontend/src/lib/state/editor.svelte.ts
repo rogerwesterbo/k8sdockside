@@ -12,7 +12,7 @@
 // exception: it is a leaf that names objects the same way, and saying an object
 // changed is not the same as knowing who is looking at it.
 
-import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
+import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
 import { changes } from './changes.svelte';
 
 /** What an editor is open on: enough to read one object and write it back. */

@@ -15,9 +15,9 @@ import {
     SettingsService,
     TerminalService,
     ThemeService,
-} from '../../../bindings/github.com/roger/k8sdockside';
-import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
-import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
+} from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
+import type * as appconfig from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/appconfig/models.js';
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
 import { changes } from './changes.svelte';
 import { editors } from './editor.svelte';

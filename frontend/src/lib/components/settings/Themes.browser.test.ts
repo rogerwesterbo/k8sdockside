@@ -68,7 +68,7 @@ const SetPreferences = vi.fn().mockResolvedValue({});
 const List = vi.fn();
 const RemoveFolder = vi.fn();
 
-vi.mock('../../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue('') },
     LogService: { Containers: vi.fn().mockResolvedValue([]), Open: vi.fn(), Close: vi.fn() },

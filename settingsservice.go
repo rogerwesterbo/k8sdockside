@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	"github.com/roger/k8sdockside/internal/appconfig"
+	"github.com/rogerwesterbo/k8sdockside/internal/appconfig"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -59,32 +59,49 @@ type About struct {
 	Platform string `json:"platform"`
 }
 
-// version is stamped at build time where the build does so, and otherwise
-// reports what the module graph says.
+// version is the release this binary was built from. The release workflow
+// rewrites the empty string here from the tag, in its own checkout, via
+// .github/scripts/stamp-version.sh -- the Wails build tasks hardcode their own
+// -ldflags and offer no hook to add -X to them, so the value is stamped into
+// the source rather than injected at link time. A build from a working tree
+// leaves it empty and falls back to the module graph.
 var version = ""
 
-// About reports what this build is. The values come from the binary's own
-// build info rather than a constant, so a development build says so instead of
-// claiming whatever number was last committed.
+// displayVersion is the one answer both places that show a version give: the
+// About dialog under the app menu, and the About section in settings.
+//
+// It comes from the binary's own build info rather than a constant, so a
+// development build says so instead of claiming whatever number was last
+// committed.
+func displayVersion() string {
+	v := version
+	if v == "" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			v = info.Main.Version
+		}
+	}
+	// The builds here pass -buildvcs=false, so an unstamped binary reports the
+	// module version as "(devel)" or not at all.
+	if v == "" || v == "(devel)" {
+		return "development build"
+	}
+	return v
+}
+
+// About reports what this build is.
 func (s *SettingsService) About() About {
 	about := About{
-		Version:  version,
+		Version:  displayVersion(),
 		Go:       runtime.Version(),
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 	}
 	if info, ok := debug.ReadBuildInfo(); ok {
-		if about.Version == "" {
-			about.Version = info.Main.Version
-		}
 		for _, dep := range info.Deps {
 			if dep.Path == "github.com/wailsapp/wails/v3" {
 				about.Wails = dep.Version
 				break
 			}
 		}
-	}
-	if about.Version == "" || about.Version == "(devel)" {
-		about.Version = "development build"
 	}
 	return about
 }

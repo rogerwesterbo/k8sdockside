@@ -5,7 +5,7 @@ import { render } from 'vitest-browser-svelte';
 // what is worth checking is what it says when a number is missing -- which is
 // the ordinary case on a cluster with no metrics stack.
 const Budget = vi.hoisted(() => vi.fn());
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     ResourceService: { Budget },
 }));
 

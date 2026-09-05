@@ -7,7 +7,7 @@
 // each tab filter the traffic of all the others.
 
 import { Events } from '@wailsio/runtime';
-import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
+import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
 import { HELM_RELEASES } from '../catalogue';
 import { adoptTable, type Table } from './adopt';
 

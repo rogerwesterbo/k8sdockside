@@ -1,0 +1,256 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**' # every branch, main included
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-24.04
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check for changes
+        uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            backend:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Makefile'
+              - '.golangci.yml'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/**'
+              # frontend/bindings is generated from the Go services and is not
+              # committed, so a service signature change breaks the frontend
+              # build without touching a single file under frontend/.
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+
+  build:
+    name: Build (Go)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          node-version: none
+          wails: 'false'
+
+      # build-go rather than build: this checks the Go packages compile without
+      # paying for a frontend bundle and a full Wails package. The frontend is
+      # built and bundled in its own job, and the real desktop build is the
+      # release workflow's.
+      - name: Build Go packages
+        run: make build-go
+
+  test:
+    name: Test (Go)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          node-version: none
+          wails: 'false'
+
+      # The live cluster tests key off K8SDOCKSIDE_TEST_KUBECONFIG and skip
+      # without it, so this is the unit suite.
+      - name: Run tests
+        run: make test
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.html
+          retention-days: 7
+          if-no-files-found: ignore
+
+  lint:
+    name: Lint (Go)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          node-version: none
+          wails: 'false'
+
+      - name: Cache tools
+        uses: actions/cache@v6
+        with:
+          path: bin/tools
+          key: ${{ runner.os }}-tools-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-tools-
+
+      - name: Run go vet
+        run: make vet
+
+      - name: Check formatting
+        run: |
+          make fmt
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Code is not formatted. Run 'make fmt' and commit the result."
+            git diff
+            exit 1
+          fi
+
+      - name: Run linter
+        run: make lint
+
+  security:
+    name: Security (Go)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          node-version: none
+          wails: 'false'
+
+      - name: Cache tools
+        uses: actions/cache@v6
+        with:
+          path: bin/tools
+          key: ${{ runner.os }}-tools-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-tools-
+
+      # Both skip build/: the Wails scaffold's own iOS/Android dependency
+      # installers live there and trip G204/G702 on code we do not own.
+      - name: Run gosec
+        run: make gosec
+
+      - name: Run govulncheck
+        run: make govulncheck
+
+  frontend:
+    name: Build, Test and Lint (Frontend)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+
+      # frontend/bindings is build output, not source: it is gitignored and
+      # every component imports from it, so nothing under frontend/ compiles
+      # until this has run. The flags must match the Makefile's `generate`
+      # target and build/Taskfile.yml's generate:bindings, or each run quietly
+      # undoes the other's output.
+      - name: Generate bindings
+        run: make generate
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run check
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
+
+      # The component tests run in real Chromium: $effect, focus and pointer
+      # handling only behave as they do in the app with a browser under them.
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Upload test attachments
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-attachments
+          path: |
+            frontend/.vitest-attachments
+            frontend/src/**/__screenshots__
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  audit-frontend:
+    name: Security (Frontend)
+    runs-on: ubuntu-24.04
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `make npm-audit` fails on advisories of any severity, which is the right
+      # setting for a deliberate local audit but too noisy to gate every push
+      # on. High and above blocks here; the weekly scan reports the rest.
+      - name: Run npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high

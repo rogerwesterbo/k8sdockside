@@ -3,7 +3,7 @@
   Clicking a resource opens (or focuses) a tab for it.
 -->
 <script lang="ts">
-    import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
+    import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
     import {
         DASHBOARD_ITEM,
         DEFINITIONS_GROUP,

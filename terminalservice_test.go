@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/roger/k8sdockside/internal/kube"
+	"github.com/rogerwesterbo/k8sdockside/internal/kube"
 )
 
 func TestConnectArgsNameTheContextExplicitly(t *testing.T) {

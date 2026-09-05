@@ -3,7 +3,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import DetailPanel from './DetailPanel.svelte';
 
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue('Name: web'),
@@ -74,7 +74,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 
 const { workspace } = await import('../state/workspace.svelte');
 const { changes } = await import('../state/changes.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };

@@ -3,8 +3,8 @@ package plugins
 import (
 	"sort"
 
-	"github.com/roger/k8sdockside/internal/kube"
-	"github.com/roger/k8sdockside/internal/metrics"
+	"github.com/rogerwesterbo/k8sdockside/internal/kube"
+	"github.com/rogerwesterbo/k8sdockside/internal/metrics"
 )
 
 // What a plugin's overview shows for one cluster: whether the thing it

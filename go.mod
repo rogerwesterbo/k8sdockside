@@ -1,4 +1,4 @@
-module github.com/roger/k8sdockside
+module github.com/rogerwesterbo/k8sdockside
 
 go 1.27.1
 

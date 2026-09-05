@@ -14,7 +14,7 @@
   cluster doing nothing.
 -->
 <script lang="ts">
-    import { ResourceService } from '../../../bindings/github.com/roger/k8sdockside';
+    import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
     import { formatValue, type Unit } from '../charts/format';
     import { adoptBudget, barsFor, ceilingOf, type Bar, type Budget } from './adopt';
 

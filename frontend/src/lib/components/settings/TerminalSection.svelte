@@ -12,8 +12,8 @@
   which shell a container actually has, and what a node shell is made of.
 -->
 <script lang="ts">
-    import { TerminalService } from '../../../../bindings/github.com/roger/k8sdockside';
-    import type { ExternalTerminals } from '../../../../bindings/github.com/roger/k8sdockside/models.js';
+    import { TerminalService } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside';
+    import type { ExternalTerminals } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside/models.js';
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';
     import SegmentedControl from './SegmentedControl.svelte';

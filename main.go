@@ -4,7 +4,7 @@ import (
 	"embed"
 	"log"
 
-	"github.com/roger/k8sdockside/internal/appconfig"
+	"github.com/rogerwesterbo/k8sdockside/internal/appconfig"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -52,8 +52,11 @@ func main() {
 	tunnels := NewPortForwardService(configs, resources.watcher, settings)
 
 	app := application.New(application.Options{
-		Name:        "K8s Dockside",
-		Description: "A Kubernetes workspace for your local kubeconfig contexts",
+		Name: "K8s Dockside",
+		// Wails renders Name as the title and Description as the body of the
+		// About dialog under the app menu, and uses Description nowhere else,
+		// so the version goes here to be seen there.
+		Description: "A Kubernetes workspace for your local kubeconfig contexts\n\nVersion " + displayVersion(),
 		Services: []application.Service{
 			application.NewService(configs),
 			application.NewService(NewSettingsService(settings)),

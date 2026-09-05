@@ -1,0 +1,59 @@
+# Keeping the three dependency trees current, so the weekly security scan has
+# less to find. Grouped into one PR per ecosystem per week: this is a desktop
+# app with a large Kubernetes and Svelte dependency graph, and ungrouped updates
+# would be a full-time inbox.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      kubernetes:
+        patterns:
+          - 'k8s.io/*'
+          - 'sigs.k8s.io/*'
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      codemirror:
+        patterns:
+          - '@codemirror/*'
+          - '@lezer/*'
+      svelte:
+        patterns:
+          - 'svelte'
+          - 'svelte-check'
+          - '@sveltejs/*'
+      testing:
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
+          - 'vitest-browser-*'
+          - 'playwright'
+          - 'jsdom'
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - '*'

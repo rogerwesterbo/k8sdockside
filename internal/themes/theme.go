@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/roger/k8sdockside/internal/addons"
+	"github.com/rogerwesterbo/k8sdockside/internal/addons"
 )
 
 // Base says which of the two default palettes fills in the tokens a theme

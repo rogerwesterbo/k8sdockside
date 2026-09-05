@@ -22,9 +22,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/roger/k8sdockside/internal/addons"
-	"github.com/roger/k8sdockside/internal/kube"
-	"github.com/roger/k8sdockside/internal/metrics"
+	"github.com/rogerwesterbo/k8sdockside/internal/addons"
+	"github.com/rogerwesterbo/k8sdockside/internal/kube"
+	"github.com/rogerwesterbo/k8sdockside/internal/metrics"
 	"k8s.io/apimachinery/pkg/labels"
 )
 

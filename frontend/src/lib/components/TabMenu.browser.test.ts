@@ -10,7 +10,7 @@ import TabBar from './TabBar.svelte';
 // the strip at the top of the window and the dock at the foot of it read the
 // same: a menu dropping from the pointer belongs to a tab up there and floats
 // over the document down here.
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue(''),

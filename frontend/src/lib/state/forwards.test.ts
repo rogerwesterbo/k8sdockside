@@ -16,7 +16,7 @@ vi.mock('@wailsio/runtime', () => ({
         }),
     },
 }));
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     PortForwardService: { List, Ports, Start, Reconnect, Stop, Forget, Open },
 }));
 

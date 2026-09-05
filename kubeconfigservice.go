@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/roger/k8sdockside/internal/appconfig"
-	"github.com/roger/k8sdockside/internal/kube"
+	"github.com/rogerwesterbo/k8sdockside/internal/appconfig"
+	"github.com/rogerwesterbo/k8sdockside/internal/kube"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 

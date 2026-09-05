@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 // The editors store talks to Go for all three of its jobs -- reading an object,
 // checking what has been typed, and writing it back -- so the bindings are
 // stubbed. What is under test is what happens to a document in between.
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
         Open: vi.fn().mockResolvedValue('logs-1'),
@@ -18,7 +18,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 
 const { editors } = await import('./editor.svelte');
 const { changes } = await import('./changes.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
 
 const TAB = 'edit:cfg::prod#pods#default#web';
 const TARGET = { contextId: 'cfg::prod', kind: 'pods', namespace: 'default', name: 'web' };

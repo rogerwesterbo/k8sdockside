@@ -12,7 +12,7 @@ vi.mock('@wailsio/runtime', () => ({
         }),
     },
 }));
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     LogService: { Containers, Open, Close },
 }));
 

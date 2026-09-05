@@ -11,9 +11,9 @@
 // none of those are things this side could work out for itself.
 
 import { Events } from '@wailsio/runtime';
-import { PortForwardService } from '../../../bindings/github.com/roger/k8sdockside';
-import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
-import type * as main from '../../../bindings/github.com/roger/k8sdockside/models.js';
+import { PortForwardService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
+import type * as main from '../../../bindings/github.com/rogerwesterbo/k8sdockside/models.js';
 
 /** One forward, live or waiting to be reconnected. */
 export type Forward = main.Forward;

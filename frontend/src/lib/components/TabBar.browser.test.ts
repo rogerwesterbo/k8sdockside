@@ -3,7 +3,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import TabBar from './TabBar.svelte';
 
-vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: { Describe: vi.fn().mockResolvedValue('') },
     LogService: {

@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/roger/k8sdockside/internal/appconfig"
-	"github.com/roger/k8sdockside/internal/themes"
+	"github.com/rogerwesterbo/k8sdockside/internal/appconfig"
+	"github.com/rogerwesterbo/k8sdockside/internal/themes"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 

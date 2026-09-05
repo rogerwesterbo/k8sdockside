@@ -201,6 +201,19 @@ func TestOpenMigratesSettingsFromTheLegacyLocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	want, err := defaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only macOS ever had the two apart. os.UserConfigDir resolves to the same
+	// $HOME/.config that configDir does on Linux, and to %AppData% on Windows,
+	// so there is no legacy location to migrate from and migrate() correctly
+	// does nothing -- which is exactly what it documents. Without this guard
+	// the test asserts a move that must not happen, and fails everywhere but
+	// on a Mac.
+	if legacy == want {
+		t.Skipf("no legacy location on %s: %s is already the current path", runtime.GOOS, legacy)
+	}
 	writeSettings(t, legacy, "Production")
 
 	store, err := Open()
@@ -210,10 +223,6 @@ func TestOpenMigratesSettingsFromTheLegacyLocation(t *testing.T) {
 
 	if got := store.Get().Contexts["cfg::prod"].Alias; got != "Production" {
 		t.Errorf("alias = %q, want the alias carried over from the legacy file", got)
-	}
-	want, err := defaultPath()
-	if err != nil {
-		t.Fatal(err)
 	}
 	if store.Path() != want {
 		t.Errorf("Path = %q, want %q", store.Path(), want)
