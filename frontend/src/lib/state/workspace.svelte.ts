@@ -442,8 +442,18 @@ class Workspace {
         this.themes.length > 0 && !this.themes.some((t) => t.id === this.theme),
     );
 
-    /** The plugins on offer, in the order the sidebar shows them. */
+    /**
+     * Every plugin installed on this machine, switched on or off. This is the
+     * settings view's list: a disabled plugin has to appear somewhere or there
+     * would be no way back.
+     */
     plugins = $derived(this.pluginCatalogue.plugins);
+    /**
+     * The plugins on offer, in the order the sidebar shows them. Everything
+     * that *offers* a plugin -- the sidebar, the charts, the overview -- goes
+     * through this rather than through `plugins`.
+     */
+    enabledPlugins = $derived(this.pluginCatalogue.plugins.filter((p) => !p.disabled));
     /** The folder user plugins are read from by default. */
     pluginDir = $derived(this.pluginCatalogue.dir);
     /** The extra folders the user has added plugins from. */
@@ -1680,6 +1690,26 @@ class Workspace {
             this.inform(`${count} plugin${count === 1 ? '' : 's'} available`);
         } catch (err) {
             this.fail(`Could not read plugins: ${message(err)}`);
+        }
+    }
+
+    /**
+     * Switches a plugin on or off.
+     *
+     * The wanted state is sent rather than a toggle, so a switch that fires
+     * twice cannot end up disagreeing with what is on disk.
+     */
+    async setPluginEnabled(id: string, enabled: boolean): Promise<void> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.SetEnabled(id, enabled));
+            // Refreshed here as well as on load, because this is what decides
+            // whether a chart panel is drawn at all: leaving it stale would
+            // keep a Metrics heading on the dashboard talking about a
+            // Prometheus the user has just switched off.
+            this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
+            this.registerViews();
+        } catch (err) {
+            this.fail(`Could not ${enabled ? 'enable' : 'disable'} the plugin: ${message(err)}`);
         }
     }
 

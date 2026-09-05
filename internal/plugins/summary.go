@@ -79,7 +79,11 @@ type Summary struct {
 // that the summary logic -- which is all judgement about wording and ordering --
 // is not tangled up with client-go.
 type Cluster interface {
-	KindServed(kind string) (bool, error)
+	// KindsServed answers for every kind in one go. It is plural because the
+	// question is answered by a sweep of the whole discovery surface -- the
+	// same one `kubectl api-resources` does -- and asking kind by kind meant a
+	// sweep apiece.
+	KindsServed(kinds []string) (map[string]bool, error)
 	CountBy(kind, namespace, selector string, path kube.FieldPath) (kube.Tally, error)
 }
 
@@ -91,24 +95,16 @@ type Cluster interface {
 func Summarise(p Plugin, cl Cluster) Summary {
 	out := Summary{PluginID: p.ID, Checked: true}
 
-	// Kinds are checked once even when several requirements and cards name the
-	// same one, because each check is a round trip to the discovery API.
-	served := map[string]bool{}
-	failed := map[string]string{}
+	// Every kind the page will need is asked for up front, in one sweep. The
+	// requirements and the cards go in together: a card left out of the sweep
+	// would go back to the cluster on its own, which is the cost this exists to
+	// avoid.
+	served, reason := kindsServed(p, cl)
 	check := func(kind string) (bool, string) {
-		if reason, known := failed[kind]; known {
+		if reason != "" {
 			return false, reason
 		}
-		if ok, known := served[kind]; known {
-			return ok, ""
-		}
-		ok, err := cl.KindServed(kind)
-		if err != nil {
-			failed[kind] = err.Error()
-			return false, err.Error()
-		}
-		served[kind] = ok
-		return ok, ""
+		return served[kind], ""
 	}
 
 	required, met := 0, 0
@@ -142,6 +138,38 @@ func Summarise(p Plugin, cl Cluster) Summary {
 		out.Cards = append(out.Cards, summariseCard(card, cl, check))
 	}
 	return out
+}
+
+// kindsServed asks the cluster about every kind the plugin names, once.
+//
+// The reason it returns is why we could not ask at all, which is a different
+// thing from a kind being absent: an unreachable cluster must never read as
+// "Argo CD is not installed here".
+func kindsServed(p Plugin, cl Cluster) (map[string]bool, string) {
+	seen := map[string]bool{}
+	kinds := make([]string, 0, len(p.Requires)+len(p.Cards))
+	add := func(kind string) {
+		if kind == "" || seen[kind] {
+			return
+		}
+		seen[kind] = true
+		kinds = append(kinds, kind)
+	}
+	for _, req := range p.Requires {
+		add(req.Kind)
+	}
+	for _, card := range p.Cards {
+		add(card.Kind)
+	}
+
+	if len(kinds) == 0 {
+		return map[string]bool{}, ""
+	}
+	served, err := cl.KindsServed(kinds)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return served, ""
 }
 
 // summariseCard counts one card, or explains why it has no number.

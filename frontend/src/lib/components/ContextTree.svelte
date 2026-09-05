@@ -277,7 +277,7 @@
                          open, the items themselves say how many there are. -->
                     {#if folded}
                         <span class="tally">
-                            {group.label === SOLUTIONS_GROUP ? workspace.plugins.length : group.items.length}
+                            {group.label === SOLUTIONS_GROUP ? workspace.enabledPlugins.length : group.items.length}
                         </span>
                     {/if}
                 </button>
@@ -326,10 +326,10 @@
                          is installed here, not there -- and whether the cluster
                          actually has it is said in the margin. -->
                     {#if group.label === SOLUTIONS_GROUP}
-                        {#if workspace.plugins.length === 0}
+                        {#if workspace.enabledPlugins.length === 0}
                             <p class="note">No plugins installed</p>
                         {:else}
-                            {#each workspace.plugins as plugin (plugin.id)}
+                            {#each workspace.enabledPlugins as plugin (plugin.id)}
                                 {@const open = workspace.isPluginExpanded(context.id, plugin.id)}
                                 {@const state = presence(plugin.id)}
                                 <button

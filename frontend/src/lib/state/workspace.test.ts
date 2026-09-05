@@ -29,6 +29,7 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         List: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
         Reload: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
         Summary: vi.fn().mockResolvedValue({ pluginId: '', installed: false, checked: true, requirements: [], cards: [], error: '' }),
+        SetEnabled: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
     },
     ThemeService: {
         List: vi.fn().mockResolvedValue({ themes: [], dir: '', folders: [], problems: [] }),
@@ -54,7 +55,7 @@ const { workspace, isSettingsTab } = await import('./workspace.svelte');
 const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
-const { ResourceService, KubeconfigService, SettingsService, ThemeService, PluginService } = await import(
+const { ResourceService, KubeconfigService, SettingsService, ThemeService, PluginService, MetricsService } = await import(
     '../../../bindings/github.com/roger/k8sdockside',
 );
 
@@ -1674,6 +1675,7 @@ describe('solution plugins', () => {
             views: [{ id: 'things', label: 'Things', icon: 'box', type: 'table', kind: 'pods', namespace: '', selector: '' }],
             origin: 'builtin',
             pack: '',
+            disabled: false,
         };
     }
 
@@ -1704,6 +1706,55 @@ describe('solution plugins', () => {
         workspace.pluginCatalogue = { plugins: [], dir: '', folders: [], problems: [] };
         workspace.customKinds = {};
         workspace.expandedPlugins = [];
+    });
+
+    // Switching a plugin off has to hide what it offers without uninstalling
+    // it: the settings list is where it is switched back on, so it cannot
+    // disappear from the catalogue itself.
+    test('a switched-off plugin leaves the sidebar but stays in the catalogue', () => {
+        const off = { ...plugin('argocd'), disabled: true };
+        workspace.pluginCatalogue = { plugins: [off, plugin('flux')], dir: '', folders: [], problems: [] };
+
+        expect(workspace.plugins.map((p) => p.id)).toEqual(['argocd', 'flux']);
+        expect(workspace.enabledPlugins.map((p) => p.id)).toEqual(['flux']);
+    });
+
+    test('setPluginEnabled sends the wanted state and adopts what comes back', async () => {
+        workspace.pluginCatalogue = { plugins: [plugin('argocd')], dir: '', folders: [], problems: [] };
+        vi.mocked(PluginService.SetEnabled).mockResolvedValueOnce({
+            plugins: [{ ...plugin('argocd'), disabled: true }],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+
+        await workspace.setPluginEnabled('argocd', false);
+
+        // The wanted state, not a toggle: a switch that sent "off" twice must
+        // end up off rather than back on.
+        expect(PluginService.SetEnabled).toHaveBeenCalledWith('argocd', false);
+        expect(workspace.enabledPlugins).toEqual([]);
+        expect(workspace.plugins.map((p) => p.id)).toEqual(['argocd']);
+    });
+
+    // The Metrics panel is drawn or left out on the strength of the attachment
+    // list, so switching a plugin off has to refresh it there and then.
+    // Otherwise switching Prometheus off leaves a Metrics heading on the
+    // dashboard saying no Prometheus was found -- until the next reload.
+    test('switching a plugin off refreshes which surfaces draw charts', async () => {
+        workspace.metricsAttachments = ['dashboard', 'pods'];
+        vi.mocked(PluginService.SetEnabled).mockResolvedValueOnce({
+            plugins: [{ ...plugin('prometheus'), disabled: true }],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+        vi.mocked(MetricsService.Attachments).mockResolvedValueOnce([]);
+
+        await workspace.setPluginEnabled('prometheus', false);
+
+        expect(workspace.metricsAttachments).toEqual([]);
+        expect(workspace.chartsAttachTo('dashboard')).toBe(false);
     });
 
     test('loads the catalogue and registers its views for tab titles', async () => {

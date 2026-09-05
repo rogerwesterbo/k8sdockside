@@ -45,6 +45,12 @@ export interface Plugin {
     origin: string;
     /** The collection it arrived in, empty for one that came on its own. */
     pack: string;
+    /**
+     * Switched off in Settings. A disabled plugin is still in the catalogue --
+     * that is where it gets switched back on -- but nothing offers it: no
+     * sidebar rows, no charts, no overview. See `workspace.enabledPlugins`.
+     */
+    disabled: boolean;
 }
 
 /** Everything installed on this machine, and what would not load. */

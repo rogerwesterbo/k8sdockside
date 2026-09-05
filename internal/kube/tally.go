@@ -152,28 +152,6 @@ func (w *Watcher) CountBy(kc Context, kind, namespace, selector string, path Fie
 	return tally, err
 }
 
-// KindServed reports whether this cluster serves a kind at all.
-//
-// It is the question a plugin's overview asks first: a plugin is installed on
-// *this machine*, and whether the thing it knows about is installed in the
-// cluster in front of you is a different matter entirely -- one the user needs
-// told plainly rather than discovered as an empty table.
-func (w *Watcher) KindServed(kc Context, kind string) (bool, error) {
-	served := false
-	err := w.withClient(kc, func(c *clusterClient) error {
-		_, err := c.mappingForKind(kind)
-		if err != nil {
-			if ErrNotServed(err) {
-				return nil
-			}
-			return err
-		}
-		served = true
-		return nil
-	})
-	return served, err
-}
-
 // IsKnownKind reports whether a kind names something this app can open: one of
 // the built-in kinds, or a well-formed custom resource.
 //

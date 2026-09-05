@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/roger/k8sdockside/internal/kube"
@@ -13,20 +14,28 @@ type fakeCluster struct {
 	served  map[string]bool
 	tallies map[string]kube.Tally
 	fail    map[string]error
-	// asked counts the discovery calls, to prove a kind named several times is
-	// only looked up once.
-	asked map[string]int
+	// discoveryErr is a cluster we could not ask at all. Discovery is one sweep
+	// of the whole API surface, so it either answers or it does not; there is
+	// no per-kind failure left to model.
+	discoveryErr error
+	// sweeps counts the discovery calls, to prove a plugin naming a kind in
+	// several places still costs one round trip.
+	sweeps int
+	// asked is every kind the last sweep was given.
+	asked []string
 }
 
-func (f *fakeCluster) KindServed(kind string) (bool, error) {
-	if f.asked == nil {
-		f.asked = map[string]int{}
+func (f *fakeCluster) KindsServed(kinds []string) (map[string]bool, error) {
+	f.sweeps++
+	f.asked = append([]string{}, kinds...)
+	if f.discoveryErr != nil {
+		return nil, f.discoveryErr
 	}
-	f.asked[kind]++
-	if err, bad := f.fail[kind]; bad {
-		return false, err
+	out := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		out[kind] = f.served[kind]
 	}
-	return f.served[kind], nil
+	return out, nil
 }
 
 func (f *fakeCluster) CountBy(kind, _, _ string, _ kube.FieldPath) (kube.Tally, error) {
@@ -71,8 +80,8 @@ func TestSummariseAHealthyInstall(t *testing.T) {
 	}
 	// The kind is named by a requirement and a card; asking twice would be two
 	// discovery round trips for one answer.
-	if cl.asked["crd:applications.argoproj.io"] != 1 {
-		t.Errorf("looked the kind up %d times, want 1", cl.asked["crd:applications.argoproj.io"])
+	if cl.sweeps != 1 {
+		t.Errorf("swept discovery %d times, want 1", cl.sweeps)
 	}
 }
 
@@ -119,10 +128,7 @@ func TestSummariseWhenTheSolutionIsNotInstalled(t *testing.T) {
 // An unreachable cluster must not read as "Argo CD is not installed here" --
 // they call for opposite reactions.
 func TestAnUnreachableClusterIsNotTheSameAsNotInstalled(t *testing.T) {
-	cl := &fakeCluster{fail: map[string]error{
-		"crd:applications.argoproj.io":    errors.New("connection refused"),
-		"crd:applicationsets.argoproj.io": errors.New("connection refused"),
-	}}
+	cl := &fakeCluster{discoveryErr: errors.New("connection refused")}
 
 	got := Summarise(argo, cl)
 
@@ -198,5 +204,60 @@ func TestAPluginWithNoRequirementsCountsAsInstalled(t *testing.T) {
 
 	if got := Summarise(plugin, &fakeCluster{}); !got.Installed {
 		t.Errorf("summary = %+v, want installed", got)
+	}
+}
+
+// The whole reason the check is batched. The real Argo CD plugin names three
+// custom resources across its requirements and its cards, and every one of them
+// used to cost a full discovery fan-out of its own -- worse on a cluster that
+// does not have Argo CD, where each miss also threw away the cache the last
+// lookup had just built. One sweep answers for all of them, which is what
+// `kubectl api-resources` does.
+func TestSummariseSweepsDiscoveryOnceForEveryKindItNeeds(t *testing.T) {
+	plugin := Plugin{
+		ID:   "argocd",
+		Name: "Argo CD",
+		Requires: []Requirement{
+			{Kind: "crd:applications.argoproj.io"},
+			{Kind: "crd:appprojects.argoproj.io"},
+			{Kind: "crd:applicationsets.argoproj.io", Optional: true},
+		},
+		Cards: []Card{
+			{Label: "By health", Kind: "crd:applications.argoproj.io", GroupBy: "status.health.status"},
+			{Label: "By sync", Kind: "crd:applications.argoproj.io", GroupBy: "status.sync.status"},
+			{Label: "Sets", Kind: "crd:applicationsets.argoproj.io"},
+			{Label: "Projects", Kind: "crd:appprojects.argoproj.io"},
+			{Label: "Workloads", Kind: "deployments"},
+		},
+	}
+	cl := &fakeCluster{}
+
+	Summarise(plugin, cl)
+
+	if cl.sweeps != 1 {
+		t.Errorf("swept discovery %d times, want exactly 1 for the whole overview", cl.sweeps)
+	}
+	// Every kind has to go in the one sweep. Leaving the cards out would send
+	// each of them back to the cluster on its own, which is the bug.
+	want := []string{
+		"crd:applications.argoproj.io",
+		"crd:appprojects.argoproj.io",
+		"crd:applicationsets.argoproj.io",
+		"deployments",
+	}
+	for _, kind := range want {
+		if !slices.Contains(cl.asked, kind) {
+			t.Errorf("the sweep did not ask about %q; asked %v", kind, cl.asked)
+		}
+	}
+	// Named three times across requirements and cards, asked for once.
+	times := 0
+	for _, kind := range cl.asked {
+		if kind == "crd:applications.argoproj.io" {
+			times++
+		}
+	}
+	if times != 1 {
+		t.Errorf("a kind named several times went into the sweep %d times: %v", times, cl.asked)
 	}
 }

@@ -157,7 +157,10 @@ type Panel struct {
 func (s *MetricsService) Charts(contextID, attach, namespace, name string, minutes int) Panel {
 	panel := Panel{Range: minutes, Charts: []plugins.ChartResult{}}
 
-	installed := s.plugins.List().Plugins
+	// Enabled rather than every plugin: switching one off has to take its
+	// charts with it, or the dashboard would go on drawing for something the
+	// user has said they do not want to see.
+	installed := s.plugins.List().Enabled()
 	panel.Attached = plugins.HasChartsFor(installed, attach)
 	if !panel.Attached {
 		// Nothing to draw here, so the cluster is not asked where its
@@ -194,17 +197,7 @@ func (s *MetricsService) Charts(contextID, attach, namespace, name string, minut
 // leave the panel out entirely rather than drawing an empty one and then
 // removing it.
 func (s *MetricsService) Attachments() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, plugin := range s.plugins.List().Plugins {
-		for _, chart := range plugin.Charts {
-			if !seen[chart.Attach] {
-				seen[chart.Attach] = true
-				out = append(out, chart.Attach)
-			}
-		}
-	}
-	return out
+	return s.plugins.List().Attachments()
 }
 
 // promQuerier adapts a Fetch to the interface the plugin package draws through.

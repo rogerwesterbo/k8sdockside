@@ -145,13 +145,25 @@
 </SettingsSection>
 
 {#snippet card(plugin: import('../../plugins/types').Plugin)}
-    <article class="plugin">
+    <article class="plugin" class:off={plugin.disabled}>
         <header>
             <Icon name={plugin.icon} size={16} />
             <div class="naming">
                 <p class="name">{plugin.name}</p>
                 <p class="tagline">{plugin.tagline || plugin.id}</p>
             </div>
+            <!-- The wanted state is sent rather than a toggle, so a card that
+                 fires twice cannot end up disagreeing with what is on disk. -->
+            <label class="switch" title={plugin.disabled ? `Switch ${plugin.name} on` : `Switch ${plugin.name} off`}>
+                <input
+                    type="checkbox"
+                    checked={!plugin.disabled}
+                    onchange={(event) =>
+                        void workspace.setPluginEnabled(plugin.id, event.currentTarget.checked)}
+                />
+                <span class="track"><span class="knob"></span></span>
+                <span class="sr-only">{plugin.disabled ? 'Off' : 'On'}</span>
+            </label>
         </header>
         <p class="counts">
             {plugin.views.length} view{plugin.views.length === 1 ? '' : 's'}
@@ -166,6 +178,77 @@
 {/snippet}
 
 <style>
+    /* A switched-off card is dimmed rather than hidden: this is the one place
+       it still appears, because this is where it gets switched back on. */
+    .plugin.off .naming,
+    .plugin.off .counts,
+    .plugin.off .from {
+        opacity: 0.45;
+    }
+
+    .switch {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        flex: none;
+    }
+
+    .switch input {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .track {
+        display: block;
+        width: 30px;
+        height: 17px;
+        padding: 2px;
+        border-radius: 999px;
+        background: var(--bg-raised);
+        border: 1px solid var(--border);
+        transition:
+            background 120ms ease,
+            border-color 120ms ease;
+    }
+
+    .knob {
+        display: block;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--text-faint);
+        transition:
+            transform 120ms ease,
+            background 120ms ease;
+    }
+
+    .switch input:checked + .track {
+        background: var(--accent);
+        border-color: var(--accent);
+    }
+
+    .switch input:checked + .track .knob {
+        background: var(--accent-text, #fff);
+        transform: translateX(13px);
+    }
+
+    .switch input:focus-visible + .track {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
     h3 {
         margin: 22px 0 8px;
         font-size: 11px;

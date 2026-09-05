@@ -62,7 +62,7 @@ func (s *PluginService) catalogue() plugins.Catalogue {
 		return *cached
 	}
 
-	loaded := plugins.Load(s.store.PluginsDir(), s.store.PluginFolders())
+	loaded := plugins.Load(s.store.PluginsDir(), s.store.PluginFolders(), s.store.DisabledPlugins())
 	s.mu.Lock()
 	s.cached = &loaded
 	s.mu.Unlock()
@@ -99,6 +99,9 @@ func (s *PluginService) Summary(contextID, pluginID string) (plugins.Summary, er
 	if !ok {
 		return plugins.Summary{PluginID: pluginID}, fmt.Errorf("no plugin called %q is installed", pluginID)
 	}
+	if plugin.Disabled {
+		return plugins.Summary{PluginID: pluginID}, fmt.Errorf("the %s plugin is switched off in Settings", plugin.Name)
+	}
 	ctx, ok := s.configs.lookup(contextID)
 	if !ok {
 		return plugins.Summary{PluginID: pluginID}, fmt.Errorf("unknown context %q -- it may have been removed from the kubeconfig", contextID)
@@ -114,12 +117,29 @@ type clusterFor struct {
 	ctx     kube.Context
 }
 
-func (c *clusterFor) KindServed(kind string) (bool, error) {
-	return c.watcher.KindServed(c.ctx, kind)
+func (c *clusterFor) KindsServed(kinds []string) (map[string]bool, error) {
+	return c.watcher.KindsServed(c.ctx, kinds)
 }
 
 func (c *clusterFor) CountBy(kind, namespace, selector string, path kube.FieldPath) (kube.Tally, error) {
 	return c.watcher.CountBy(c.ctx, kind, namespace, selector, path)
+}
+
+// SetEnabled switches a plugin on or off. A switched-off plugin keeps its place
+// in the settings list -- that is where it is switched back on -- but stops
+// being offered anywhere else: no sidebar rows, no charts, no overview.
+//
+// The wanted state is passed rather than toggled so that the switch in the
+// settings view cannot drift out of step with what is on disk.
+func (s *PluginService) SetEnabled(id string, enabled bool) (plugins.Catalogue, error) {
+	if _, ok := s.catalogue().Find(id); !ok {
+		return s.catalogue(), fmt.Errorf("no plugin called %q is installed", id)
+	}
+	if _, err := s.store.SetPluginEnabled(id, enabled); err != nil {
+		return s.catalogue(), err
+	}
+	s.forget()
+	return s.catalogue(), nil
 }
 
 // Dir is the folder user plugins are read from by default.

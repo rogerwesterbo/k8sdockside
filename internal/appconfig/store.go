@@ -188,9 +188,15 @@ type Settings struct {
 	// ThemeFolders rather than merged into one list of "add-on folders":
 	// somebody who syncs a folder of themes has not asked for plugins out of
 	// it, and one list would mean every folder was scanned for both.
-	PluginFolders []string                `json:"pluginFolders"`
-	Contexts      map[string]ContextPrefs `json:"contexts"`
-	TabOrder      []TabRef                `json:"tabOrder"`
+	PluginFolders []string `json:"pluginFolders"`
+	// DisabledPlugins are the plugins the user has switched off, built-in and
+	// installed alike. It records the disabled ones rather than the enabled
+	// ones on purpose: a plugin shipped in a later release, or dropped into a
+	// watched folder, is on the moment it appears, and a settings file written
+	// before this field existed reads as "nothing disabled".
+	DisabledPlugins []string                `json:"disabledPlugins"`
+	Contexts        map[string]ContextPrefs `json:"contexts"`
+	TabOrder        []TabRef                `json:"tabOrder"`
 	// Dock is the bottom strip: its tabs in the order the user left them, and
 	// whether it is showing them. Kept apart from TabOrder rather than merged
 	// into it: the two strips are reordered independently and hold different
@@ -205,16 +211,17 @@ type Settings struct {
 // been saved, and that also fills in any field missing from an older file.
 func Defaults() Settings {
 	return Settings{
-		ManualFiles:   []string{},
-		ManualFolders: []string{},
-		ExcludedFiles: []string{},
-		ThemeFolders:  []string{},
-		PluginFolders: []string{},
-		Contexts:      map[string]ContextPrefs{},
-		TabOrder:      []TabRef{},
-		Dock:          Dock{Size: 320, Tabs: []DockTabRef{}},
-		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
-		Preferences:   Preferences{Theme: themes.DefaultID, Density: DensityComfortable},
+		ManualFiles:     []string{},
+		ManualFolders:   []string{},
+		ExcludedFiles:   []string{},
+		ThemeFolders:    []string{},
+		PluginFolders:   []string{},
+		DisabledPlugins: []string{},
+		Contexts:        map[string]ContextPrefs{},
+		TabOrder:        []TabRef{},
+		Dock:            Dock{Size: 320, Tabs: []DockTabRef{}},
+		Layout:          Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
+		Preferences:     Preferences{Theme: themes.DefaultID, Density: DensityComfortable},
 	}
 }
 
@@ -530,6 +537,33 @@ func (s *Store) RemovePluginFolder(path string) (Settings, error) {
 	})
 }
 
+// DisabledPlugins returns the ids of the plugins the user has switched off.
+func (s *Store) DisabledPlugins() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.DisabledPlugins)
+}
+
+// SetPluginEnabled switches one plugin on or off by id.
+//
+// It takes the wanted state rather than being a toggle so that the frontend
+// cannot drift out of step with the file: a switch that sends "off" twice ends
+// up off, where a toggle would end up back on.
+func (s *Store) SetPluginEnabled(id string, enabled bool) (Settings, error) {
+	if id == "" {
+		return s.Get(), errors.New("plugin id is required")
+	}
+	return s.update(func(d *Settings) {
+		if enabled {
+			d.DisabledPlugins = slices.DeleteFunc(d.DisabledPlugins, func(p string) bool { return p == id })
+			return
+		}
+		if !slices.Contains(d.DisabledPlugins, id) {
+			d.DisabledPlugins = append(d.DisabledPlugins, id)
+		}
+	})
+}
+
 // SetLayout records the sidebar width and detail-panel dock and size.
 func (s *Store) SetLayout(l Layout) (Settings, error) {
 	return s.update(func(d *Settings) { d.Layout = l })
@@ -647,6 +681,9 @@ func normalise(s Settings) Settings {
 	if s.PluginFolders == nil {
 		s.PluginFolders = []string{}
 	}
+	if s.DisabledPlugins == nil {
+		s.DisabledPlugins = []string{}
+	}
 	if s.Contexts == nil {
 		s.Contexts = map[string]ContextPrefs{}
 	}
@@ -712,6 +749,7 @@ func clone(s Settings) Settings {
 	out.ExcludedFiles = slices.Clone(s.ExcludedFiles)
 	out.ThemeFolders = slices.Clone(s.ThemeFolders)
 	out.PluginFolders = slices.Clone(s.PluginFolders)
+	out.DisabledPlugins = slices.Clone(s.DisabledPlugins)
 	out.TabOrder = slices.Clone(s.TabOrder)
 	out.Dock.Tabs = slices.Clone(s.Dock.Tabs)
 	// slices.Clone keeps nil as nil, which is what preserves "never chosen".

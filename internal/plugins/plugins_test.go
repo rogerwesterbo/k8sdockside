@@ -3,6 +3,7 @@ package plugins
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -195,7 +196,7 @@ func TestLoadReadsPluginsAndPacks(t *testing.T) {
 	}`)
 	write(t, filepath.Join(dir, "cloned"), "plugin.json", `{"id": "three", "name": "Three", "views": [{"id": "pods", "kind": "pods"}]}`)
 
-	cat := Load(dir, nil)
+	cat := Load(dir, nil, nil)
 	if len(cat.Problems) > 0 {
 		t.Fatalf("problems: %v", cat.Problems)
 	}
@@ -218,7 +219,7 @@ func TestLoadReportsBadFilesWithoutLosingGoodOnes(t *testing.T) {
 	write(t, dir, "wrong.json", `{"id": "wrong", "views": [{"id": "v", "kind": "widgets"}]}`)
 	write(t, dir, "fine.json", `{"id": "fine", "name": "Fine", "views": [{"id": "pods", "kind": "pods"}]}`)
 
-	cat := Load(dir, nil)
+	cat := Load(dir, nil, nil)
 	if _, ok := cat.Find("fine"); !ok {
 		t.Error("a broken file alongside a good one cost us the good one")
 	}
@@ -231,7 +232,7 @@ func TestLoadLetsAUserPluginReplaceABuiltin(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, "mine.json", `{"id": "argocd", "name": "My Argo", "views": [{"id": "apps", "kind": "pods"}]}`)
 
-	cat := Load(dir, nil)
+	cat := Load(dir, nil, nil)
 	p, ok := cat.Find("argocd")
 	if !ok {
 		t.Fatal("argocd is missing entirely")
@@ -257,7 +258,7 @@ func TestExampleIsAPluginThatLoads(t *testing.T) {
 		t.Fatalf("WriteExample: %v", err)
 	}
 
-	cat := Load(dir, nil)
+	cat := Load(dir, nil, nil)
 	if len(cat.Problems) > 0 {
 		t.Fatalf("the starter plugin does not load: %v", cat.Problems)
 	}
@@ -271,5 +272,135 @@ func TestExampleIsAPluginThatLoads(t *testing.T) {
 	}
 	if again == path {
 		t.Errorf("both starters went to %s", path)
+	}
+}
+
+func TestLoadMarksADisabledPluginWithoutDroppingIt(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "solo.json", `{"id": "solo", "name": "Solo", "views": [{"id": "pods", "kind": "pods"}]}`)
+
+	cat := Load(dir, nil, []string{"solo", "argocd"})
+
+	// Still in the catalogue: the settings view has to list a switched-off
+	// plugin to offer switching it back on.
+	solo, ok := cat.Find("solo")
+	if !ok {
+		t.Fatal("a disabled plugin fell out of the catalogue, so nothing could re-enable it")
+	}
+	if !solo.Disabled {
+		t.Error("solo is disabled in settings but did not come back marked")
+	}
+	if argocd, _ := cat.Find("argocd"); !argocd.Disabled {
+		t.Error("a built-in must be switchable off like any other plugin")
+	}
+
+	enabled := cat.Enabled()
+	for _, p := range enabled {
+		if p.ID == "solo" || p.ID == "argocd" {
+			t.Errorf("Enabled() offered %q, which is switched off", p.ID)
+		}
+	}
+	if len(enabled) != len(cat.Plugins)-2 {
+		t.Errorf("Enabled() returned %d of %d plugins, want two fewer", len(enabled), len(cat.Plugins))
+	}
+}
+
+func TestLoadIgnoresADisabledIDThatNamesNothing(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "solo.json", `{"id": "solo", "name": "Solo", "views": [{"id": "pods", "kind": "pods"}]}`)
+
+	// A plugin switched off and then deleted leaves its id behind in settings.
+	cat := Load(dir, nil, []string{"long-gone"})
+
+	if len(cat.Problems) > 0 {
+		t.Fatalf("problems: %v", cat.Problems)
+	}
+	if len(cat.Enabled()) != len(cat.Plugins) {
+		t.Error("an id naming no installed plugin should switch nothing off")
+	}
+}
+
+func TestResolveKindSaysWhenAPluginIsSwitchedOff(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "solo.json", `{"id": "solo", "name": "Solo", "views": [{"id": "pods", "kind": "pods"}]}`)
+
+	cat := Load(dir, nil, []string{"solo"})
+
+	_, err := cat.ResolveKind(ViewKind("solo", "pods"))
+	if err == nil {
+		t.Fatal("a tab on a switched-off plugin's view should not resolve")
+	}
+	// A restored tab on a plugin the user turned off needs telling apart from
+	// one whose folder went missing: the fix is a switch, not a lost file.
+	if !strings.Contains(err.Error(), "switched off") {
+		t.Errorf("error is %q, want it to say the plugin is switched off", err)
+	}
+}
+
+// The Metrics panel is drawn, or left out entirely, on the strength of this
+// list. A switched-off plugin's surfaces have to leave it: otherwise switching
+// Prometheus off leaves a Metrics heading behind on the dashboard saying no
+// Prometheus was found -- talk of a thing the user has just switched off.
+func TestAttachmentsLoseTheSurfacesOfASwitchedOffPlugin(t *testing.T) {
+	// Prometheus is the built-in that charts the cluster dashboard. If that
+	// ever stops being true this test should be the thing that says so.
+	if !slices.Contains(Load(t.TempDir(), nil, nil).Attachments(), AttachDashboard) {
+		t.Fatal("no built-in charts the dashboard, so this test is checking nothing")
+	}
+
+	got := Load(t.TempDir(), nil, []string{"prometheus"}).Attachments()
+
+	if slices.Contains(got, AttachDashboard) {
+		t.Errorf("attachments = %v, want the dashboard gone with the plugin that charts it", got)
+	}
+	// Its per-object charts go too, or every Pod keeps a Metrics section.
+	if slices.Contains(got, "pods") || slices.Contains(got, "nodes") {
+		t.Errorf("attachments = %v, want the detail-panel surfaces gone as well", got)
+	}
+}
+
+// With everything switched off nothing anywhere should draw a chart panel.
+func TestAttachmentsAreEmptyWhenEveryPluginIsOff(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "watcher.json", `{
+		"id": "watcher",
+		"name": "Watcher",
+		"views": [{"id": "pods", "kind": "pods"}],
+		"charts": [{"id": "cpu", "label": "CPU", "attach": "dashboard", "query": "up"}]
+	}`)
+
+	all := Load(dir, nil, nil)
+	ids := make([]string, 0, len(all.Plugins))
+	for _, p := range all.Plugins {
+		ids = append(ids, p.ID)
+	}
+
+	if got := Load(dir, nil, ids).Attachments(); len(got) != 0 {
+		t.Errorf("attachments = %v, want none", got)
+	}
+}
+
+// Two plugins charting the same surface must not draw two panels.
+func TestAttachmentsNamesEachSurfaceOnce(t *testing.T) {
+	dir := t.TempDir()
+	for _, id := range []string{"one", "two"} {
+		write(t, dir, id+".json", `{
+			"id": "`+id+`",
+			"name": "`+id+`",
+			"views": [{"id": "pods", "kind": "pods"}],
+			"charts": [{"id": "cpu", "label": "CPU", "attach": "dashboard", "query": "up"}]
+		}`)
+	}
+
+	got := Load(dir, nil, nil).Attachments()
+
+	seen := 0
+	for _, s := range got {
+		if s == "dashboard" {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Errorf("attachments = %v, want dashboard named once", got)
 	}
 }

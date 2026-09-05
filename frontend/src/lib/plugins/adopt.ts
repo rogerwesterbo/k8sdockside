@@ -31,6 +31,7 @@ export function adoptPlugin(plugin: bindings.Plugin): Plugin {
         })),
         origin: plugin.origin,
         pack: plugin.pack,
+        disabled: plugin.disabled ?? false,
     };
 }
 

@@ -84,11 +84,25 @@ var Builtin = sync.OnceValue(func() []Plugin {
 // The finding, the size limits, the one-level-deep rule and what happens to a
 // file that will not parse are all in internal/addons, shared with the theme
 // loader. What is left here is only what a *plugin* file is.
-func Load(dir string, extra []string) Catalogue {
+//
+// disabled are the ids the user has switched off. They are marked rather than
+// filtered out, and an id naming nothing is ignored: a plugin switched off and
+// then deleted leaves its id behind in settings, and that is not an error worth
+// showing anyone.
+func Load(dir string, extra []string, disabled []string) Catalogue {
 	// The default folder first, so a plugin in one the user added later cannot
 	// quietly take an id from the folder we told them to use.
 	folders := append([]string{dir}, extra...)
 	loaded, problems := addons.Load(Builtin(), folders, parseFile)
+
+	off := make(map[string]bool, len(disabled))
+	for _, id := range disabled {
+		off[id] = true
+	}
+	for i := range loaded {
+		loaded[i].Disabled = off[loaded[i].ID]
+	}
+
 	return Catalogue{
 		Plugins:  loaded,
 		Dir:      dir,

@@ -196,6 +196,12 @@ type Plugin struct {
 	Origin string `json:"origin"`
 	// Pack is the collection it arrived in, empty for one that came on its own.
 	Pack string `json:"pack"`
+	// Disabled is set by the loader for a plugin the user has switched off in
+	// settings. A disabled plugin stays in the catalogue rather than being
+	// dropped from it, because the settings view has to list it to offer
+	// switching it back on; everything that *offers* a plugin reads Enabled
+	// instead. Ignored on the way in, like Origin.
+	Disabled bool `json:"disabled"`
 }
 
 // BuiltinOrigin marks the plugins that ship with the app.
@@ -242,6 +248,43 @@ type Catalogue struct {
 	Dir      string    `json:"dir"`
 	Folders  []string  `json:"folders"`
 	Problems []Problem `json:"problems"`
+}
+
+// Enabled returns the plugins that are switched on, in catalogue order.
+//
+// This is what the sidebar, the charts and the overview go through. Find and
+// Plugins deliberately still see everything: turning a plugin off hides what it
+// offers, it does not uninstall it.
+func (c Catalogue) Enabled() []Plugin {
+	out := make([]Plugin, 0, len(c.Plugins))
+	for _, p := range c.Plugins {
+		if !p.Disabled {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Attachments names every surface some enabled plugin draws a chart on: a
+// resource kind, AttachDashboard or AttachOverview.
+//
+// It hangs off the catalogue rather than taking a list because it is what
+// decides whether a chart panel is drawn at all, and a caller that passed the
+// unfiltered plugins would leave a Metrics heading on the dashboard of a user
+// who has just switched the only charting plugin off.
+func (c Catalogue) Attachments() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, plugin := range c.Enabled() {
+		for _, chart := range plugin.Charts {
+			if seen[chart.Attach] {
+				continue
+			}
+			seen[chart.Attach] = true
+			out = append(out, chart.Attach)
+		}
+	}
+	return out
 }
 
 // Find returns the plugin with the given id.
@@ -553,6 +596,12 @@ func (c Catalogue) ResolveKind(kind string) (Resolved, error) {
 	plugin, ok := c.Find(pluginID)
 	if !ok {
 		return Resolved{}, fmt.Errorf("no plugin called %q is installed -- the folder it came from may have been removed", pluginID)
+	}
+	// Told apart from the missing case on purpose: a restored tab on a plugin
+	// the user switched off is one switch away from working again, and saying
+	// "not installed" would send them looking for a file that is right there.
+	if plugin.Disabled {
+		return Resolved{}, fmt.Errorf("the %s plugin is switched off in Settings", plugin.Name)
 	}
 
 	// Every plugin has an overview whether or not it declares one, so it is

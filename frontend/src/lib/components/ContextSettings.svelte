@@ -36,7 +36,18 @@
     let editingMetrics = $state(false);
     let metricsError = $state('');
 
-    let source = $derived(workspace.metricsSourceFor(context.id));
+    /**
+     * Whether this cluster's Prometheus is worth asking about at all.
+     *
+     * The endpoint below is read by exactly one thing: the charts an enabled
+     * plugin draws. With every charting plugin switched off the row configures
+     * nothing, so it goes -- and with it the Services listing that hunting for
+     * a Prometheus costs, which is the part that would otherwise happen every
+     * time a context was selected.
+     */
+    let charting = $derived(workspace.metricsAttachments.length > 0);
+
+    let source = $derived(charting ? workspace.metricsSourceFor(context.id) : null);
     let configured = $derived(workspace.settings.contexts[context.id]?.metrics ?? '');
 
     async function commitMetrics(): Promise<void> {
@@ -121,6 +132,7 @@
         </div>
     </div>
 
+    {#if charting}
     <div class="field">
         <span>Metrics</span>
         <div class="metrics">
@@ -172,6 +184,7 @@
             </p>
         {/if}
     </div>
+    {/if}
 
     <dl class="meta">
         <div><dt>Context</dt><dd class="selectable">{context.name}</dd></div>

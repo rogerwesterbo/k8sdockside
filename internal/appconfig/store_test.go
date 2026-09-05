@@ -788,3 +788,62 @@ func TestSetDockKeepsTheCallersSliceOutOfTheStore(t *testing.T) {
 		t.Errorf("tab name = %q, want the store to hold its own copy", got)
 	}
 }
+
+func TestSetPluginEnabledRecordsOnlyTheDisabledOnes(t *testing.T) {
+	store := openIn(t)
+
+	// Nothing is disabled until somebody says so: the list is an opt-out, so a
+	// built-in added in a later release is on without a migration.
+	if got := store.DisabledPlugins(); len(got) != 0 {
+		t.Fatalf("DisabledPlugins() = %v, want none to start with", got)
+	}
+
+	if _, err := store.SetPluginEnabled("argocd", false); err != nil {
+		t.Fatalf("SetPluginEnabled: %v", err)
+	}
+	if got := store.DisabledPlugins(); len(got) != 1 || got[0] != "argocd" {
+		t.Errorf("DisabledPlugins() = %v, want [argocd]", got)
+	}
+
+	// Disabling twice must not record it twice.
+	if _, err := store.SetPluginEnabled("argocd", false); err != nil {
+		t.Fatalf("SetPluginEnabled: %v", err)
+	}
+	if got := store.DisabledPlugins(); len(got) != 1 {
+		t.Errorf("DisabledPlugins() = %v, want argocd recorded once", got)
+	}
+
+	if _, err := store.SetPluginEnabled("argocd", true); err != nil {
+		t.Fatalf("SetPluginEnabled: %v", err)
+	}
+	if got := store.DisabledPlugins(); len(got) != 0 {
+		t.Errorf("DisabledPlugins() = %v, want re-enabling to clear it", got)
+	}
+}
+
+func TestSetPluginEnabledSurvivesAReopen(t *testing.T) {
+	path := tempSettings(t)
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := store.SetPluginEnabled("flux", false); err != nil {
+		t.Fatalf("SetPluginEnabled: %v", err)
+	}
+
+	reopened, err := openAt(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if got := reopened.DisabledPlugins(); len(got) != 1 || got[0] != "flux" {
+		t.Errorf("after reopen DisabledPlugins() = %v, want [flux]", got)
+	}
+}
+
+func TestSetPluginEnabledRefusesABlankID(t *testing.T) {
+	store := openIn(t)
+
+	if _, err := store.SetPluginEnabled("", false); err == nil {
+		t.Error("expected an error for a plugin id that is empty")
+	}
+}
