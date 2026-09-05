@@ -15,6 +15,29 @@ vi.mock('@wailsio/runtime', async (importOriginal) => {
         },
     };
 });
+
+// The real backend answers every settings write with the whole settings file,
+// and the store adopts that answer whole. A mock answering `{}` says instead
+// that every other section is empty, so a debounced write landing a quarter of
+// a second into a test undoes whatever it had just set -- the dock folds itself
+// back up, a preference goes back to its default -- which is a race the test
+// loses about half the time. So the settings mock keeps what it is given and
+// hands all of it back, the way the file does.
+const settingsFile = vi.hoisted(() => {
+    const saved: Record<string, unknown> = {};
+    return {
+        keep: (section: string) =>
+            vi.fn((value: unknown) => {
+                saved[section] = value;
+                return Promise.resolve({ ...saved });
+            }),
+        keepPrefsFor: () =>
+            vi.fn((contextId: string, prefs: unknown) => {
+                saved.contexts = { ...(saved.contexts as object), [contextId]: prefs };
+                return Promise.resolve({ ...saved });
+            }),
+    };
+});
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
@@ -85,11 +108,11 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
-        SetContextPrefs: vi.fn().mockResolvedValue({}),
-        SetTabOrder: vi.fn().mockResolvedValue({}),
-        SetDock: vi.fn().mockResolvedValue({}),
-        SetLayout: vi.fn().mockResolvedValue({}),
-        SetPreferences: vi.fn().mockResolvedValue({}),
+        SetContextPrefs: settingsFile.keepPrefsFor(),
+        SetTabOrder: settingsFile.keep('tabOrder'),
+        SetDock: settingsFile.keep('dock'),
+        SetLayout: settingsFile.keep('layout'),
+        SetPreferences: settingsFile.keep('preferences'),
     },
 }));
 

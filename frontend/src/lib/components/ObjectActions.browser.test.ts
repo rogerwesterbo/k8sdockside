@@ -18,6 +18,29 @@ vi.mock('@wailsio/runtime', async (importOriginal) => {
     };
 });
 const deliver = (event: { data: unknown }) => drainEvents.handler(event);
+
+// The real backend answers every settings write with the whole settings file,
+// and the store adopts that answer whole. A mock answering `{}` says instead
+// that every other section is empty, so a debounced write landing a quarter of
+// a second into a test undoes whatever it had just set -- the dock folds itself
+// back up, a preference goes back to its default -- which is a race the test
+// loses about half the time. So the settings mock keeps what it is given and
+// hands all of it back, the way the file does.
+const settingsFile = vi.hoisted(() => {
+    const saved: Record<string, unknown> = {};
+    return {
+        keep: (section: string) =>
+            vi.fn((value: unknown) => {
+                saved[section] = value;
+                return Promise.resolve({ ...saved });
+            }),
+        keepPrefsFor: () =>
+            vi.fn((contextId: string, prefs: unknown) => {
+                saved.contexts = { ...(saved.contexts as object), [contextId]: prefs };
+                return Promise.resolve({ ...saved });
+            }),
+    };
+});
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
@@ -93,11 +116,11 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
-        SetContextPrefs: vi.fn().mockResolvedValue({}),
-        SetTabOrder: vi.fn().mockResolvedValue({}),
-        SetDock: vi.fn().mockResolvedValue({}),
-        SetLayout: vi.fn().mockResolvedValue({}),
-        SetPreferences: vi.fn().mockResolvedValue({}),
+        SetContextPrefs: settingsFile.keepPrefsFor(),
+        SetTabOrder: settingsFile.keep('tabOrder'),
+        SetDock: settingsFile.keep('dock'),
+        SetLayout: settingsFile.keep('layout'),
+        SetPreferences: settingsFile.keep('preferences'),
     },
 }));
 
@@ -461,8 +484,12 @@ test('a shell opens in the dock without asking anything first', async () => {
     workspace.closeAllDockTabs();
 });
 
+// Chosen through the store rather than by assigning to `settings.preferences`:
+// a settings write landing mid-test is adopted whole, and only what the store
+// itself wrote comes back in the answer. A preference poked straight into the
+// object does not, so it returns to its default halfway through the test.
 test('a shell goes to your own terminal when that is what you chose', async () => {
-    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'external' };
+    workspace.setTerminal({ mode: 'external' });
     render(ObjectActions, { object: POD });
     await expect.element(page.getByRole('button', { name: 'Shell' })).toBeVisible();
 
@@ -473,17 +500,17 @@ test('a shell goes to your own terminal when that is what you chose', async () =
     );
     // And nothing opens in the dock: the shell is over there.
     expect(workspace.dockTabs.some((t) => t.view === 'shell')).toBe(false);
-    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'app' };
+    workspace.setTerminal({ mode: 'app' });
 });
 
 test('a node shell says which node rather than which pod', async () => {
-    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'external' };
+    workspace.setTerminal({ mode: 'external' });
     render(ObjectActions, { object: NODE });
 
     await page.getByRole('button', { name: 'Shell' }).click();
 
     await vi.waitFor(() => expect(TerminalService.LaunchNode).toHaveBeenCalledWith(PROD, 'wrkr01'));
-    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'app' };
+    workspace.setTerminal({ mode: 'app' });
 });
 
 test('forwarding offers the ports the object actually has', async () => {
