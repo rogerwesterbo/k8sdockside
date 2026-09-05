@@ -435,7 +435,7 @@ func Defaults() Settings {
 			// one with nothing in it is a third of the window showing nothing.
 			Bottom: PaneState{Tabs: []PaneTabRef{}, Size: 320},
 		},
-		Layout:          Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
+		Layout: Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
 		Preferences: Preferences{
 			Theme:    themes.DefaultID,
 			Density:  DensityComfortable,
