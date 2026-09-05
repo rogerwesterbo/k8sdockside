@@ -10,24 +10,24 @@
     <Installer
         Path="k8sdockside"
         Arguments=""
-        InstallLocation="C:\Program Files\My Company\My Product">
+        InstallLocation="C:\Program Files\K8s Dockside">
     </Installer>
     <PackageInformation
-        PackageName="My Product"
-        PackageDisplayName="My Product"
-        PublisherName="CN=My Company"
-        PublisherDisplayName="My Company"
-        Version="0.1.0.0"
-        PackageDescription="A k8sdockside application">
+        PackageName="io.github.rogerwesterbo.k8sdockside"
+        PackageDisplayName="K8s Dockside"
+        PublisherName="CN=Roger Westerbø"
+        PublisherDisplayName="Roger Westerbø"
+        Version="0.0.1.0"
+        PackageDescription="A Kubernetes workspace for your local kubeconfig contexts">
         <Capabilities>
             <Capability Name="runFullTrust" />
             
         </Capabilities>
         <Applications>
             <Application
-                Id="com.example.k8sdockside"
-                Description="A k8sdockside application"
-                DisplayName="My Product"
+                Id="K8sDockside"
+                Description="A Kubernetes workspace for your local kubeconfig contexts"
+                DisplayName="K8s Dockside"
                 ExecutableName="k8sdockside"
                 EntryPoint="Windows.FullTrustApplication">
                 
@@ -41,9 +41,9 @@
         </Dependencies>
         <Properties>
             <Framework>false</Framework>
-            <DisplayName>My Product</DisplayName>
-            <PublisherDisplayName>My Company</PublisherDisplayName>
-            <Description>A k8sdockside application</Description>
+            <DisplayName>K8s Dockside</DisplayName>
+            <PublisherDisplayName>Roger Westerbø</PublisherDisplayName>
+            <Description>A Kubernetes workspace for your local kubeconfig contexts</Description>
             <Logo>Assets\AppIcon.png</Logo>
         </Properties>
     </PackageInformation>

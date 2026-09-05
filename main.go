@@ -45,7 +45,7 @@ func main() {
 	graphs := NewMetricsService(settings, configs, resources.watcher, solutions)
 
 	app := application.New(application.Options{
-		Name:        "k8sdockside",
+		Name:        "K8s Dockside",
 		Description: "A Kubernetes workspace for your local kubeconfig contexts",
 		Services: []application.Service{
 			application.NewService(configs),
@@ -66,7 +66,7 @@ func main() {
 	})
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "k8sdockside",
+		Title: "K8s Dockside",
 		// Wide enough for the sidebar, a tab bar and a docked detail panel
 		// side by side without anything collapsing.
 		Width:     1440,

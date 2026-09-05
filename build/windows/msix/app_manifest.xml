@@ -8,15 +8,15 @@
   IgnorableNamespaces="uap3">
   
   <Identity 
-    Name="com.example.k8sdockside"
-    Publisher="CN=My Company"
-    Version="0.1.0.0" 
+    Name="io.github.rogerwesterbo.k8sdockside"
+    Publisher="CN=Roger Westerbø"
+    Version="0.0.1.0" 
     ProcessorArchitecture="x64" />
   
   <Properties>
-    <DisplayName>My Product</DisplayName>
-    <PublisherDisplayName>My Company</PublisherDisplayName>
-    <Description>A k8sdockside application</Description>
+    <DisplayName>K8s Dockside</DisplayName>
+    <PublisherDisplayName>Roger Westerbø</PublisherDisplayName>
+    <Description>A Kubernetes workspace for your local kubeconfig contexts</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   
@@ -29,10 +29,10 @@
   </Resources>
   
   <Applications>
-    <Application Id="com.example.k8sdockside" Executable="k8sdockside" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="K8sDockside" Executable="k8sdockside" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="My Product"
-        Description="A k8sdockside application"
+        DisplayName="K8s Dockside"
+        Description="A Kubernetes workspace for your local kubeconfig contexts"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

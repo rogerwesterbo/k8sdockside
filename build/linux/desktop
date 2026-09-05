@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
-Name=My Product
-Comment=A k8sdockside application
+Name=K8s Dockside
+Comment=A Kubernetes workspace for your local kubeconfig contexts
 # The Exec line includes %u to pass the URL to the application
 Exec=/usr/local/bin/k8sdockside %u
 Terminal=false
