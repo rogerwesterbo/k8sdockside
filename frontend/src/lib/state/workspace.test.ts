@@ -40,6 +40,27 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         RemoveFolder: vi.fn().mockResolvedValue({}),
         BrowseForFolder: vi.fn().mockResolvedValue({}),
     },
+    TerminalService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue({ id: 'term-1', namespace: 'default', pod: 'web', container: 'app', node: '' }),
+        OpenNode: vi.fn().mockResolvedValue({ id: 'term-1', namespace: 'default', pod: '', container: '', node: 'wrkr01' }),
+        Send: vi.fn(),
+        Resize: vi.fn(),
+        Close: vi.fn(),
+        Externals: vi.fn().mockResolvedValue({ terminals: [], kubectl: '', reason: '' }),
+        Launch: vi.fn().mockResolvedValue(undefined),
+        LaunchNode: vi.fn().mockResolvedValue(undefined),
+    },
+    PortForwardService: {
+        List: vi.fn().mockResolvedValue([]),
+        Ports: vi.fn().mockResolvedValue([]),
+        Start: vi.fn().mockResolvedValue({ id: 'pf-1', localPort: 51234, state: 'active' }),
+        Reconnect: vi.fn().mockResolvedValue({ id: 'pf-1', localPort: 51234, state: 'active' }),
+        Stop: vi.fn(),
+        Forget: vi.fn().mockResolvedValue(undefined),
+        Open: vi.fn().mockResolvedValue(undefined),
+        URL: vi.fn().mockResolvedValue(''),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
@@ -1099,6 +1120,15 @@ describe('preferences', () => {
             showKubeconfigNames: false,
             showLineNumbers: true,
             metricsRange: 60,
+            terminal: {
+                mode: 'app',
+                external: '',
+                shells: ['bash', 'sh'],
+                nodeImage: 'busybox',
+                nodeNamespace: 'default',
+                fontSize: 12,
+                scrollback: 5000,
+            },
         };
     });
 

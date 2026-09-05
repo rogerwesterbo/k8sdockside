@@ -32,6 +32,27 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         List: vi.fn().mockResolvedValue({ themes: [], dir: '', folders: [], problems: [] }),
         Tokens: vi.fn().mockResolvedValue([]),
     },
+    TerminalService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue({ id: 'term-1', namespace: 'default', pod: 'web', container: 'app', node: '' }),
+        OpenNode: vi.fn().mockResolvedValue({ id: 'term-1', namespace: 'default', pod: '', container: '', node: 'wrkr01' }),
+        Send: vi.fn(),
+        Resize: vi.fn(),
+        Close: vi.fn(),
+        Externals: vi.fn().mockResolvedValue({ terminals: [], kubectl: '', reason: '' }),
+        Launch: vi.fn().mockResolvedValue(undefined),
+        LaunchNode: vi.fn().mockResolvedValue(undefined),
+    },
+    PortForwardService: {
+        List: vi.fn().mockResolvedValue([]),
+        Ports: vi.fn().mockResolvedValue([]),
+        Start: vi.fn().mockResolvedValue({ id: 'pf-1', localPort: 51234, state: 'active' }),
+        Reconnect: vi.fn().mockResolvedValue({ id: 'pf-1', localPort: 51234, state: 'active' }),
+        Stop: vi.fn(),
+        Forget: vi.fn().mockResolvedValue(undefined),
+        Open: vi.fn().mockResolvedValue(undefined),
+        URL: vi.fn().mockResolvedValue(''),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
@@ -89,7 +110,7 @@ test('the strip is on screen with nothing open, and says what it is for', async 
     render(Dock);
 
     await expect.element(page.getByRole('tablist', { name: 'Dock' })).toBeVisible();
-    await expect.element(page.getByText(/Edit in the details panel/)).toBeVisible();
+    await expect.element(page.getByText(/in the details panel/)).toBeVisible();
 });
 
 test('an object opened for editing becomes a tab named after it', async () => {
@@ -125,7 +146,7 @@ test('closing the last tab leaves the strip and its hint behind', async () => {
 
     await page.getByRole('button', { name: 'Close web' }).click();
 
-    await expect.element(page.getByText(/Edit in the details panel/)).toBeVisible();
+    await expect.element(page.getByText(/in the details panel/)).toBeVisible();
     await expect.element(page.getByRole('tablist', { name: 'Dock' })).toBeVisible();
 });
 

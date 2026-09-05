@@ -8,12 +8,14 @@
         DASHBOARD_ITEM,
         DEFINITIONS_GROUP,
         NAV_GROUPS,
+        NETWORK_GROUP,
         PLUGIN_OVERVIEW,
         SOLUTIONS_GROUP,
         pluginKindFor,
     } from '../catalogue';
     import { classify } from '../errors';
     import { alpha } from '../colors';
+    import { forwards, type Forward } from '../state/forwards.svelte';
     import { workspace, type Health } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
 
@@ -163,6 +165,43 @@
             default:
                 return name;
         }
+    }
+
+    /** This cluster's forwards, which hang under the Network heading. */
+    let tunnels = $derived(forwards.forContext(context.id));
+
+    /** What a forward's row says it is doing, for the title attribute. */
+    function forwardTitle(forward: Forward): string {
+        const target = `${forward.name}:${forward.remotePort}`;
+        switch (forward.state) {
+            case 'active':
+                return `localhost:${forward.localPort} → ${target} — click to open in your browser`;
+            case 'connecting':
+                return `Connecting to ${target}…`;
+            case 'error':
+                return `${target} — ${forward.error}`;
+            default:
+                return `${target} — disconnected`;
+        }
+    }
+
+    /** Opens a live forward, and does nothing for one that is not up. */
+    function visit(forward: Forward): void {
+        if (forward.state !== 'active') return;
+        void forwards.open(forward.id).catch((err: unknown) => {
+            workspace.fail(err instanceof Error ? err.message : String(err));
+        });
+    }
+
+    /** The one button a forward's row carries: stop it, or start it again. */
+    function toggleForward(forward: Forward): void {
+        if (forward.state === 'active' || forward.state === 'connecting') {
+            forwards.stop(forward.id);
+            return;
+        }
+        void forwards.reconnect(forward.id).catch((err: unknown) => {
+            workspace.fail(err instanceof Error ? err.message : String(err));
+        });
     }
 
     function statusTitle(state: Health): string {
@@ -319,6 +358,46 @@
                             <span>{item.label}</span>
                         </button>
                     {/each}
+
+                    <!-- The network section carries the forwards this app is
+                         holding open into this cluster. They are here rather
+                         than only in their own tab because a tunnel is a thing
+                         that is *running*: it should be visible without going
+                         to look for it, and stoppable from where it is seen. -->
+                    {#if group.label === NETWORK_GROUP && tunnels.length > 0}
+                        {#each tunnels as forward (forward.id)}
+                            <div class="tunnel">
+                                <button
+                                    class="tunnel-label {forward.state}"
+                                    title={forwardTitle(forward)}
+                                    onclick={() => visit(forward)}
+                                >
+                                    <span class="dot"></span>
+                                    <span class="local">
+                                        {forward.localPort ? `:${forward.localPort}` : '—'}
+                                    </span>
+                                    <span class="target">{forward.name}:{forward.remotePort}</span>
+                                </button>
+                                <button
+                                    class="tunnel-act"
+                                    title={forward.state === 'active' || forward.state === 'connecting'
+                                        ? 'Disconnect this forward'
+                                        : 'Connect this forward again'}
+                                    aria-label={forward.state === 'active' || forward.state === 'connecting'
+                                        ? `Disconnect ${forward.name}:${forward.remotePort}`
+                                        : `Reconnect ${forward.name}:${forward.remotePort}`}
+                                    onclick={() => toggleForward(forward)}
+                                >
+                                    <Icon
+                                        name={forward.state === 'active' || forward.state === 'connecting'
+                                            ? 'close'
+                                            : 'refresh'}
+                                        size={11}
+                                    />
+                                </button>
+                            </div>
+                        {/each}
+                    {/if}
 
                     <!-- The solutions section: one row per plugin installed on
                          this machine, each unfolding into its own views. The
@@ -757,6 +836,90 @@
        one level in from its plugin. */
     .item.nested {
         padding-left: calc(var(--indent) + 16px);
+    }
+
+    /* One forward, under the network heading: where it is listening, what it
+       reaches, and the one button that stops or restarts it. Indented like a
+       nested item, because it belongs to the section rather than being one of
+       the section's own rows. */
+    .tunnel {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding-right: 4px;
+    }
+
+    .tunnel-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 24px;
+        padding-left: calc(var(--indent) + 16px);
+        padding-right: 4px;
+        border-radius: var(--radius-sm);
+        color: var(--text-faint);
+        font-size: 11.5px;
+        text-align: left;
+    }
+
+    .tunnel-label:hover {
+        background: var(--bg-hover);
+    }
+
+    /* Only a live one is a link; the rest are rows that describe themselves. */
+    .tunnel-label.active {
+        cursor: pointer;
+    }
+
+    .tunnel-label .dot {
+        flex: 0 0 auto;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--text-faint);
+    }
+
+    .tunnel-label.active .dot {
+        background: var(--ok);
+    }
+
+    .tunnel-label.connecting .dot {
+        background: var(--warn);
+    }
+
+    .tunnel-label.error .dot {
+        background: var(--error);
+    }
+
+    .tunnel-label .local {
+        flex: 0 0 auto;
+        font-family: var(--mono);
+        color: var(--text-dim);
+    }
+
+    .tunnel-label .target {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tunnel-act {
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        width: 20px;
+        height: 20px;
+        border-radius: var(--radius-sm);
+        color: var(--text-faint);
+    }
+
+    .tunnel-act:hover {
+        background: var(--bg-hover);
+        color: var(--text);
     }
 
     /* One plugin: a heading like an API group, but with the solution's own icon

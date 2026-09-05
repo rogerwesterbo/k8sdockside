@@ -4,12 +4,13 @@
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { DASHBOARD, SETTINGS, isPluginOverview } from './lib/catalogue';
+    import { DASHBOARD, PORT_FORWARDS, SETTINGS, isPluginOverview } from './lib/catalogue';
     import Dashboard from './lib/components/Dashboard.svelte';
     import DetailPanel from './lib/components/DetailPanel.svelte';
     import Dock from './lib/components/Dock.svelte';
     import Icon from './lib/components/Icon.svelte';
     import PluginOverview from './lib/components/PluginOverview.svelte';
+    import PortForwards from './lib/components/PortForwards.svelte';
     import ResourceTable from './lib/components/ResourceTable.svelte';
     import SettingsView from './lib/components/settings/SettingsView.svelte';
     import Sidebar from './lib/components/Sidebar.svelte';
@@ -181,6 +182,8 @@
                                 <SettingsView />
                             {:else if workspace.activeTab.kind === DASHBOARD}
                                 <Dashboard contextId={workspace.activeTab.contextId} />
+                            {:else if workspace.activeTab.kind === PORT_FORWARDS}
+                                <PortForwards contextId={workspace.activeTab.contextId} />
                             {:else if isPluginOverview(workspace.activeTab.kind)}
                                 <PluginOverview
                                     contextId={workspace.activeTab.contextId}

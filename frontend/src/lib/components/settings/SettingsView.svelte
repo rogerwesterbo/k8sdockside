@@ -20,6 +20,7 @@
         { id: 'themes', label: 'Themes', icon: 'display' },
         { id: 'plugins', label: 'Plugins', icon: 'puzzle' },
         { id: 'behaviour', label: 'Behaviour', icon: 'sliders' },
+        { id: 'terminal', label: 'Terminal', icon: 'terminal' },
         { id: 'sources', label: 'Kubeconfig sources', icon: 'folder' },
         { id: 'about', label: 'About', icon: 'info' },
     ] as const;
@@ -37,6 +38,7 @@
     import AppearanceSection from './AppearanceSection.svelte';
     import BehaviourSection from './BehaviourSection.svelte';
     import SourcesSection from './SourcesSection.svelte';
+    import TerminalSection from './TerminalSection.svelte';
     import PluginsSection from './PluginsSection.svelte';
     import ThemesSection from './ThemesSection.svelte';
 
@@ -98,6 +100,8 @@
             <PluginsSection />
         {:else if active === 'behaviour'}
             <BehaviourSection />
+        {:else if active === 'terminal'}
+            <TerminalSection />
         {:else if active === 'sources'}
             <SourcesSection />
         {:else}

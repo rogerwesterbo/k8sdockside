@@ -25,6 +25,29 @@ export const SETTINGS = '__settings__';
 export const HELM_RELEASES = 'helmreleases';
 
 /**
+ * The port forwards view: the tunnels this app is holding open into the
+ * cluster.
+ *
+ * A sentinel kind for the same reason DASHBOARD and SETTINGS are -- the tab
+ * machinery keys everything off `kind`, and a second concept of "special tab"
+ * would have to be threaded through all of it. Unlike those two it lives in a
+ * section, under Network, because that is what a forward is: a route into the
+ * cluster, sitting beside the Services it is most often made against.
+ *
+ * The tabs it opens belong to a context, and each shows only that context's
+ * forwards: a tunnel is a connection to one cluster, and a list mixing several
+ * would be a list you had to read the fine print of.
+ */
+export const PORT_FORWARDS = '__forwards__';
+
+/**
+ * The section the forwards live under. Named here because the sidebar hangs
+ * the live list of them off this heading, and a group matched by a string
+ * typed twice is a group that stops matching when one of them is renamed.
+ */
+export const NETWORK_GROUP = 'Network';
+
+/**
  * The section whose children are fetched from the cluster: the API groups it
  * serves, and the definitions under each.
  */
@@ -88,7 +111,7 @@ export const NAV_GROUPS: NavGroup[] = [
         ],
     },
     {
-        label: 'Network',
+        label: NETWORK_GROUP,
         items: [
             { kind: 'services', label: 'Services', icon: 'share' },
             { kind: 'endpointslices', label: 'Endpoint Slices', icon: 'share' },
@@ -98,6 +121,9 @@ export const NAV_GROUPS: NavGroup[] = [
             { kind: 'ingresses', label: 'Ingresses', icon: 'globe' },
             { kind: 'ingressclasses', label: 'Ingress Classes', icon: 'globe' },
             { kind: 'networkpolicies', label: 'Network Policies', icon: 'shield' },
+            // Not a kind the cluster serves: the forwards this app is holding
+            // open. See PORT_FORWARDS.
+            { kind: PORT_FORWARDS, label: 'Port Forwards', icon: 'forward' },
         ],
     },
     {

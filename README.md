@@ -41,6 +41,24 @@ cluster you are looking at.
   that writes it back with `⌘S`. A save that the cluster refuses -- a conflict,
   an admission webhook, a missing permission -- is reported in the API server's
   own words, and what you typed stays where it is.
+- **A shell in a container, or on a node.** The detail panel's **Shell** opens
+  a real terminal in the dock beside the logs and the editor -- resizable, with
+  a container picker and its own scrollback -- or, if you would rather, in the
+  terminal emulator you already use, with your font and your tmux. Which shell
+  it tries is a list rather than a guess (`bash`, then `sh`), because a
+  container image is free to have either, both or neither. A node has no exec
+  to open, so **Shell** on one creates the same privileged pod `kubectl debug`
+  would, chrooted into the machine, and deletes it when the terminal closes.
+  See **Settings → Terminal**.
+- **Port forwarding, listed where it can be stopped.** **Forward** on a pod or
+  a service asks three things a button cannot guess: which port, which local
+  port -- blank means any free one -- and whether to open a browser on it. A
+  Service resolves through to a pod behind it and to the port on that pod its
+  service port lands on, which is rarely the same number. Every forward appears
+  under **Network** in the sidebar with the port it is listening on and a button
+  that disconnects it, and in a **Port Forwards** tab that reconnects and
+  removes them. They are remembered between sessions as requests rather than as
+  connections: nothing dials a cluster at launch.
 - **Themes, and themes you add yourself.** Thirteen palettes ship with the app —
   from `K8s Dockside Dark` through `Deep Sea`, `Driftwood` and `Lighthouse` to
   ports of Nord and Catppuccin Mocha — chosen from a gallery in
@@ -109,6 +127,14 @@ Some details worth knowing:
   Changing `apiVersion`, `kind`, `metadata.name` or `metadata.namespace` is
   refused: the write goes to the URL of the object that was opened, so a rename
   there cannot mean what it looks like it means.
+- **A shell and a forward are streams, not requests.** Both upgrade one HTTP
+  request into a connection that stays open -- over websockets where the API
+  server speaks them, over SPDY where it or something in between does not, which
+  is the same pair `kubectl` falls back through. Both ride the connection a tab
+  already has. A shell tries each configured shell in turn and takes "no such
+  executable" as "try the next one"; while it is doing that, what you type is
+  held for whichever attempt is live, because a failed attempt's copier would
+  otherwise still be holding the keyboard.
 - **Node and dashboard figures are capacity and requests, not usage.** Live
   usage comes from the metrics API, a separate server that is not always
   installed.
@@ -138,6 +164,17 @@ because they need a cluster:
 ```sh
 K8SDOCKSIDE_TEST_KUBECONFIG=~/kubeconfig/example.config \
 K8SDOCKSIDE_TEST_CONTEXT=admin@example \
+  go test ./internal/kube/ -run Live -v
+```
+
+The exec and port-forward checks need something to open, and skip without it.
+Both go through a protocol upgrade that no unit test can stand in for:
+
+```sh
+K8SDOCKSIDE_TEST_KUBECONFIG=~/.kube/config \
+K8SDOCKSIDE_TEST_CONTEXT=admin@example \
+K8SDOCKSIDE_TEST_POD=argocd/argocd-redis-5b965dbf67-wnk4x \
+K8SDOCKSIDE_TEST_SERVICE=argocd/argocd-server \
   go test ./internal/kube/ -run Live -v
 ```
 
@@ -180,6 +217,8 @@ resourceservice.go           dashboard, resource tables, describe, editing
 themeservice.go              the theme catalogue, and the folders it is read from
 pluginservice.go             the solution plugins, and each one's per-cluster overview
 metricsservice.go            finding a cluster's Prometheus, and drawing plugin charts
+terminalservice.go           shells: the sessions open, and the external terminals
+portforwardservice.go        the tunnels open, and the ones remembered from last time
 internal/kube/               kubeconfig parsing, and the stubbed cluster data
 internal/appconfig/          the settings file
 internal/addons/             finding and merging add-on files, shared by the two below
@@ -188,10 +227,13 @@ internal/themes/builtin/     the thirteen themes, as JSON in the public format
 internal/plugins/            the plugin format, loader and overview builder
 internal/plugins/builtin/    Argo CD, Flux and Prometheus, in the public format
 internal/metrics/            PromQL, Prometheus discovery, and reading its answers
+internal/termapp/            the terminal emulators on this machine, and how to run one in it
 frontend/src/
   App.svelte                 shell: sidebar | tabs + view | detail panel | dock
   lib/state/workspace.svelte.ts   all application state
   lib/state/editor.svelte.ts      the documents open in the dock's editor
+  lib/state/terminals.svelte.ts   the shells open in the dock, and their xterm instances
+  lib/state/forwards.svelte.ts    the port forwards, live and remembered
   lib/theme/apply.ts         writing a theme's colours onto the document
   lib/plugins/               the plugin catalogue as the sidebar and overview see it
   lib/charts/                the SVG line chart, and the panel that hosts them

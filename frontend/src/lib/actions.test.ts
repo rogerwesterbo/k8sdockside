@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { actionsFor, type ActionId } from './actions';
-import { DASHBOARD, HELM_RELEASES, SETTINGS, customKindFor } from './catalogue';
+import { DASHBOARD, HELM_RELEASES, PORT_FORWARDS, SETTINGS, customKindFor } from './catalogue';
 
 /** The action ids a kind offers, which is all these tests care about. */
 function ids(kind: string): ActionId[] {
@@ -28,14 +28,16 @@ describe('what every object can do', () => {
         expect(actionsFor(HELM_RELEASES)).toEqual([]);
     });
 
-    test.each([DASHBOARD, SETTINGS])('the %s view offers nothing', (kind) => {
+    // The forwards view is a list of the app's own tunnels rather than a
+    // listing of objects, so there is nothing here to act on either.
+    test.each([DASHBOARD, SETTINGS, PORT_FORWARDS])('the %s view offers nothing', (kind) => {
         expect(actionsFor(kind)).toEqual([]);
     });
 });
 
 describe('what particular kinds can do', () => {
     test('a pod offers its logs', () => {
-        expect(ids('pods')).toEqual(['edit', 'logs', 'delete']);
+        expect(ids('pods')).toEqual(['edit', 'logs', 'shell', 'forward', 'delete']);
     });
 
     // A workload's logs are every container of every pod its selector finds,
@@ -53,23 +55,48 @@ describe('what particular kinds can do', () => {
     });
 
     test('a node can be cordoned and drained', () => {
-        expect(ids('nodes')).toEqual(['edit', 'cordon', 'drain', 'delete']);
+        expect(ids('nodes')).toEqual(['edit', 'shell', 'cordon', 'drain', 'delete']);
+    });
+
+    // A shell on a node is a privileged pod created on it rather than an exec,
+    // but from the bar it is the same button.
+    test('a node offers a shell, and nothing to forward', () => {
+        expect(ids('nodes')).toContain('shell');
+        expect(ids('nodes')).not.toContain('forward');
+    });
+
+    // A service has no containers to exec into: what it has is ports, which
+    // land on the pods behind it.
+    test('a service offers a forward but no shell', () => {
+        expect(ids('services')).toEqual(['edit', 'forward', 'delete']);
+    });
+
+    // Nothing here runs a container, so there is nothing to open a shell in.
+    test.each(['configmaps', 'secrets', 'ingresses', 'namespaces'])('a %s offers no shell', (kind) => {
+        expect(ids(kind)).not.toContain('shell');
+    });
+
+    // A CronJob's containers belong to the Jobs it creates, not to it: there is
+    // no pod of its own to attach to, though its logs gather from all of them.
+    test('a cron job offers logs but no shell', () => {
+        expect(ids('cronjobs')).toContain('logs');
+        expect(ids('cronjobs')).not.toContain('shell');
     });
 
     test.each(['deployments', 'statefulsets'])('a %s can be scaled and restarted', (kind) => {
-        expect(ids(kind)).toEqual(['edit', 'logs', 'scale', 'restart', 'delete']);
+        expect(ids(kind)).toEqual(['edit', 'logs', 'shell', 'forward', 'scale', 'restart', 'delete']);
     });
 
     // A DaemonSet runs one pod per node, so there is no replica count to set --
     // but it does roll.
     test('a daemonset restarts but does not scale', () => {
-        expect(ids('daemonsets')).toEqual(['edit', 'logs', 'restart', 'delete']);
+        expect(ids('daemonsets')).toEqual(['edit', 'logs', 'shell', 'forward', 'restart', 'delete']);
     });
 
     // A ReplicaSet has a replica count, but rolling one means nothing: the
     // Deployment above it owns the template that a restart would stamp.
     test('a replicaset scales but does not restart', () => {
-        expect(ids('replicasets')).toEqual(['edit', 'logs', 'scale', 'delete']);
+        expect(ids('replicasets')).toEqual(['edit', 'logs', 'shell', 'forward', 'scale', 'delete']);
     });
 });
 
@@ -90,13 +117,25 @@ describe('how the bar treats each one', () => {
         expect(actionsFor('deployments').find((a) => a.id === 'scale')?.form).toBe('number');
     });
 
+    // Which port, which local port and whether to open a browser are three
+    // things a button cannot guess, so a forward asks before it opens one.
+    test('a forward asks which port', () => {
+        expect(actionsFor('services').find((a) => a.id === 'forward')?.form).toBe('ports');
+    });
+
+    // A shell that needed a form filled in first is not a shell anybody would
+    // use: which shell and which terminal are settings, answered once.
+    test('a shell just opens', () => {
+        expect(actionsFor('pods').find((a) => a.id === 'shell')?.form).toBe('immediate');
+    });
+
     test('cordon and restart just happen', () => {
         expect(actionsFor('nodes').find((a) => a.id === 'cordon')?.form).toBe('immediate');
         expect(actionsFor('deployments').find((a) => a.id === 'restart')?.form).toBe('immediate');
     });
 
     test('every action has a label and an icon', () => {
-        for (const kind of ['nodes', 'deployments', 'daemonsets', 'pods']) {
+        for (const kind of ['nodes', 'deployments', 'daemonsets', 'pods', 'services']) {
             for (const action of actionsFor(kind)) {
                 expect(action.label, `${kind}/${action.id}`).not.toBe('');
                 expect(action.icon, `${kind}/${action.id}`).not.toBe('');

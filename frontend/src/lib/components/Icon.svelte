@@ -47,6 +47,11 @@
             'M10 4h4v2.5a1.5 1.5 0 1 0 3 0V4h3v4h-2.5a1.5 1.5 0 1 0 0 3H20v4h-4v-2.5a1.5 1.5 0 1 0-3 0V15H9v-4H6.5a1.5 1.5 0 1 0 0-3H9V4z',
         ],
 
+        // A terminal: a prompt and a cursor.
+        terminal: ['M4 5h16v14H4z', 'M7.5 9.5l2.5 2.5-2.5 2.5', 'M13 15h4'],
+        // A port forward: a local end, a remote end, and traffic crossing.
+        forward: ['M4 8h5v8H4z', 'M15 8h5v8h-5z', 'M9 12h6', 'M13 10l2 2-2 2'],
+
         // Interface
         'chevron-left': ['M14.5 6l-6 6 6 6'],
         'chevron-right': ['M9.5 6l6 6-6 6'],

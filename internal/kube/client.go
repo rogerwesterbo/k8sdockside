@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 
@@ -46,6 +47,12 @@ type clusterClient struct {
 	mapper meta.ResettableRESTMapper
 	disco  discovery.CachedDiscoveryInterface
 	host   string
+	// cfg is the connection itself rather than a client built from it, kept
+	// because two things here do not go through a client at all: an exec and a
+	// port-forward both upgrade a single HTTP request into a stream, and the
+	// dialer that does it is built from the config -- credentials, TLS and
+	// proxy included -- not from the typed or dynamic client above.
+	cfg *rest.Config
 }
 
 // newClusterClient builds the live clients for one kubeconfig context.
@@ -93,6 +100,7 @@ func newClusterClient(kc Context) (*clusterClient, error) {
 		mapper:  restmapper.NewDeferredDiscoveryRESTMapper(cached),
 		disco:   cached,
 		host:    cfg.Host,
+		cfg:     cfg,
 	}, nil
 }
 

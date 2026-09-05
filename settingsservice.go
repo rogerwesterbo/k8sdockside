@@ -101,8 +101,8 @@ func (s *SettingsService) SetLayout(layout appconfig.Layout) (appconfig.Settings
 }
 
 // SetPreferences saves the app-wide preferences: theme, density, font size,
-// whether tabs are restored at launch, and whether removing a kubeconfig
-// source asks first.
+// whether tabs are restored at launch, whether removing a kubeconfig source
+// asks first, and how a shell opens.
 func (s *SettingsService) SetPreferences(prefs appconfig.Preferences) (appconfig.Settings, error) {
 	return s.store.SetPreferences(prefs)
 }

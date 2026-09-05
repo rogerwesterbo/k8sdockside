@@ -5,9 +5,18 @@
 // line rather than a branch. Nothing here calls a cluster: it decides which
 // buttons are drawn, and the store beside it does the work.
 
-import { DASHBOARD, HELM_RELEASES, SETTINGS } from './catalogue';
+import { DASHBOARD, HELM_RELEASES, PORT_FORWARDS, SETTINGS } from './catalogue';
 
-export type ActionId = 'edit' | 'logs' | 'scale' | 'restart' | 'cordon' | 'drain' | 'delete';
+export type ActionId =
+    | 'edit'
+    | 'logs'
+    | 'shell'
+    | 'forward'
+    | 'scale'
+    | 'restart'
+    | 'cordon'
+    | 'drain'
+    | 'delete';
 
 /**
  * How choosing an action behaves.
@@ -15,7 +24,7 @@ export type ActionId = 'edit' | 'logs' | 'scale' | 'restart' | 'cordon' | 'drain
  * `immediate` runs at once, `confirm` replaces the bar with a question naming
  * the object, and `number` asks for a replica count first.
  */
-export type ActionForm = 'immediate' | 'confirm' | 'number';
+export type ActionForm = 'immediate' | 'confirm' | 'number' | 'ports';
 
 export interface Action {
     id: ActionId;
@@ -28,6 +37,18 @@ export interface Action {
 
 const EDIT: Action = { id: 'edit', label: 'Edit', icon: 'edit', form: 'immediate' };
 const LOGS: Action = { id: 'logs', label: 'Logs', icon: 'rows', form: 'immediate' };
+/**
+ * A terminal in the object. Immediate: which shell, and which of the settings'
+ * terminals opens it, are answered from the preferences rather than asked here
+ * -- a shell you have to fill in a form for is not a shell you would use.
+ */
+const SHELL: Action = { id: 'shell', label: 'Shell', icon: 'terminal', form: 'immediate' };
+/**
+ * A local port into the object. It asks first, because there are three answers
+ * it cannot guess: which port, on which local port, and whether to open a
+ * browser on it.
+ */
+const FORWARD: Action = { id: 'forward', label: 'Forward', icon: 'forward', form: 'ports' };
 const SCALE: Action = { id: 'scale', label: 'Scale', icon: 'scale', form: 'number' };
 const RESTART: Action = { id: 'restart', label: 'Restart', icon: 'repeat', form: 'immediate' };
 /** Its label follows the node: a cordoned one offers to be uncordoned instead. */
@@ -52,6 +73,44 @@ const LOGGABLE = [
     'cronjobs',
 ];
 
+/**
+ * The kinds a shell can be opened in.
+ *
+ * A pod runs containers, and a workload resolves to one of its pods -- the same
+ * reach Logs has, and for the same reason. A node is here too and is a
+ * different thing entirely: there is no exec against a machine, so it is a
+ * privileged pod created on it and chrooted into its filesystem. See
+ * internal/kube/nodeshell.go.
+ */
+const SHELLABLE = [
+    'pods',
+    'deployments',
+    'statefulsets',
+    'daemonsets',
+    'replicasets',
+    'replicationcontrollers',
+    'jobs',
+    'nodes',
+];
+
+/**
+ * The kinds a port can be forwarded from.
+ *
+ * A Service is the common case and the one that needs the most work behind it:
+ * its ports exist only in the cluster's routing, so forwarding one means
+ * finding a pod behind it and the port on that pod the service port lands on.
+ * A workload forwards through one of its pods, exactly as a shell does.
+ */
+const FORWARDABLE = [
+    'pods',
+    'services',
+    'deployments',
+    'statefulsets',
+    'daemonsets',
+    'replicasets',
+    'replicationcontrollers',
+];
+
 /** The kinds that carry a replica count, which is what Scale sets. */
 const SCALABLE = ['deployments', 'statefulsets', 'replicasets', 'replicationcontrollers'];
 
@@ -69,7 +128,7 @@ const ROLLABLE = ['deployments', 'statefulsets', 'daemonsets'];
  * in the app; a Helm release is a Secret the backend decodes, so deleting "it"
  * would not mean what it appears to.
  */
-const NOT_AN_OBJECT = [DASHBOARD, SETTINGS, HELM_RELEASES];
+const NOT_AN_OBJECT = [DASHBOARD, SETTINGS, HELM_RELEASES, PORT_FORWARDS];
 
 /** The actions offered for one kind, in the order the bar draws them. */
 export function actionsFor(kind: string): Action[] {
@@ -77,6 +136,8 @@ export function actionsFor(kind: string): Action[] {
 
     const out: Action[] = [EDIT];
     if (LOGGABLE.includes(kind)) out.push(LOGS);
+    if (SHELLABLE.includes(kind)) out.push(SHELL);
+    if (FORWARDABLE.includes(kind)) out.push(FORWARD);
     if (SCALABLE.includes(kind)) out.push(SCALE);
     if (ROLLABLE.includes(kind)) out.push(RESTART);
     if (kind === 'nodes') out.push(CORDON, DRAIN);

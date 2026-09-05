@@ -21,6 +21,38 @@ export interface ConfigFile {
     error: string;
 }
 
+/**
+ * How a shell opens, resolved. Every field here has a value: the store fills
+ * in what a settings file does not say, and the fallbacks below only cover a
+ * service call that failed before it reached the store.
+ */
+export interface TerminalSettings {
+    /** 'app' opens the terminal in the dock, 'external' the user's own. */
+    mode: 'app' | 'external';
+    /** The id of the external terminal to use; empty means this machine's default. */
+    external: string;
+    /** The shells tried in a container, in order, until one of them runs. */
+    shells: string[];
+    /** The image a node shell's debug pod runs, and where it is created. */
+    nodeImage: string;
+    nodeNamespace: string;
+    fontSize: number;
+    scrollback: number;
+}
+
+/** One forward the user set up, as it is remembered between sessions. */
+export interface SavedForward {
+    id: string;
+    contextId: string;
+    kind: string;
+    namespace: string;
+    name: string;
+    remotePort: number;
+    localPort: number;
+    random: boolean;
+    browser: boolean;
+}
+
 /** The persisted user preferences. */
 export interface Settings {
     manualFiles: string[];
@@ -61,7 +93,15 @@ export interface Settings {
         showLineNumbers: boolean;
         /** How far back a metrics chart looks, in minutes. */
         metricsRange: number;
+        /** How a shell opens, and what it opens with. */
+        terminal: TerminalSettings;
     };
+    /**
+     * The forwards the user set up. The live state of each lives in the
+     * forwards store, which the backend feeds; this is only what survives a
+     * restart, and nothing in the app reads it directly.
+     */
+    portForwards: SavedForward[];
     layout: {
         detailDock: string;
         detailSize: number;
@@ -156,7 +196,31 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // Zero from the store means never chosen. An hour is long enough to
             // show a rollout and short enough to still show a spike.
             metricsRange: settings.preferences?.metricsRange || 60,
+            terminal: {
+                // 'app' is the answer that always works: the terminal in the
+                // dock needs nothing installed on this machine.
+                mode: (settings.preferences?.terminal?.mode || 'app') as 'app' | 'external',
+                // Deliberately kept as written even when nothing on this
+                // machine answers to it -- see appconfig.Terminal.External.
+                external: settings.preferences?.terminal?.external ?? '',
+                shells: [...(settings.preferences?.terminal?.shells ?? ['bash', 'sh'])],
+                nodeImage: settings.preferences?.terminal?.nodeImage || 'busybox',
+                nodeNamespace: settings.preferences?.terminal?.nodeNamespace || 'default',
+                fontSize: settings.preferences?.terminal?.fontSize || 12,
+                scrollback: settings.preferences?.terminal?.scrollback || 5000,
+            },
         },
+        portForwards: (settings.portForwards ?? []).map((forward) => ({
+            id: forward.id,
+            contextId: forward.contextId,
+            kind: forward.kind,
+            namespace: forward.namespace,
+            name: forward.name,
+            remotePort: forward.remotePort,
+            localPort: forward.localPort,
+            random: forward.random,
+            browser: forward.browser,
+        })),
         layout: {
             ...settings.layout,
             // Preserved as null rather than defaulted to []: the two mean

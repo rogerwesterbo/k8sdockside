@@ -1,6 +1,7 @@
 <!--
   The dock at the foot of the window: a strip of tabs that is always there, and
-  under it whatever the selected one is showing -- today, the YAML editor.
+  under it whatever the selected one is showing -- an object's YAML, its logs,
+  or a shell running in it.
 
   It belongs to the window rather than to the view above it. Switching clusters,
   opening another tab or closing every tab there is leaves the dock exactly as
@@ -19,6 +20,7 @@
     import Icon from './Icon.svelte';
     import LogView from './LogView.svelte';
     import TabStrip, { type StripTab } from './TabStrip.svelte';
+    import TerminalView from './TerminalView.svelte';
     import YamlEditor from './YamlEditor.svelte';
 
     /** Below this the editor shows its toolbar and three lines, which is not an editor. */
@@ -43,7 +45,7 @@
                 id: tab.id,
                 title: tab.title,
                 subtitle: contextName(tab.contextId),
-                icon: tab.view === 'logs' ? 'rows' : 'edit',
+                icon: tab.view === 'logs' ? 'rows' : tab.view === 'shell' ? 'terminal' : 'edit',
                 color: workspace.colorOf(tab.contextId),
                 hint: `${singularFor(tab.kind)} ${tab.name}${tab.namespace ? ` in ${tab.namespace}` : ''} — ${contextName(tab.contextId)}`,
                 // Only an editor has unsaved work; closing a log view loses
@@ -124,7 +126,7 @@
         activeId={workspace.activeDockTabId}
         label="Dock"
         rule="above"
-        empty="Select a resource, then Edit in the details panel to open its YAML here."
+        empty="Select a resource, then Edit, Logs or Shell in the details panel to open it here."
         onactivate={(id) => workspace.activateDockTab(id)}
         onclose={(id) => workspace.closeDockTab(id)}
         onmove={(from, to) => workspace.moveDockTab(from, to)}
@@ -137,6 +139,8 @@
             {#key active.id}
                 {#if active.view === 'logs'}
                     <LogView tab={active} />
+                {:else if active.view === 'shell'}
+                    <TerminalView tab={active} />
                 {:else}
                     <YamlEditor tab={active} />
                 {/if}

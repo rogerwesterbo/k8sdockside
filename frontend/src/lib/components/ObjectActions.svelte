@@ -14,6 +14,7 @@
     import { singularFor } from '../catalogue';
     import { actionsFor, type Action, type ActionId } from '../actions';
     import { actions } from '../state/actions.svelte';
+    import { forwards, type PortOption } from '../state/forwards.svelte';
     import { workspace, type DetailTarget } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
 
@@ -26,10 +27,30 @@
     let facts = $derived(actions.stateOf(object));
     let drain = $derived(actions.drainOf(object));
 
-    /** The action waiting on an answer -- a confirmation or a number -- if any. */
+    /** The action waiting on an answer -- a confirmation, a number, a port -- if any. */
     let asking = $state<ActionId | null>(null);
     let replicas = $state(0);
     let busy = $state(false);
+
+    /**
+     * What a forward could be opened on, read from the object when the form is
+     * opened. A pod or a workload answers with its container ports, a service
+     * with its own -- which are not the same thing, and the difference is why
+     * this is a list from the cluster rather than a number field.
+     */
+    let ports = $state<PortOption[]>([]);
+    let portsError = $state('');
+    let loadingPorts = $state(false);
+    /**
+     * The chosen remote port, and the local one.
+     *
+     * Both are nullable because that is what a number field bound to an empty
+     * box holds, and for the local one empty is a real answer: it means "any
+     * free port", which is what the app asks for unless told otherwise.
+     */
+    let remotePort = $state<number | null>(null);
+    let localPort = $state<number | null>(null);
+    let openBrowser = $state(true);
     /** The confirmation's safe button, focused so a stray Enter cannot destroy. */
     let cancelEl = $state<HTMLButtonElement | null>(null);
 
@@ -41,6 +62,8 @@
     $effect(() => {
         const ref = { ...object };
         asking = null;
+        ports = [];
+        portsError = '';
         void actions.load(ref);
     });
 
@@ -66,6 +89,15 @@
         }
         if (action.id === 'logs') {
             workspace.openLogs(object);
+            return;
+        }
+        if (action.id === 'shell') {
+            workspace.openShell(object);
+            return;
+        }
+        if (action.form === 'ports') {
+            asking = action.id;
+            void loadPorts();
             return;
         }
         if (action.form === 'immediate') {
@@ -118,6 +150,75 @@
         }
     }
 
+    /**
+     * Reads the ports this object could be forwarded from.
+     *
+     * A failure is shown in the form rather than swallowed: "this service
+     * selects no pods" is the answer to why there is nothing to choose, and it
+     * is more use than an empty list.
+     */
+    async function loadPorts(): Promise<void> {
+        loadingPorts = true;
+        portsError = '';
+        try {
+            const found = await forwards.ports(object);
+            ports = found;
+            // The first port is the one almost always wanted, and a form that
+            // opens on a chosen value is one field shorter to fill in.
+            remotePort = found[0]?.port ?? null;
+            localPort = null;
+            openBrowser = true;
+        } catch (err) {
+            portsError = err instanceof Error ? err.message : String(err);
+        } finally {
+            loadingPorts = false;
+        }
+    }
+
+    /**
+     * Opens the forward the form describes.
+     *
+     * The local port is left empty by default, which means "any free one" --
+     * the port is normally reached by the link the app puts beside it, and
+     * choosing one by hand only matters when something else already expects it.
+     */
+    async function forward(): Promise<void> {
+        const remote = remotePort ?? 0;
+        // Empty means "any free port", which is the whole reason this field is
+        // allowed to be empty.
+        const local = localPort ?? 0;
+        if (remote <= 0 || remote > 65535) {
+            workspace.fail(`${remote} is not a port`);
+            return;
+        }
+        if (local < 0 || local > 65535) {
+            workspace.fail(`${local} is not a port`);
+            return;
+        }
+
+        busy = true;
+        try {
+            const opened = await forwards.start(object, remote, local, openBrowser);
+            workspace.inform(
+                `Forwarding localhost:${opened.localPort} to ${object.name} on ${remote}`,
+            );
+            asking = null;
+        } catch (err) {
+            workspace.fail(err instanceof Error ? err.message : String(err));
+        } finally {
+            busy = false;
+        }
+    }
+
+    /** How one port reads in the picker: its number, name and where it lands. */
+    function portLabel(port: PortOption): string {
+        const parts = [String(port.port)];
+        if (port.name) parts.push(port.name);
+        if (port.target && port.target !== String(port.port)) parts.push(`→ ${port.target}`);
+        if (port.protocol && port.protocol !== 'TCP') parts.push(port.protocol);
+        return parts.join(' · ');
+    }
+
     /** The question each asked-for action puts. */
     function question(id: ActionId): string {
         if (id === 'drain') return `Drain ${subject}? Everything running on it will be moved.`;
@@ -137,6 +238,58 @@
                 <button bind:this={cancelEl} class="plain" onclick={() => (asking = null)}>Cancel</button>
                 <button class="go" class:danger={asked.tone === 'danger'} disabled={busy} onclick={() => perform(asked.id)}>
                     {asked.label}
+                </button>
+            </div>
+        {:else if asked && asked.form === 'ports'}
+            {#if loadingPorts}
+                <p class="question">Reading {subject}'s ports…</p>
+            {:else if portsError}
+                <p class="question failed">{portsError}</p>
+            {:else if ports.length === 0}
+                <p class="question">
+                    {subject} declares no ports. You can still forward one by typing it.
+                </p>
+            {/if}
+
+            {#if !loadingPorts && !portsError}
+                <label class="field">
+                    Port
+                    {#if ports.length > 0}
+                        <select bind:value={remotePort}>
+                            {#each ports as port (port.port + port.name)}
+                                <option value={port.port}>{portLabel(port)}</option>
+                            {/each}
+                        </select>
+                    {:else}
+                        <input type="number" min="1" max="65535" bind:value={remotePort} />
+                    {/if}
+                </label>
+
+                <label class="field">
+                    Local
+                    <input
+                        type="number"
+                        min="0"
+                        max="65535"
+                        placeholder="any free port"
+                        bind:value={localPort}
+                    />
+                </label>
+
+                <label class="check">
+                    <input type="checkbox" bind:checked={openBrowser} />
+                    Open a browser
+                </label>
+            {/if}
+
+            <div class="answers">
+                <button bind:this={cancelEl} class="plain" onclick={() => (asking = null)}>Cancel</button>
+                <button
+                    class="go"
+                    disabled={busy || loadingPorts || !remotePort || remotePort <= 0}
+                    onclick={() => forward()}
+                >
+                    Forward
                 </button>
             </div>
         {:else if asked && asked.form === 'number'}
@@ -279,6 +432,41 @@
         gap: 8px;
         font-size: 12px;
         color: var(--text-dim);
+    }
+
+    .field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-dim);
+        white-space: nowrap;
+    }
+
+    .field select,
+    .field input {
+        height: 24px;
+        padding: 0 6px;
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--border);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        max-width: 170px;
+    }
+
+    .check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-dim);
+        white-space: nowrap;
+    }
+
+    .question.failed {
+        color: var(--error);
     }
 
     .scale input {

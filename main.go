@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main starts the app: it opens the settings file, wires up the eight services
+// main starts the app: it opens the settings file, wires up the ten services
 // the frontend calls, and shows the main window.
 func main() {
 	// The settings store holds the user's kubeconfig paths, context aliases and
@@ -43,6 +43,12 @@ func main() {
 	// cluster through the API server, so it rides the connection a tab already
 	// has rather than opening its own.
 	graphs := NewMetricsService(settings, configs, resources.watcher, solutions)
+	// Terminals and port forwards borrow the same watcher again. Both are
+	// long-lived streams rather than requests -- an exec and a forward each
+	// hold one connection open for as long as the window shows them -- so both
+	// keep their own registry of what is open, the way the log service does.
+	shells := NewTerminalService(configs, resources.watcher, settings)
+	tunnels := NewPortForwardService(configs, resources.watcher, settings)
 
 	app := application.New(application.Options{
 		Name:        "K8s Dockside",
@@ -56,6 +62,8 @@ func main() {
 			application.NewService(NewThemeService(settings)),
 			application.NewService(solutions),
 			application.NewService(graphs),
+			application.NewService(shells),
+			application.NewService(tunnels),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

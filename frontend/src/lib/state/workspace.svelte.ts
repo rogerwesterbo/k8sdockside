@@ -13,6 +13,7 @@ import {
     MetricsService,
     PluginService,
     SettingsService,
+    TerminalService,
     ThemeService,
 } from '../../../bindings/github.com/roger/k8sdockside';
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
@@ -20,7 +21,9 @@ import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/
 import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
 import { changes } from './changes.svelte';
 import { editors } from './editor.svelte';
+import { forwards } from './forwards.svelte';
 import { logs } from './logs.svelte';
+import { terminals } from './terminals.svelte';
 import {
     DASHBOARD,
     DEFAULT_COLLAPSED_GROUPS,
@@ -61,11 +64,11 @@ export interface DetailTarget {
 }
 
 /**
- * What a dock tab shows: an object as YAML, or its logs. Naming the view rather
- * than assuming it is what let the second one arrive without the strip, the
- * store or the settings file changing shape.
+ * What a dock tab shows: an object as YAML, its logs, or a shell in it. Naming
+ * the view rather than assuming it is what let the second and third arrive
+ * without the strip, the store or the settings file changing shape.
  */
-export type DockView = 'edit' | 'logs';
+export type DockView = 'edit' | 'logs' | 'shell';
 
 /**
  * One tab in the bottom dock.
@@ -161,7 +164,17 @@ function defaultSettings(): Settings {
             showKubeconfigNames: false,
             showLineNumbers: true,
             metricsRange: 60,
+            terminal: {
+                mode: 'app',
+                external: '',
+                shells: ['bash', 'sh'],
+                nodeImage: 'busybox',
+                nodeNamespace: 'default',
+                fontSize: 12,
+                scrollback: 5000,
+            },
         },
+        portForwards: [],
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
 }
@@ -491,6 +504,10 @@ class Workspace {
         // round. The plugins go with it because the sidebar draws their rows
         // and the tab bar titles their tabs, both before any cluster answers.
         await Promise.all([this.loadThemes(), this.loadPlugins()]);
+        // The forwards from last session, as rows waiting to be reconnected.
+        // Nothing is dialled here: see PortForwardService for why launching the
+        // app must not open every tunnel in the list.
+        void forwards.load();
         await this.sync({ restoreTabs: true });
         this.loaded = true;
     }
@@ -1053,6 +1070,49 @@ class Workspace {
     }
 
     /**
+     * Opens a shell on one object -- in the dock, or in the user's own terminal
+     * if that is what they have chosen.
+     *
+     * The choice is read here rather than at the button, so that every way of
+     * asking for a shell honours it: the action bar, the terminal view's own
+     * "External", and whatever asks next.
+     */
+    openShell(target: DetailTarget): void {
+        if (this.terminal.mode === 'external') {
+            void this.openExternalShell(target);
+            return;
+        }
+        this.openDockTab('shell', target);
+    }
+
+    /**
+     * Opens a shell in the terminal emulator installed on this machine.
+     *
+     * What runs over there is kubectl: this app's connection to a cluster lives
+     * in its own process and cannot be handed to another one. A machine without
+     * kubectl is told so plainly, because the fix is a thing the user can do.
+     */
+    async openExternalShell(target: DetailTarget): Promise<void> {
+        try {
+            if (target.kind === 'nodes') {
+                await TerminalService.LaunchNode(target.contextId, target.name);
+            } else {
+                await TerminalService.Launch(
+                    target.contextId,
+                    target.kind,
+                    target.namespace,
+                    target.name,
+                    '',
+                    '',
+                );
+            }
+            this.inform(`Opened a shell on ${target.name} in your terminal`);
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
+    /**
      * Opens one view onto an object in the dock, or focuses it if it is there.
      *
      * The view is part of a tab's id, so an object's YAML and its logs are two
@@ -1140,6 +1200,7 @@ class Workspace {
             // object the cluster has moved past, or scrollback from a stream
             // that closed hours ago.
             if (tab.view === 'logs') logs.forget(tab.id);
+            else if (tab.view === 'shell') terminals.forget(tab.id);
             else editors.forget(tab.id);
         }
 
@@ -1830,6 +1891,27 @@ class Workspace {
 
     setShowLineNumbers(showLineNumbers: boolean): void {
         this.updatePreferences({ showLineNumbers });
+    }
+
+    // ----- terminals ------------------------------------------------------
+
+    /** How a shell opens, and what it opens with. */
+    terminal = $derived(this.settings.preferences.terminal);
+
+    /** The built-in terminal's type size and how many lines it keeps. */
+    terminalFontSize = $derived(this.settings.preferences.terminal.fontSize);
+    terminalScrollback = $derived(this.settings.preferences.terminal.scrollback);
+
+    /**
+     * Changes part of the terminal settings.
+     *
+     * A patch rather than the whole record, because the settings view edits one
+     * field at a time and every one of them is written through the preferences
+     * writer the rest of this block uses -- one writer for the section, which is
+     * what stops two of them undoing each other.
+     */
+    setTerminal(patch: Partial<Settings['preferences']['terminal']>): void {
+        this.updatePreferences({ terminal: { ...this.settings.preferences.terminal, ...patch } });
     }
 
     /** Sets the window every chart on screen covers, in minutes. */

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/roger/k8sdockside/internal/themes"
@@ -106,6 +107,102 @@ type Layout struct {
 	CollapsedGroups []string `json:"collapsedGroups"`
 }
 
+// Terminal is how the app opens a shell, and what it opens it with.
+//
+// It is one record rather than five loose preferences because the fields only
+// make sense together: an external terminal ignores the font size, and the node
+// image is only ever read on the way to creating a debug pod. The frontend
+// reads it whole and the backend reads it whole.
+type Terminal struct {
+	// Mode is TerminalInApp or TerminalExternal. Empty means the built-in one,
+	// which is the answer that always works: it needs nothing installed.
+	Mode string `json:"mode"`
+	// External is the id of the terminal emulator to launch when Mode is
+	// external -- one of the ids internal/termapp knows. Empty means "whatever
+	// this machine uses by default", which is deliberately not resolved to a
+	// concrete id on save: a settings file synced between two machines should
+	// go on meaning "the default here" on both of them.
+	External string `json:"external"`
+	// Shells are the commands tried in a container, in order, until one of them
+	// runs. A container image is free to have bash, only sh, or neither, and
+	// there is no way to know which without asking it.
+	Shells []string `json:"shells"`
+	// NodeImage is the image the node shell's debug pod runs, and NodeNamespace
+	// is where it is created. Both are settings because a cluster can force
+	// them: an air-gapped one mirrors its own images, and a namespace enforcing
+	// the restricted pod security standard will not take a privileged pod.
+	NodeImage     string `json:"nodeImage"`
+	NodeNamespace string `json:"nodeNamespace"`
+	// FontSize is the built-in terminal's type size in px, and Scrollback how
+	// many lines it keeps.
+	FontSize   int `json:"fontSize"`
+	Scrollback int `json:"scrollback"`
+}
+
+// The values Terminal.Mode may take. Strings rather than an enum, for the
+// reason Density is: the settings file stays readable, and a value from a
+// hand-edited file normalises back to the default rather than failing to parse.
+const (
+	TerminalInApp    = "app"
+	TerminalExternal = "external"
+)
+
+// Terminal defaults. The shells are bash for the comfort of it and sh because
+// a container that has anything has sh; the image is busybox because it is tiny
+// and mirrored everywhere, and the namespace follows kubectl debug.
+//
+// They are stated here rather than taken from internal/kube so that this
+// package goes on knowing nothing about Kubernetes; kube has the same fallback
+// for a caller that hands it nothing.
+var defaultShells = []string{"bash", "sh"}
+
+const (
+	DefaultNodeImage     = "busybox"
+	DefaultNodeNamespace = "default"
+	DefaultTermFontSize  = 12
+	DefaultScrollback    = 5000
+)
+
+// The bounds a hand-edited file is held to. A one-pixel terminal and a million
+// lines of scrollback are both ways of making the app unusable from a text
+// editor.
+const (
+	MinTermFontSize = 8
+	MaxTermFontSize = 32
+	MinScrollback   = 200
+	MaxScrollback   = 200000
+)
+
+// PortForward is one tunnel the user set up, remembered so the list survives a
+// restart.
+//
+// What is remembered is the request, not the connection: nothing here can be
+// live across a restart, and the app deliberately does not reconnect on its own
+// at launch -- that would mean dialling every cluster in this list on startup,
+// including the ones behind a VPN nobody is on yet. They come back listed and
+// disconnected, with a button.
+type PortForward struct {
+	// ID is the app's own handle for the forward, kept so that a reconnect is
+	// the same row rather than a new one.
+	ID        string `json:"id"`
+	ContextID string `json:"contextId"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// RemotePort is what the user chose: a container port on a pod, a service
+	// port on a Service.
+	RemotePort int `json:"remotePort"`
+	// LocalPort is the port it last came up on, so a forward that was given a
+	// port at random still comes back on the one you bookmarked.
+	LocalPort int `json:"localPort"`
+	// Random records that the user asked for any free port rather than that
+	// one. It is what makes falling back to another port acceptable when the
+	// remembered one is taken.
+	Random bool `json:"random"`
+	// Browser records that this forward opens a browser when it comes up.
+	Browser bool `json:"browser"`
+}
+
 // Preferences are the app-wide choices that belong to neither one context nor
 // the window's arrangement: how the app looks, and what it does on its own
 // without being asked. They are kept apart from Layout deliberately -- Layout
@@ -165,6 +262,10 @@ type Preferences struct {
 	// before this field existed would unmarshal to false and quietly take the
 	// gutter away from everyone who already had it.
 	ShowLineNumbers *bool `json:"showLineNumbers"`
+	// Terminal is how a shell opens: in the dock or in the terminal emulator
+	// the user already has, which shell to try, and what a node shell is made
+	// of. See Terminal.
+	Terminal Terminal `json:"terminal"`
 }
 
 // Settings is the whole persisted file.
@@ -205,6 +306,11 @@ type Settings struct {
 	Dock        Dock        `json:"dock"`
 	Layout      Layout      `json:"layout"`
 	Preferences Preferences `json:"preferences"`
+	// PortForwards are the tunnels the user set up, remembered as requests
+	// rather than as connections. They sit here rather than in Preferences for
+	// the reason ManualFolders does: this is a list of things, not a choice
+	// about how the app behaves.
+	PortForwards []PortForward `json:"portForwards"`
 }
 
 // Defaults returns a settings value that is safe to use before anything has
@@ -221,7 +327,25 @@ func Defaults() Settings {
 		TabOrder:        []TabRef{},
 		Dock:            Dock{Size: 320, Tabs: []DockTabRef{}},
 		Layout:          Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
-		Preferences:     Preferences{Theme: themes.DefaultID, Density: DensityComfortable},
+		Preferences: Preferences{
+			Theme:    themes.DefaultID,
+			Density:  DensityComfortable,
+			Terminal: DefaultTerminal(),
+		},
+		PortForwards: []PortForward{},
+	}
+}
+
+// DefaultTerminal is the terminal settings a fresh install starts with: the
+// built-in terminal, bash then sh, and busybox in `default` for a node shell.
+func DefaultTerminal() Terminal {
+	return Terminal{
+		Mode:          TerminalInApp,
+		Shells:        slices.Clone(defaultShells),
+		NodeImage:     DefaultNodeImage,
+		NodeNamespace: DefaultNodeNamespace,
+		FontSize:      DefaultTermFontSize,
+		Scrollback:    DefaultScrollback,
 	}
 }
 
@@ -665,6 +789,24 @@ func (s *Store) flush() error {
 
 // normalise fills in anything a hand-edited or older settings file left out, so
 // the rest of the app never has to check for zero values.
+// PortForwards returns the forwards the user has set up.
+func (s *Store) PortForwards() []PortForward {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.PortForwards)
+}
+
+// SetPortForwards replaces the remembered list.
+//
+// The whole list rather than one entry: the service that owns them holds the
+// live state and writes what it has, and an add-one/remove-one pair would give
+// two writers to a list with one owner.
+func (s *Store) SetPortForwards(forwards []PortForward) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.PortForwards = slices.Clone(forwards)
+	})
+}
+
 func normalise(s Settings) Settings {
 	if s.ManualFiles == nil {
 		s.ManualFiles = []string{}
@@ -736,10 +878,63 @@ func normalise(s Settings) Settings {
 	if s.Preferences.MetricsRange < 0 || s.Preferences.MetricsRange > MaxMetricsRange {
 		s.Preferences.MetricsRange = 0
 	}
+	s.Preferences.Terminal = normaliseTerminal(s.Preferences.Terminal)
+	if s.PortForwards == nil {
+		s.PortForwards = []PortForward{}
+	}
 	// RestoreTabs and ShowLineNumbers are deliberately not defaulted: nil is a
 	// value in its own right for both, meaning "never chosen", and the frontend
 	// resolves each to true.
 	return s
+}
+
+// normaliseTerminal fills in what a settings file does not say and repairs what
+// it says wrongly.
+//
+// Everything here has a working default, so an older file -- which has none of
+// these fields at all -- comes back with a terminal that opens in the dock and
+// tries bash then sh, which is what somebody upgrading into this feature would
+// expect it to do without being asked anything.
+//
+// The one field deliberately left alone is External: it names a terminal that
+// may not be installed on *this* machine, and blanking it here would mean a
+// settings file synced between a desktop with kitty and a laptop without it
+// lost the choice on every sync. An id nothing answers to falls back at the
+// point it is launched instead.
+func normaliseTerminal(t Terminal) Terminal {
+	d := DefaultTerminal()
+	switch t.Mode {
+	case TerminalInApp, TerminalExternal:
+	default:
+		t.Mode = d.Mode
+	}
+
+	shells := make([]string, 0, len(t.Shells))
+	for _, shell := range t.Shells {
+		if trimmed := strings.TrimSpace(shell); trimmed != "" && !slices.Contains(shells, trimmed) {
+			shells = append(shells, trimmed)
+		}
+	}
+	// A list with nothing in it is a shell that can never open, which is not a
+	// choice anybody makes on purpose.
+	if len(shells) == 0 {
+		shells = slices.Clone(d.Shells)
+	}
+	t.Shells = shells
+
+	if strings.TrimSpace(t.NodeImage) == "" {
+		t.NodeImage = d.NodeImage
+	}
+	if strings.TrimSpace(t.NodeNamespace) == "" {
+		t.NodeNamespace = d.NodeNamespace
+	}
+	if t.FontSize < MinTermFontSize || t.FontSize > MaxTermFontSize {
+		t.FontSize = d.FontSize
+	}
+	if t.Scrollback < MinScrollback || t.Scrollback > MaxScrollback {
+		t.Scrollback = d.Scrollback
+	}
+	return t
 }
 
 func clone(s Settings) Settings {
@@ -764,6 +959,8 @@ func clone(s Settings) Settings {
 		numbers := *s.Preferences.ShowLineNumbers
 		out.Preferences.ShowLineNumbers = &numbers
 	}
+	out.Preferences.Terminal.Shells = slices.Clone(s.Preferences.Terminal.Shells)
+	out.PortForwards = slices.Clone(s.PortForwards)
 	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
 	for k, v := range s.Contexts {
 		v.CollapsedGroups = slices.Clone(v.CollapsedGroups)

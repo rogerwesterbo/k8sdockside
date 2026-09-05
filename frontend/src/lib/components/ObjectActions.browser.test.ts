@@ -55,6 +55,27 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         List: vi.fn().mockResolvedValue({ themes: [], dir: '', folders: [], problems: [] }),
         Tokens: vi.fn().mockResolvedValue([]),
     },
+    TerminalService: {
+        Containers: vi.fn().mockResolvedValue([]),
+        Open: vi.fn().mockResolvedValue({ id: 'term-1', namespace: 'default', pod: 'web', container: 'app', node: '' }),
+        OpenNode: vi.fn().mockResolvedValue({ id: 'term-1', namespace: 'default', pod: '', container: '', node: 'wrkr01' }),
+        Send: vi.fn(),
+        Resize: vi.fn(),
+        Close: vi.fn(),
+        Externals: vi.fn().mockResolvedValue({ terminals: [], kubectl: '', reason: '' }),
+        Launch: vi.fn().mockResolvedValue(undefined),
+        LaunchNode: vi.fn().mockResolvedValue(undefined),
+    },
+    PortForwardService: {
+        List: vi.fn().mockResolvedValue([]),
+        Ports: vi.fn().mockResolvedValue([]),
+        Start: vi.fn().mockResolvedValue({ id: 'pf-1', localPort: 51234, state: 'active' }),
+        Reconnect: vi.fn().mockResolvedValue({ id: 'pf-1', localPort: 51234, state: 'active' }),
+        Stop: vi.fn(),
+        Forget: vi.fn().mockResolvedValue(undefined),
+        Open: vi.fn().mockResolvedValue(undefined),
+        URL: vi.fn().mockResolvedValue(''),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
@@ -68,17 +89,20 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 
 const { workspace } = await import('../state/workspace.svelte');
 const { actions } = await import('../state/actions.svelte');
-const { ActionService } = await import('../../../bindings/github.com/roger/k8sdockside');
+const { ActionService, PortForwardService, TerminalService } = await import(
+    '../../../bindings/github.com/roger/k8sdockside'
+);
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const POD = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
 const NODE = { contextId: PROD, kind: 'nodes', namespace: '', name: 'wrkr01' };
 const DEPLOYMENT = { contextId: PROD, kind: 'deployments', namespace: 'default', name: 'web' };
+const SERVICE = { contextId: PROD, kind: 'services', namespace: 'web', name: 'api' };
 
 const settle = () => new Promise((r) => setTimeout(r, 60));
 
 beforeEach(() => {
-    for (const ref of [POD, NODE, DEPLOYMENT]) actions.forget(ref);
+    for (const ref of [POD, NODE, DEPLOYMENT, SERVICE]) actions.forget(ref);
     workspace.closeDetail();
     workspace.notice = null;
     vi.mocked(ActionService.ObjectState).mockReset().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] });
@@ -87,6 +111,25 @@ beforeEach(() => {
     vi.mocked(ActionService.Cordon).mockReset().mockResolvedValue(undefined);
     vi.mocked(ActionService.Drain).mockReset().mockResolvedValue('drain-1');
     vi.mocked(ActionService.CancelDrain).mockReset();
+    vi.mocked(PortForwardService.Ports).mockReset().mockResolvedValue([]);
+    vi.mocked(PortForwardService.Start).mockReset().mockResolvedValue({
+        id: 'pf-1',
+        contextId: PROD,
+        kind: 'services',
+        namespace: 'web',
+        name: 'api',
+        remotePort: 80,
+        localPort: 51234,
+        random: true,
+        browser: false,
+        state: 'active',
+        error: '',
+        pod: 'api-7f9',
+        podPort: 8080,
+        note: '',
+    });
+    vi.mocked(TerminalService.Launch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(TerminalService.LaunchNode).mockReset().mockResolvedValue(undefined);
 });
 
 test('an ordinary object offers to be edited and deleted', async () => {
@@ -304,4 +347,107 @@ test('logs and the editor are two dock tabs on the same object', async () => {
     await page.getByRole('button', { name: 'Edit' }).click();
 
     expect(workspace.dockTabs.map((t) => t.view).sort()).toEqual(['edit', 'logs']);
+});
+
+// ---- shells and forwards ---------------------------------------------------
+
+test('a shell opens in the dock without asking anything first', async () => {
+    render(ObjectActions, { object: POD });
+    await expect.element(page.getByRole('button', { name: 'Shell' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Shell' }).click();
+
+    // Which shell, and which terminal, are settings answered once -- a shell
+    // you have to fill in a form for is not a shell anybody would use.
+    await vi.waitFor(() => expect(workspace.dockTabs.some((t) => t.view === 'shell')).toBe(true));
+    workspace.closeAllDockTabs();
+});
+
+test('a shell goes to your own terminal when that is what you chose', async () => {
+    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'external' };
+    render(ObjectActions, { object: POD });
+    await expect.element(page.getByRole('button', { name: 'Shell' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Shell' }).click();
+
+    await vi.waitFor(() =>
+        expect(TerminalService.Launch).toHaveBeenCalledWith(PROD, 'pods', 'default', 'web', '', ''),
+    );
+    // And nothing opens in the dock: the shell is over there.
+    expect(workspace.dockTabs.some((t) => t.view === 'shell')).toBe(false);
+    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'app' };
+});
+
+test('a node shell says which node rather than which pod', async () => {
+    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'external' };
+    render(ObjectActions, { object: NODE });
+
+    await page.getByRole('button', { name: 'Shell' }).click();
+
+    await vi.waitFor(() => expect(TerminalService.LaunchNode).toHaveBeenCalledWith(PROD, 'wrkr01'));
+    workspace.settings.preferences.terminal = { ...workspace.terminal, mode: 'app' };
+});
+
+test('forwarding offers the ports the object actually has', async () => {
+    vi.mocked(PortForwardService.Ports).mockResolvedValue([
+        { name: 'http', port: 80, protocol: 'TCP', target: '8080' },
+        { name: '', port: 9090, protocol: 'TCP', target: '' },
+    ]);
+    render(ObjectActions, { object: SERVICE });
+    await expect.element(page.getByRole('button', { name: 'Forward' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Forward' }).click();
+
+    // A service port reads with where it lands on the pod, which is rarely the
+    // same number.
+    const picker = page.getByRole('combobox', { name: 'Port' });
+    await expect.element(picker).toBeVisible();
+
+    const options = [...(picker.element() as HTMLSelectElement).options].map((o) => o.textContent?.trim());
+    expect(options).toEqual(['80 · http · → 8080', '9090']);
+});
+
+test('forwarding sends what was chosen, with a blank local port meaning any', async () => {
+    vi.mocked(PortForwardService.Ports).mockResolvedValue([
+        { name: 'http', port: 80, protocol: 'TCP', target: '8080' },
+    ]);
+    render(ObjectActions, { object: SERVICE });
+    await page.getByRole('button', { name: 'Forward' }).click();
+    await expect.element(page.getByRole('combobox', { name: 'Port' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Forward', exact: true }).click();
+
+    await vi.waitFor(() =>
+        // 0 is "any free port", and true is the browser checkbox, which is on
+        // unless it is turned off.
+        expect(PortForwardService.Start).toHaveBeenCalledWith(PROD, 'services', 'web', 'api', 80, 0, true),
+    );
+});
+
+test('a local port typed by hand is the one asked for', async () => {
+    vi.mocked(PortForwardService.Ports).mockResolvedValue([
+        { name: 'http', port: 80, protocol: 'TCP', target: '8080' },
+    ]);
+    render(ObjectActions, { object: SERVICE });
+    await page.getByRole('button', { name: 'Forward' }).click();
+    await expect.element(page.getByRole('spinbutton', { name: 'Local' })).toBeVisible();
+
+    await page.getByRole('spinbutton', { name: 'Local' }).fill('8081');
+    await page.getByRole('checkbox', { name: 'Open a browser' }).click();
+    await page.getByRole('button', { name: 'Forward', exact: true }).click();
+
+    await vi.waitFor(() =>
+        expect(PortForwardService.Start).toHaveBeenCalledWith(PROD, 'services', 'web', 'api', 80, 8081, false),
+    );
+});
+
+test('an object whose ports could not be read says so rather than offering none', async () => {
+    vi.mocked(PortForwardService.Ports).mockRejectedValue(
+        new Error('service api selects no pods -- its endpoints are set by hand'),
+    );
+    render(ObjectActions, { object: SERVICE });
+
+    await page.getByRole('button', { name: 'Forward' }).click();
+
+    await expect.element(page.getByText(/selects no pods/)).toBeVisible();
 });
