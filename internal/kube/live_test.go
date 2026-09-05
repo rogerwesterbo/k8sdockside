@@ -164,8 +164,22 @@ func TestLiveOverviewAndNamespaces(t *testing.T) {
 	for _, s := range overview.Stats {
 		t.Logf("  %s: %d/%d", s.Label, s.Ready, s.Total)
 	}
-	for _, g := range overview.Gauges {
-		t.Logf("  %s: %.1f/%.1f %s", g.Label, g.Used, g.Capacity, g.Unit)
+
+	// The dashboard's resource accounting comes from Budget now. Against a real
+	// cluster this is the only place the metrics-server path is exercised at
+	// all -- and a cluster without one must still answer, with the used column
+	// absent and a reason given.
+	budget, err := w.Budget(ctx, Scope{Kind: ScopeCluster}, nil)
+	if err != nil {
+		t.Fatalf("Budget: %v", err)
+	}
+	t.Logf("usage source %q %s", budget.Usage.Source, budget.Usage.Error)
+	for _, a := range budget.Amounts {
+		t.Logf("  %s: %.2f requested, %.2f limits, %.2f used of %.2f allocatable (%.2f capacity) %s",
+			a.Label, a.Requested, a.Limits, a.Used, a.Allocatable, a.Capacity, a.Unit)
+	}
+	if len(budget.Amounts) == 0 {
+		t.Error("no amounts in the cluster budget")
 	}
 }
 

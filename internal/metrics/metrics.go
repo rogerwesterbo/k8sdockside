@@ -122,6 +122,54 @@ func QueryRange(ctx context.Context, fetch Fetch, query, legend string, r Range)
 	return parseRange(raw, legend)
 }
 
+// QueryInstant runs one PromQL query at a single moment and returns a value per
+// series, keyed by the labels named, joined with "/".
+//
+// This is what the snapshot views need: a node's usage right now is one number,
+// and asking for a whole range so as to read the last point off it would cost
+// far more and say the same thing. Several labels because a node is identified
+// by one and a pod by two; a series missing any of them is dropped, since a
+// half-built key would collide with a real one.
+func QueryInstant(ctx context.Context, fetch Fetch, query string, keys ...string) (map[string]float64, error) {
+	raw, err := fetch(ctx, "/api/v1/query", map[string]string{"query": query})
+	if err != nil {
+		return nil, err
+	}
+
+	answer, err := decodeResponse(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[string]float64, len(answer.Data.Result))
+	for _, series := range answer.Data.Result {
+		key, ok := seriesKey(series.Metric, keys)
+		if !ok {
+			continue
+		}
+		if point, ok := sample(series.Value); ok {
+			out[key] = point.V
+		}
+	}
+	return out, nil
+}
+
+// seriesKey builds one series' key out of the labels asked for.
+func seriesKey(labels map[string]string, keys []string) (string, bool) {
+	if len(keys) == 0 {
+		return "", false
+	}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := labels[key]
+		if value == "" {
+			return "", false
+		}
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, "/"), true
+}
+
 // Variables are the values a chart's query may refer to: the object it is being
 // drawn for. Nothing else is interpolable, which is the point -- see Expand.
 type Variables struct {
@@ -214,6 +262,8 @@ type promSeries struct {
 	// Values are [unixSeconds, "value"] pairs -- Prometheus sends the sample as
 	// a string so that NaN and very large numbers survive JSON.
 	Values [][2]any `json:"values"`
+	// Value is the single sample an instant query returns, in the same shape.
+	Value [2]any `json:"value"`
 }
 
 // seriesName is what the legend calls a series.
@@ -263,20 +313,31 @@ func sample(pair [2]any) (Point, bool) {
 	return Point{T: at, V: value}, true
 }
 
-// parseRange turns a query_range answer into series.
-func parseRange(raw []byte, legend string) (Result, error) {
+// decodeResponse reads the envelope every Prometheus answer arrives in and
+// turns a refusal into an error, so both readers report a bad query the same
+// way.
+func decodeResponse(raw []byte) (promResponse, error) {
 	var answer promResponse
 	if err := json.Unmarshal(raw, &answer); err != nil {
 		// Anything but JSON here almost always means the proxy reached
 		// something that is not Prometheus, which is worth saying plainly
 		// rather than reporting as a parse error at byte 4.
-		return Result{}, fmt.Errorf("the reply was not a Prometheus response: %w", err)
+		return answer, fmt.Errorf("the reply was not a Prometheus response: %w", err)
 	}
 	if answer.Status != "success" {
 		if answer.Error != "" {
-			return Result{}, errors.New(answer.Error)
+			return answer, errors.New(answer.Error)
 		}
-		return Result{}, fmt.Errorf("prometheus answered %q", answer.Status)
+		return answer, fmt.Errorf("prometheus answered %q", answer.Status)
+	}
+	return answer, nil
+}
+
+// parseRange turns a query_range answer into series.
+func parseRange(raw []byte, legend string) (Result, error) {
+	answer, err := decodeResponse(raw)
+	if err != nil {
+		return Result{}, err
 	}
 
 	out := Result{Series: []Series{}}

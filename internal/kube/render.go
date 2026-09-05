@@ -26,8 +26,6 @@ func status(s string) Cell      { return Cell{Text: s, Tone: toneFor(s)} }
 func number(n int) Cell         { return Cell{Text: fmt.Sprintf("%d", n)} }
 func muted(s string) Cell       { return Cell{Text: s, Tone: "info"} }
 
-func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }
-
 // farFuture sorts a cell with no time after every cell that has one, so
 // "<none>" collects at the end rather than leading the list.
 const farFuture = 1 << 62

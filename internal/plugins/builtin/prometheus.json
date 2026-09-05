@@ -190,6 +190,70 @@
             "legend": "code",
             "description": "Requests per second by response code, as the API server itself reports them.",
             "query": "sum by (code) (rate(apiserver_request_total[5m]))"
+        },
+        {
+            "id": "cluster-cpu-commitment",
+            "label": "CPU requested vs used",
+            "attach": "dashboard",
+            "unit": "cores",
+            "legend": "series",
+            "description": "What the scheduler has booked, what those pods may grow into, and what they are really burning. Needs kube-state-metrics. Requested far above used is a cluster paying for room nobody uses; used near limits is a cluster about to throttle.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m])), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "cluster-memory-commitment",
+            "label": "Memory requested vs used",
+            "attach": "dashboard",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "Requested, limits and working set across the cluster. Needs kube-state-metrics. Memory limits are the ones that kill: used approaching limits is an OOM waiting to happen.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{container!=\"\"}), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "node-cpu-commitment",
+            "label": "CPU requested vs used",
+            "attach": "nodes",
+            "unit": "cores",
+            "legend": "series",
+            "description": "What this node has been asked to hold against what it is actually doing. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\",node=\"$node\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\",node=\"$node\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{node=\"$node\",container!=\"\"}[5m])), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "node-memory-commitment",
+            "label": "Memory requested vs used",
+            "attach": "nodes",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "Requested, limits and working set for everything placed on this node. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\",node=\"$node\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\",node=\"$node\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{node=\"$node\",container!=\"\"}), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "pod-cpu-commitment",
+            "label": "CPU requested vs used",
+            "attach": "pods",
+            "unit": "cores",
+            "legend": "series",
+            "description": "This pod's own request and limit against what it burns. Needs kube-state-metrics. The clearest place to see a request that was guessed rather than measured.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "pod-memory-commitment",
+            "label": "Memory requested vs used",
+            "attach": "pods",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "This pod's request and limit against its working set. Needs kube-state-metrics. The working set touching the limit line is what the OOM killer acts on.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}), \"series\", \"used\", \"\", \"\")"
         }
-    ]
+    ],
+    "usage": {
+        "node": {
+            "cpu": "sum by (node) (rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]))",
+            "memory": "sum by (node) (container_memory_working_set_bytes{container!=\"\"})"
+        },
+        "pod": {
+            "cpu": "sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m]))",
+            "memory": "sum by (namespace, pod) (container_memory_working_set_bytes{container!=\"\",container!=\"POD\"})"
+        }
+    }
 }

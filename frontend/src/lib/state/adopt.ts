@@ -138,7 +138,6 @@ export interface Overview {
     distribution: string;
     namespaces: string[];
     stats: kube.Stat[];
-    gauges: kube.Gauge[];
     /** The same shape a resource tab renders, so both sort through one path. */
     events: Table;
 }
@@ -264,7 +263,6 @@ export function adoptOverview(overview: kube.Overview): Overview {
         distribution: overview.distribution,
         namespaces: [...(overview.namespaces ?? [])],
         stats: [...(overview.stats ?? [])],
-        gauges: [...(overview.gauges ?? [])],
         events: adoptTable(overview.events),
     };
 }

@@ -52,14 +52,6 @@ type Stat struct {
 	Total int    `json:"total"`
 }
 
-// Gauge is a used/capacity measure on the dashboard.
-type Gauge struct {
-	Label    string  `json:"label"`
-	Used     float64 `json:"used"`
-	Capacity float64 `json:"capacity"`
-	Unit     string  `json:"unit"`
-}
-
 // Event is a cluster event as shown on the dashboard and in the events table.
 type Event struct {
 	Type    string `json:"type"`
@@ -79,7 +71,6 @@ type Overview struct {
 	Distribution string   `json:"distribution"`
 	Namespaces   []string `json:"namespaces"`
 	Stats        []Stat   `json:"stats"`
-	Gauges       []Gauge  `json:"gauges"`
 	// Events is the same Table the events tab renders, capped to what the
 	// dashboard has room for, so both are sorted and sortable by the same code
 	// rather than by two implementations that can disagree.

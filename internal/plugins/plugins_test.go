@@ -404,3 +404,120 @@ func TestAttachmentsNamesEachSurfaceOnce(t *testing.T) {
 		t.Errorf("attachments = %v, want dashboard named once", got)
 	}
 }
+
+func TestValidateChecksUsageQueries(t *testing.T) {
+	// Nothing here checks PromQL syntax: the app has no PromQL parser, for
+	// charts either, and a malformed query comes back as Prometheus's own
+	// error when it is run. What is checked is everything this app is the only
+	// one able to check.
+	view := View{ID: "things", Label: "Things", Kind: "pods"}
+	cases := map[string]Plugin{
+		"empty query": {ID: "x", Views: []View{view}, Usage: &UsageQueries{
+			Node: UsagePair{CPU: "   ", Memory: "sum by (node) (x)"},
+		}},
+		// A usage query is asked for the whole cluster at once, so there is no
+		// object to substitute -- a $variable here would reach Prometheus
+		// unexpanded and be read as an operator.
+		"query with a variable": {ID: "x", Views: []View{view}, Usage: &UsageQueries{
+			Node: UsagePair{
+				CPU:    `sum by (node) (rate(x{pod="$name"}[5m]))`,
+				Memory: "sum by (node) (x)",
+			},
+		}},
+		// Half a pair is worse than none: the used column would show CPU and
+		// silently report zero memory.
+		"only one of the pair": {ID: "x", Views: []View{view}, Usage: &UsageQueries{
+			Node: UsagePair{CPU: "sum by (node) (x)"},
+		}},
+	}
+	for name, plugin := range cases {
+		if _, err := validate(plugin); err == nil {
+			t.Errorf("%s: validate accepted it", name)
+		}
+	}
+}
+
+func TestValidateAcceptsACompleteUsageBlock(t *testing.T) {
+	p, err := validate(Plugin{
+		ID:    "prom",
+		Views: []View{{ID: "things", Kind: "pods"}},
+		Usage: &UsageQueries{
+			Node: UsagePair{CPU: " sum by (node) (x) ", Memory: "sum by (node) (y)"},
+			Pod:  UsagePair{CPU: "sum by (namespace, pod) (x)", Memory: "sum by (namespace, pod) (y)"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if p.Usage.Node.CPU != "sum by (node) (x)" {
+		t.Errorf("node CPU query = %q, want it trimmed", p.Usage.Node.CPU)
+	}
+}
+
+func TestUsageQueriesComeFromTheFirstEnabledPluginThatHasThem(t *testing.T) {
+	// A plugin the user has switched off must not go on answering, and two
+	// plugins declaring usage must not be silently mixed.
+	list := []Plugin{
+		{ID: "off", Disabled: true, Usage: &UsageQueries{
+			Node: UsagePair{CPU: "disabled", Memory: "disabled"},
+		}},
+		{ID: "none"},
+		{ID: "prom", Usage: &UsageQueries{
+			Node: UsagePair{CPU: "wanted", Memory: "wanted-mem"},
+		}},
+	}
+
+	got, ok := UsageQueriesFor(list)
+
+	if !ok {
+		t.Fatal("no usage queries found though an enabled plugin declares them")
+	}
+	if got.Node.CPU != "wanted" {
+		t.Errorf("node CPU query = %q, want the enabled plugin's", got.Node.CPU)
+	}
+}
+
+func TestNoUsageQueriesWhenNoEnabledPluginDeclaresThem(t *testing.T) {
+	if _, ok := UsageQueriesFor([]Plugin{{ID: "none"}}); ok {
+		t.Error("usage queries were reported where none exist")
+	}
+}
+
+func TestTheBuiltinPrometheusPluginCarriesUsageQueriesAndCommitmentCharts(t *testing.T) {
+	// The snapshot views fall back to these on a cluster with no
+	// metrics-server, so a typo that made them vanish would show up only as a
+	// permanently empty "used" column.
+	var prom Plugin
+	for _, p := range Builtin() {
+		if p.ID == "prometheus" {
+			prom = p
+		}
+	}
+	if prom.ID == "" {
+		t.Fatal("no builtin prometheus plugin")
+	}
+
+	if prom.Usage == nil {
+		t.Fatal("the prometheus plugin declares no usage queries")
+	}
+	if !prom.Usage.Node.Filled() {
+		t.Errorf("node usage queries = %+v, want both filled", prom.Usage.Node)
+	}
+	if !prom.Usage.Pod.Filled() {
+		t.Errorf("pod usage queries = %+v, want both filled", prom.Usage.Pod)
+	}
+
+	// One requested/limits/used chart per resource on each of the three
+	// surfaces.
+	byAttach := map[string]int{}
+	for _, c := range prom.Charts {
+		if c.Legend == "series" {
+			byAttach[c.Attach]++
+		}
+	}
+	for _, attach := range []string{AttachDashboard, "nodes", "pods"} {
+		if byAttach[attach] != 2 {
+			t.Errorf("%s has %d requested-vs-used charts, want 2 (CPU and memory)", attach, byAttach[attach])
+		}
+	}
+}

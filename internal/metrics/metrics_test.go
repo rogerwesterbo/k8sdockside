@@ -230,3 +230,96 @@ func TestQueryRangeCarriesFetchErrors(t *testing.T) {
 		t.Fatal("a transport failure was swallowed")
 	}
 }
+
+func TestQueryInstantReadsAVectorKeyedByLabel(t *testing.T) {
+	// The snapshot views want one number per node, not a line -- so an instant
+	// query, and the answer indexed by whichever label identifies the thing.
+	body := `{"status":"success","data":{"resultType":"vector","result":[
+		{"metric":{"node":"worker-1"},"value":[1700000000,"2.5"]},
+		{"metric":{"node":"worker-2"},"value":[1700000000,"0.5"]}
+	]}}`
+
+	got, err := QueryInstant(context.Background(), fetchReturning(body), "sum by (node) (x)", "node")
+	if err != nil {
+		t.Fatalf("QueryInstant: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2: %v", len(got), got)
+	}
+	if got["worker-1"] != 2.5 {
+		t.Errorf("worker-1 = %v, want 2.5", got["worker-1"])
+	}
+	if got["worker-2"] != 0.5 {
+		t.Errorf("worker-2 = %v, want 0.5", got["worker-2"])
+	}
+}
+
+func TestQueryInstantDropsSamplesItCannotRead(t *testing.T) {
+	// NaN is what Prometheus returns for a division by zero, and it must not
+	// arrive as a usage figure.
+	body := `{"status":"success","data":{"resultType":"vector","result":[
+		{"metric":{"node":"worker-1"},"value":[1700000000,"NaN"]},
+		{"metric":{"node":"worker-2"},"value":[1700000000,"1"]}
+	]}}`
+
+	got, err := QueryInstant(context.Background(), fetchReturning(body), "x", "node")
+	if err != nil {
+		t.Fatalf("QueryInstant: %v", err)
+	}
+	if _, bad := got["worker-1"]; bad {
+		t.Error("an unreadable sample became a usage figure")
+	}
+	if got["worker-2"] != 1 {
+		t.Errorf("worker-2 = %v, want 1", got["worker-2"])
+	}
+}
+
+func TestQueryInstantReportsPrometheusErrors(t *testing.T) {
+	body := `{"status":"error","errorType":"bad_data","error":"parse error at char 4"}`
+
+	if _, err := QueryInstant(context.Background(), fetchReturning(body), "x{", "node"); err == nil {
+		t.Fatal("a Prometheus error was not reported")
+	} else if !strings.Contains(err.Error(), "parse error") {
+		t.Errorf("error = %v, want it to carry Prometheus's own reason", err)
+	}
+}
+
+func TestQueryInstantJoinsSeveralLabelsIntoOneKey(t *testing.T) {
+	// A pod is only identified by namespace and name together, so the key has
+	// to be built from both.
+	body := `{"status":"success","data":{"resultType":"vector","result":[
+		{"metric":{"namespace":"prod","pod":"api-0"},"value":[1700000000,"0.4"]},
+		{"metric":{"namespace":"staging","pod":"api-0"},"value":[1700000000,"2"]}
+	]}}`
+
+	got, err := QueryInstant(context.Background(), fetchReturning(body), "x", "namespace", "pod")
+	if err != nil {
+		t.Fatalf("QueryInstant: %v", err)
+	}
+	if got["prod/api-0"] != 0.4 {
+		t.Errorf("prod/api-0 = %v, want 0.4", got["prod/api-0"])
+	}
+	if got["staging/api-0"] != 2 {
+		t.Errorf("staging/api-0 = %v, want 2", got["staging/api-0"])
+	}
+}
+
+func TestQueryInstantDropsSeriesMissingAKeyLabel(t *testing.T) {
+	// Without every part of the key there is nothing to match the value up to,
+	// and a half-formed key would collide with a real one.
+	body := `{"status":"success","data":{"resultType":"vector","result":[
+		{"metric":{"namespace":"prod"},"value":[1700000000,"0.4"]},
+		{"metric":{"namespace":"prod","pod":"api-0"},"value":[1700000000,"1"]}
+	]}}`
+
+	got, err := QueryInstant(context.Background(), fetchReturning(body), "x", "namespace", "pod")
+	if err != nil {
+		t.Fatalf("QueryInstant: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1: %v", len(got), got)
+	}
+	if got["prod/api-0"] != 1 {
+		t.Errorf("prod/api-0 = %v, want 1", got["prod/api-0"])
+	}
+}

@@ -43,6 +43,7 @@ func main() {
 	// cluster through the API server, so it rides the connection a tab already
 	// has rather than opening its own.
 	graphs := NewMetricsService(settings, configs, resources.watcher, solutions)
+	resources.useMetrics(graphs)
 	// Terminals and port forwards borrow the same watcher again. Both are
 	// long-lived streams rather than requests -- an exec and a forward each
 	// hold one connection open for as long as the window shows them -- so both

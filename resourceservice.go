@@ -33,6 +33,10 @@ type ResourceService struct {
 	// view names. Set after construction because the plugin service needs this
 	// service's watcher, and one of the two has to be built first.
 	plugins *PluginService
+	// graphs resolves where a context's Prometheus is, for the budget views'
+	// usage fallback. Set after construction for the same reason: it is built
+	// from this service's watcher.
+	graphs *MetricsService
 }
 
 // NewResourceService wires the service to the kubeconfig cache it resolves
@@ -47,6 +51,11 @@ func NewResourceService(configs *KubeconfigService) *ResourceService {
 // against. Unexported so it stays out of the generated bindings: it is wiring
 // between two services in the same package, not something the frontend calls.
 func (s *ResourceService) usePlugins(p *PluginService) { s.plugins = p }
+
+// useMetrics gives the service the Prometheus endpoint resolver its budget
+// views fall back to. Unexported for the same reason as usePlugins: wiring
+// between two services, not something the frontend calls.
+func (s *ResourceService) useMetrics(m *MetricsService) { s.graphs = m }
 
 // push forwards one snapshot to the frontend. It is called from the watcher's
 // background goroutines, which is why it tolerates being called before the app

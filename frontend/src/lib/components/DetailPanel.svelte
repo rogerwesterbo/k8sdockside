@@ -7,6 +7,7 @@
     import { fly } from 'svelte/transition';
     import { singularFor } from '../catalogue';
     import MetricsPanel from '../charts/MetricsPanel.svelte';
+    import ResourceBudget from '../budget/ResourceBudget.svelte';
     import { alpha } from '../colors';
     import { actions } from '../state/actions.svelte';
     import { changes } from '../state/changes.svelte';
@@ -25,6 +26,15 @@
     const MIN_SIZE = 260;
 
     let target = $derived(workspace.detailTarget);
+    /**
+     * The two kinds that own a resource budget of their own.
+     *
+     * A node holds hardware and a namespace holds a quota; everything else is
+     * accounted for inside one of those two, so a budget on it would either
+     * repeat the parent's numbers or invent a denominator.
+     */
+    const BUDGET_SCOPES: Record<string, string> = { nodes: 'node', namespaces: 'namespace' };
+    let budgetScope = $derived(target ? (BUDGET_SCOPES[target.kind] ?? '') : '');
     let dock = $derived(workspace.dock);
     let color = $derived(target ? workspace.colorOf(target.contextId) : 'var(--accent)');
     /**
@@ -185,6 +195,19 @@
                  the report is long enough that anything under it is out of
                  sight. Draws nothing at all unless an installed plugin has
                  charts for this kind and the cluster has a Prometheus. -->
+            <!-- Above the charts for a node or a namespace: how full it is
+                 right now is what someone opening this came to find out, and
+                 unlike the charts it needs nothing installed to answer. -->
+            {#if budgetScope}
+                <ResourceBudget
+                    contextId={target.contextId}
+                    scope={budgetScope}
+                    name={target.name}
+                    title="Resources"
+                    compact
+                />
+            {/if}
+
             <MetricsPanel
                 contextId={target.contextId}
                 attach={target.kind}

@@ -5,6 +5,7 @@
     import { adoptOverview, type Overview } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
     import MetricsPanel from '../charts/MetricsPanel.svelte';
+    import ResourceBudget from '../budget/ResourceBudget.svelte';
     import ErrorState from './ErrorState.svelte';
     import SortableTable from './SortableTable.svelte';
 
@@ -52,11 +53,6 @@
         };
     });
 
-    function percent(used: number, capacity: number): number {
-        if (capacity <= 0) return 0;
-        return Math.min(100, Math.round((used / capacity) * 100));
-    }
-
     function statTone(stat: kube.Stat): string {
         if (stat.total === 0) return 'muted';
         return stat.ready === stat.total ? 'ok' : 'warn';
@@ -89,24 +85,10 @@
             {/each}
         </section>
 
-        <section class="gauges">
-            <h2>Capacity</h2>
-            {#each overview.gauges as gauge (gauge.label)}
-                {@const pct = percent(gauge.used, gauge.capacity)}
-                <div class="gauge">
-                    <div class="gauge-head">
-                        <span>{gauge.label}</span>
-                        <span class="gauge-value">
-                            {gauge.used}{gauge.unit ? ` ${gauge.unit}` : ''} of {gauge.capacity}{gauge.unit ? ` ${gauge.unit}` : ''}
-                            <span class="pct">{pct}%</span>
-                        </span>
-                    </div>
-                    <div class="track">
-                        <div class="fill" class:high={pct >= 80} style:width="{pct}%" style:background={color}></div>
-                    </div>
-                </div>
-            {/each}
-        </section>
+        <!-- Capacity, allocatable, requests, limits and live usage, all
+             against each other. Reads the API server for everything but the
+             last, so it works on a cluster with no monitoring at all. -->
+        <ResourceBudget {contextId} scope="cluster" title="Resources" />
 
         <!-- Between the counters and the events: the counters say what the
              cluster is made of, the charts say what it has been doing, and the
@@ -240,51 +222,6 @@
         margin: 4px 0 0;
         font-size: 12px;
         color: var(--text-dim);
-    }
-
-    .gauges {
-        margin-bottom: 26px;
-    }
-
-    .gauge + .gauge {
-        margin-top: 12px;
-    }
-
-    .gauge-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 12px;
-        font-size: 12px;
-        margin-bottom: 5px;
-    }
-
-    .gauge-value {
-        color: var(--text-faint);
-        font-size: 11px;
-        font-family: var(--mono);
-    }
-
-    .pct {
-        color: var(--text-dim);
-        margin-left: 6px;
-    }
-
-    .track {
-        height: 6px;
-        border-radius: 3px;
-        background: var(--bg-raised);
-        overflow: hidden;
-    }
-
-    .fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 220ms ease;
-    }
-
-    .fill.high {
-        background: var(--warn) !important;
     }
 
     /* The events panel is the shared table; it only needs a frame and a bound

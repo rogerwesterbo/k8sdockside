@@ -421,24 +421,3 @@ func parseMemory(s string) float64 {
 	}
 	return q.AsApproximateFloat64() / (1 << 30)
 }
-
-// requestsOf totals what a pod asks the scheduler for, in cores and GiB.
-//
-// Init containers run before the others and are counted as the largest single
-// one rather than added on top, because that is how the scheduler reserves for
-// them -- summing would overstate every pod that has any.
-func requestsOf(pod *unstructured.Unstructured) (cpu, mem float64) {
-	for _, raw := range nestedSlice(pod, "spec", "containers") {
-		requests := asMap(asMap(asMap(raw)["resources"])["requests"])
-		cpu += parseCPU(mapString(requests, "cpu"))
-		mem += parseMemory(mapString(requests, "memory"))
-	}
-
-	var initCPU, initMem float64
-	for _, raw := range nestedSlice(pod, "spec", "initContainers") {
-		requests := asMap(asMap(asMap(raw)["resources"])["requests"])
-		initCPU = max(initCPU, parseCPU(mapString(requests, "cpu")))
-		initMem = max(initMem, parseMemory(mapString(requests, "memory")))
-	}
-	return max(cpu, initCPU), max(mem, initMem)
-}

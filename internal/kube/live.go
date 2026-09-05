@@ -98,7 +98,6 @@ func (w *Watcher) Overview(kc Context) (Overview, error) {
 		Cluster:   kc.Cluster,
 		Server:    kc.Server,
 		Stats:     []Stat{},
-		Gauges:    []Gauge{},
 		Events:    Table{Kind: KindEvents, Columns: []string{}, Rows: []Row{}},
 	}
 
@@ -125,14 +124,11 @@ func (w *Watcher) Overview(kc Context) (Overview, error) {
 			return err
 		}
 		nodesReady := 0
-		var cpuCapacity, memCapacity float64
 		for i := range nodes {
 			n := &nodes[i]
 			if conditionStatus(n, "Ready", "status", "conditions") == "True" {
 				nodesReady++
 			}
-			cpuCapacity += parseCPU(nestedString(n, "status", "allocatable", "cpu"))
-			memCapacity += parseMemory(nestedString(n, "status", "allocatable", "memory"))
 		}
 		out.Distribution = distributionOf(nodes)
 
@@ -141,15 +137,10 @@ func (w *Watcher) Overview(kc Context) (Overview, error) {
 			return err
 		}
 		podsRunning := 0
-		var cpuRequested, memRequested float64
 		for i := range pods {
-			p := &pods[i]
-			if nestedString(p, "status", "phase") == "Running" {
+			if nestedString(&pods[i], "status", "phase") == "Running" {
 				podsRunning++
 			}
-			cpu, mem := requestsOf(p)
-			cpuRequested += cpu
-			memRequested += mem
 		}
 
 		deployTotal, deployReady := 0, 0
@@ -169,15 +160,10 @@ func (w *Watcher) Overview(kc Context) (Overview, error) {
 			{Label: "Deployments", Ready: deployReady, Total: deployTotal},
 			{Label: "Namespaces", Ready: len(out.Namespaces), Total: len(out.Namespaces)},
 		}
-		// Requested rather than consumed: live usage comes from the metrics
-		// API, a separate server that is not always installed. Requests are
-		// what the scheduler packs against, which is the more actionable number
-		// anyway -- it is what `kubectl describe node` reports.
-		out.Gauges = []Gauge{
-			{Label: "CPU requested", Used: round1(cpuRequested), Capacity: round1(cpuCapacity), Unit: "cores"},
-			{Label: "Memory requested", Used: round1(memRequested), Capacity: round1(memCapacity), Unit: "GiB"},
-			{Label: "Pods", Used: float64(len(pods)), Capacity: float64(len(nodes) * 110)},
-		}
+		// Capacity and requests are deliberately not computed here: they are
+		// the Budget's, which counts them for a node and a namespace as well
+		// and by the scheduler's own rules. Two implementations of the same
+		// sum would eventually disagree.
 
 		out.Events = c.eventTable(ctx)
 		return nil

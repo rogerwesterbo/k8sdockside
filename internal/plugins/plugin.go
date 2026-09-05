@@ -175,6 +175,32 @@ type Chart struct {
 // print raw numbers, which is why the set is closed and checked on load.
 var ChartUnits = []string{"", "cores", "bytes", "bytes/s", "percent", "ops/s", "seconds", "count"}
 
+// UsagePair is the two queries that make up a usage reading. Both or neither:
+// half a pair would draw a CPU figure next to a memory figure that is silently
+// zero, which is worse than drawing nothing.
+type UsagePair struct {
+	// CPU must return cores, and Memory bytes -- the units the readings are
+	// converted from. A query returning anything else is not wrong in a way
+	// this app can detect, only in a way the numbers look wrong.
+	CPU    string `json:"cpu,omitzero"`
+	Memory string `json:"memory,omitzero"`
+}
+
+// Filled reports whether both halves are present.
+func (p UsagePair) Filled() bool { return p.CPU != "" && p.Memory != "" }
+
+// UsageQueries let a plugin stand in for metrics-server on a cluster that has
+// none, by saying how to ask its Prometheus the same two questions.
+//
+// These are instant queries over the whole cluster rather than charts, so
+// unlike a chart's query they are given no object and may not refer to one:
+// there is nothing to substitute, and a `$name` left in would reach Prometheus
+// unexpanded. Node is keyed by the `node` label, Pod by `namespace` and `pod`.
+type UsageQueries struct {
+	Node UsagePair `json:"node,omitzero"`
+	Pod  UsagePair `json:"pod,omitzero"`
+}
+
 // Plugin is one solution the app knows how to show.
 type Plugin struct {
 	ID      string `json:"id"`
@@ -190,6 +216,9 @@ type Plugin struct {
 	Views       []View        `json:"views"`
 	Cards       []Card        `json:"cards,omitzero"`
 	Charts      []Chart       `json:"charts,omitzero"`
+	// Usage is optional: a plugin that knows a Prometheus can offer it as a
+	// stand-in for metrics-server. Absent for almost every plugin.
+	Usage *UsageQueries `json:"usage,omitzero"`
 
 	// Origin is filled in by the loader and ignored on the way in: BuiltinOrigin
 	// or the path of the file it was read from.
@@ -385,10 +414,76 @@ func validate(p Plugin) (Plugin, error) {
 		p.Charts[i] = chart
 	}
 
+	if p.Usage != nil {
+		usage, err := validateUsage(p.ID, *p.Usage)
+		if err != nil {
+			return p, err
+		}
+		p.Usage = &usage
+	}
+
 	if len(p.Views) == 0 && len(p.Cards) == 0 && len(p.Charts) == 0 {
 		return p, fmt.Errorf("plugin %q has no views, nothing to summarise and nothing to chart, so there would be nothing to show", p.ID)
 	}
 	return p, nil
+}
+
+// validateUsage checks a plugin's usage queries, which are held to a stricter
+// rule than a chart's: they are asked for the whole cluster at once, so they
+// are given no object and may not refer to one.
+func validateUsage(pluginID string, u UsageQueries) (UsageQueries, error) {
+	pairs := []struct {
+		name string
+		pair *UsagePair
+	}{
+		{"node", &u.Node},
+		{"pod", &u.Pod},
+	}
+
+	declared := false
+	for _, p := range pairs {
+		p.pair.CPU = strings.TrimSpace(p.pair.CPU)
+		p.pair.Memory = strings.TrimSpace(p.pair.Memory)
+
+		if p.pair.CPU == "" && p.pair.Memory == "" {
+			continue
+		}
+		declared = true
+		if !p.pair.Filled() {
+			return u, fmt.Errorf("plugin %q gives only one of the %s usage queries; both cpu and memory are needed", pluginID, p.name)
+		}
+		for what, query := range map[string]string{"cpu": p.pair.CPU, "memory": p.pair.Memory} {
+			if err := metrics.CheckQuery(query); err != nil {
+				return u, fmt.Errorf("plugin %q has a bad %s %s usage query: %w", pluginID, p.name, what, err)
+			}
+			// PromQL has no $ of its own, so anything holding one is a chart
+			// variable that nothing here will expand.
+			if strings.ContainsRune(query, '$') {
+				return u, fmt.Errorf("plugin %q has a %s %s usage query using a variable; usage queries cover the whole cluster and are given no object to substitute", pluginID, p.name, what)
+			}
+		}
+	}
+
+	if !declared {
+		return u, fmt.Errorf("plugin %q has a usage block with no queries in it", pluginID)
+	}
+	return u, nil
+}
+
+// UsageQueriesFor returns the usage queries of the first enabled plugin that
+// declares any.
+//
+// First rather than merged: two plugins pointing at differently configured
+// Prometheuses would otherwise have their answers silently mixed into one set
+// of numbers.
+func UsageQueriesFor(list []Plugin) (UsageQueries, bool) {
+	for _, p := range list {
+		if p.Disabled || p.Usage == nil {
+			continue
+		}
+		return *p.Usage, true
+	}
+	return UsageQueries{}, false
 }
 
 func validateChart(pluginID string, c Chart) (Chart, error) {

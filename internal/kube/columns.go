@@ -295,10 +295,20 @@ var builtinColumns = map[string][]column{
 		nameColumn,
 		{Name: "Roles", From: nodeRoles},
 		{Name: "Version", Path: ".status.nodeInfo.kubeletVersion"},
-		// Capacity, not usage: live usage comes from the metrics API, which is
-		// a separate server that is not always installed.
+		// Capacity is the hardware; allocatable is what the scheduler may
+		// actually hand out, once the kubelet has kept back what it needs. The
+		// gap between them is invisible with only one on screen, and it is the
+		// difference between a node looking full and being full.
+		//
+		// Neither is usage: what a node is really burning, and what has been
+		// requested on it, need the metrics API and every pod in the cluster
+		// respectively. Both are in the node's detail panel, which can afford
+		// the extra reads that a live table refreshing on every node event
+		// cannot.
 		{Name: "CPU", Path: ".status.capacity.cpu"},
+		{Name: "CPU alloc", Path: ".status.allocatable.cpu"},
 		{Name: "Memory", Path: ".status.capacity.memory"},
+		{Name: "Mem alloc", Path: ".status.allocatable.memory"},
 		{Name: "Taints", From: func(u *unstructured.Unstructured) Cell {
 			return number(len(nestedSlice(u, "spec", "taints")))
 		}},
