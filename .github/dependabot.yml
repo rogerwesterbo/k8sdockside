@@ -19,6 +19,13 @@ updates:
         update-types:
           - minor
           - patch
+    # Both are indirect, and apimachinery type-checks against the exact major it
+    # was released with -- bumping either alone breaks the build even though the
+    # module graph resolves. Whichever versions the k8s.io/* release train needs
+    # come in with it, via `go mod tidy`.
+    ignore:
+      - dependency-name: k8s.io/kube-openapi
+      - dependency-name: sigs.k8s.io/structured-merge-diff/*
 
   - package-ecosystem: npm
     directory: /frontend

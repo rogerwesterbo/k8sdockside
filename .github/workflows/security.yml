@@ -41,8 +41,12 @@ jobs:
           node-version: none
           wails: 'false'
 
+      # frontend-dist-stub because this job skips Node: main.go embeds
+      # frontend/dist, and without it the root package will not type-check. The
+      # make targets below depend on it already; the SARIF pass shells out to
+      # gosec directly and would otherwise report the embed as a Golang error.
       - name: Install scanners
-        run: make install-security-scanner install-govulncheck
+        run: make install-security-scanner install-govulncheck frontend-dist-stub
 
       # Reporting pass first, so the SARIF is written even when there are
       # findings; the gate below is what actually fails the job.

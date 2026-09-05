@@ -67,7 +67,7 @@ build: ## Build the production desktop app into bin/ (wails3 build).
 	@printf "$(GREEN)✓ Build complete: $(BOLD)bin/$(APP_NAME)$(RESET)\n"
 
 .PHONY: build-go
-build-go: ## Compile the Go packages only (skips build/ios, no frontend build).
+build-go: frontend-dist-stub ## Compile the Go packages only (skips build/ios, no frontend build).
 	@printf "$(CYAN)Building Go packages...$(RESET)\n"
 	@go build $(GO_PKGS)
 	@printf "$(GREEN)✓ Go build complete$(RESET)\n"
@@ -77,6 +77,20 @@ build-frontend: ## Build the frontend into frontend/dist.
 	@printf "$(CYAN)Building frontend...$(RESET)\n"
 	@cd $(FRONTEND_DIR) && npm run build
 	@printf "$(GREEN)✓ Frontend built: $(BOLD)$(FRONTEND_DIR)/dist$(RESET)\n"
+
+# main.go embeds frontend/dist, so the root package does not even type-check
+# until that directory holds at least one file -- which breaks `go build`,
+# `go test`, golangci-lint, gosec and govulncheck alike. dist is generated and
+# gitignored, and the CI Go jobs deliberately skip Node to avoid paying for a
+# frontend bundle they never look at, so stand in a placeholder instead. The
+# `all:` prefix on the embed pattern is what makes a dotfile enough to satisfy
+# it. A real `make build-frontend` overwrites this with the actual bundle.
+.PHONY: frontend-dist-stub
+frontend-dist-stub: ## Ensure frontend/dist exists so the Go embed resolves.
+	@mkdir -p $(FRONTEND_DIR)/dist
+	@[ -n "$$(ls -A $(FRONTEND_DIR)/dist 2>/dev/null)" ] || \
+		printf 'placeholder so //go:embed all:frontend/dist resolves; see make build-frontend\n' \
+			> $(FRONTEND_DIR)/dist/.embed-placeholder
 
 .PHONY: generate
 generate: ## Regenerate the TypeScript bindings from the Go services.
@@ -127,7 +141,7 @@ fix: ## Run go fix against code.
 	@printf "$(GREEN)✓ Fix complete$(RESET)\n"
 
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint against the Go code.
+lint: golangci-lint frontend-dist-stub ## Run golangci-lint against the Go code.
 	@printf "$(CYAN)Running golangci-lint...$(RESET)\n"
 	@$(GOLANGCI_LINT) run --timeout 5m ./...
 	@printf "$(GREEN)✓ Lint complete$(RESET)\n"
@@ -140,7 +154,7 @@ lint-frontend: ## Type-check the Svelte frontend (svelte-check).
 
 ##@ Tests
 .PHONY: test
-test: ## Run unit tests.
+test: frontend-dist-stub ## Run unit tests.
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
 	@go test -v $(GO_PKGS) -coverprofile coverage.out
 	@go tool cover -html=coverage.out -o coverage.html
@@ -176,11 +190,18 @@ deps: ## Download and verify Go dependencies, and install frontend deps.
 update-deps: update-deps-go update-deps-frontend ## Update Go and frontend dependencies.
 	@printf "$(GREEN)$(BOLD)✓ All dependencies updated!$(RESET)\n"
 
+# `go get -u` walks the whole graph, which the Kubernetes libraries do not
+# survive: k8s.io/apimachinery pins k8s.io/kube-openapi and
+# sigs.k8s.io/structured-merge-diff per release, and upgrading either on its own
+# leaves apimachinery type-checking against the wrong major. Compile afterwards
+# so a graph like that fails here, loudly, instead of in the next build.
 .PHONY: update-deps-go
 update-deps-go: ## Update Go dependencies.
 	@printf "$(CYAN)Updating Go dependencies...$(RESET)\n"
 	@go get -u ./...
 	@go mod tidy
+	@printf "$(CYAN)Verifying the upgraded module graph still compiles...$(RESET)\n"
+	@$(MAKE) --no-print-directory build-go
 	@printf "$(GREEN)✓ Go dependencies updated!$(RESET)\n"
 
 .PHONY: update-deps-frontend
@@ -244,13 +265,13 @@ audit: gosec govulncheck npm-audit ## Run all security scans (gosec + govulnchec
 	@printf "$(GREEN)$(BOLD)✓ Audit complete$(RESET)\n"
 
 .PHONY: gosec
-gosec: install-security-scanner ## Run gosec security scan (fails on findings)
+gosec: install-security-scanner frontend-dist-stub ## Run gosec security scan (fails on findings)
 	@printf "$(CYAN)Running gosec...$(RESET)\n"
 	@$(GOSEC) -exclude-dir=build ./...
 	@printf "$(GREEN)✓ gosec complete$(RESET)\n"
 
 .PHONY: govulncheck
-govulncheck: install-govulncheck ## Run govulncheck vulnerability scan (fails on findings)
+govulncheck: install-govulncheck frontend-dist-stub ## Run govulncheck vulnerability scan (fails on findings)
 	@printf "$(CYAN)Running govulncheck...$(RESET)\n"
 	@$(GOVULNCHECK) ./...
 	@printf "$(GREEN)✓ govulncheck complete$(RESET)\n"
