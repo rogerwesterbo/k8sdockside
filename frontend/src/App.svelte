@@ -3,26 +3,24 @@
   into, and the docked detail panel. All of the state it renders lives in the
   workspace store.
 
-  The three panes are fixed places rather than a tree of splits, and what goes
-  in each of them is the user's choice -- see lib/state/panes.ts. Main fills
-  what the others leave; the right panel is there when it holds something; the
+  The four panes are fixed places rather than a tree of splits, and what goes in
+  each of them is the user's choice -- see lib/state/panes.ts. Main fills what
+  the others leave; the side panels are there when they hold something; the
   bottom one is always there, because a place has to be visible before anything
   can be put in it.
+
+  The cluster tree is a tab in the left panel rather than a fixed strip, so it
+  can be moved like anything else. It cannot be closed -- it is how everything
+  else gets opened -- but Cmd/Ctrl+B hides the panel it is in and brings it back.
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
     import DetailPanel from './lib/components/DetailPanel.svelte';
     import Icon from './lib/components/Icon.svelte';
     import Pane from './lib/components/Pane.svelte';
-    import Sidebar from './lib/components/Sidebar.svelte';
     import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
     import { applyTheme } from './lib/theme/apply';
-
-    const MIN_SIDEBAR = 200;
-    const MAX_SIDEBAR = 520;
-
-    let draggingSidebar = $state(false);
 
     onMount(() => {
         workspace.load();
@@ -98,6 +96,14 @@
             workspace.openSettings();
             return;
         }
+        // The same key VS Code hides its sidebar with, and the reversible
+        // version of the close button the cluster tree deliberately does not
+        // have.
+        if (event.key === 'b' || event.key === 'B') {
+            event.preventDefault();
+            workspace.toggleClusters();
+            return;
+        }
         if (event.code === 'NumpadAdd') {
             event.preventDefault();
             workspace.zoomIn();
@@ -114,32 +120,6 @@
         return () => clearTimeout(timer);
     });
 
-    function startSidebarResize(event: PointerEvent): void {
-        event.preventDefault();
-        draggingSidebar = true;
-        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    }
-
-    function onSidebarResize(event: PointerEvent): void {
-        if (!draggingSidebar) return;
-        workspace.setSidebarWidth(Math.max(MIN_SIDEBAR, Math.min(event.clientX, MAX_SIDEBAR)));
-    }
-
-    function endSidebarResize(event: PointerEvent): void {
-        draggingSidebar = false;
-        (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
-    }
-
-    function onSidebarKey(event: KeyboardEvent): void {
-        const step = event.shiftKey ? 48 : 16;
-        if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            workspace.setSidebarWidth(Math.max(MIN_SIDEBAR, workspace.sidebarWidth - step));
-        } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            workspace.setSidebarWidth(Math.min(MAX_SIDEBAR, workspace.sidebarWidth + step));
-        }
-    }
 </script>
 
 <svelte:window onkeydown={onZoomKey} />
@@ -148,28 +128,11 @@
     <TopBar />
 
     <div class="body">
-        <Sidebar />
-
-        <!-- A focusable separator is the ARIA "window splitter" pattern; the
-             a11y rules below only key off the role, which they treat as static. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-            class="sidebar-handle"
-            class:active={draggingSidebar}
-            role="separator"
-            aria-label="Resize sidebar"
-            aria-orientation="vertical"
-            aria-valuenow={workspace.sidebarWidth}
-            aria-valuemin={MIN_SIDEBAR}
-            aria-valuemax={MAX_SIDEBAR}
-            tabindex="0"
-            onpointerdown={startSidebarResize}
-            onpointermove={onSidebarResize}
-            onpointerup={endSidebarResize}
-            onpointercancel={endSidebarResize}
-            onkeydown={onSidebarKey}
-        ></div>
+        <!-- Outside <main> so it keeps its full height: the bottom panel spans
+             the view and whatever is beside it, and shortening the cluster list
+             by however tall a log stream happens to be is not a trade the tree
+             should have to make. -->
+        <Pane pane="left" />
 
         <main>
             <div class="upper">
@@ -255,23 +218,6 @@
         display: flex;
         flex: 1 1 auto;
         min-height: 0;
-    }
-
-    /* Sits over the sidebar's right border so the whole seam is grabbable. */
-    .sidebar-handle {
-        width: 5px;
-        margin-left: -3px;
-        margin-right: -2px;
-        z-index: 3;
-        cursor: col-resize;
-        background: transparent;
-        transition: background 120ms ease;
-    }
-
-    .sidebar-handle:hover,
-    .sidebar-handle.active,
-    .sidebar-handle:focus-visible {
-        background: var(--accent);
     }
 
     main {

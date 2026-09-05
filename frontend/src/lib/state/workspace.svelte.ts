@@ -31,7 +31,9 @@ import { forwards } from './forwards.svelte';
 import { logs } from './logs.svelte';
 import { terminals } from './terminals.svelte';
 import {
+    CLUSTERS_TAB_ID,
     PANE_IDS,
+    clustersTab,
     defaultPanes,
     isDocumentView,
     isPaneId,
@@ -71,8 +73,11 @@ export type DockSide = 'right' | 'bottom' | 'left';
 // is re-exported here so that a component reaching for the store gets the types
 // that go with it from the same place.
 export {
+    CLUSTERS_TAB_ID,
     PANE_IDS,
     PANE_LABELS,
+    clustersTab,
+    isHorizontal,
     isDocumentView,
     isPaneId,
     isTabView,
@@ -174,9 +179,17 @@ export interface Notice {
 function canRestore(known: Set<string>) {
     return (ref: { type: string; contextId: string; kind: string }): boolean => {
         if (!isTabView(ref.type)) return false;
+        // The tree belongs to the window, not to a cluster, so there is no
+        // context for it to be known by.
+        if (ref.type === 'clusters') return true;
         if (ref.type === 'resource') return ref.kind === SETTINGS || known.has(ref.contextId);
         return isDocumentView(ref.type) && known.has(ref.contextId);
     };
+}
+
+/** A predicate that spares the pinned tabs whatever else it says. */
+function pinnedFirst(keep: (tab: Tab) => boolean): (tab: Tab) => boolean {
+    return (tab) => tab.pinned === true || keep(tab);
 }
 
 /** One saved tab, as the store holds it. */
@@ -188,6 +201,7 @@ function tabFromRef(ref: {
     name: string;
 }): Tab {
     const view = ref.type as TabView;
+    if (view === 'clusters') return clustersTab();
     const title =
         view === 'resource'
             ? ref.kind === DASHBOARD
@@ -208,6 +222,11 @@ function tabFromRef(ref: {
 /** The panes of a settings file nothing has been opened in yet. */
 function defaultPaneSettings(): Settings['panes'] {
     return {
+        left: {
+            tabs: [{ type: 'clusters', contextId: '', kind: 'clusters', namespace: '', name: '' }],
+            open: true,
+            size: 260,
+        },
         main: { tabs: [], open: true, size: 0 },
         right: { tabs: [], open: true, size: 420 },
         bottom: { tabs: [], open: false, size: 320 },
@@ -465,7 +484,8 @@ class Workspace {
 
     dock = $derived((this.settings.layout.detailDock || 'right') as DockSide);
     detailSize = $derived(this.settings.layout.detailSize || 520);
-    sidebarWidth = $derived(this.settings.layout.sidebarWidth || 260);
+    /** The cluster tree's pane width. Kept under its old name for the settings view. */
+    sidebarWidth = $derived(this.panes.left.size);
     /** How tall the bottom pane stands when it is open, in px. */
     dockSize = $derived(this.panes.bottom.size);
     /**
@@ -1028,6 +1048,24 @@ class Workspace {
     }
 
     /**
+     * Hides or shows the cluster tree, wherever it happens to live.
+     *
+     * The pane rather than the tab, because hiding is what people mean: the
+     * tree cannot be closed, and folding the panel away is the reversible
+     * version of the thing a close button looks like it would do.
+     */
+    toggleClusters(): void {
+        const pane = this.paneOf(CLUSTERS_TAB_ID);
+        if (pane === null) return;
+        if (this.isPaneOpen(pane) && this.panes[pane].activeId === CLUSTERS_TAB_ID) {
+            this.setPaneOpen(pane, false);
+            return;
+        }
+        this.setPaneOpen(pane, true);
+        this.panes[pane].activeId = CLUSTERS_TAB_ID;
+    }
+
+    /**
      * Closes every tab in a pane but one. Pass a context to spare the tabs
      * belonging to other clusters -- "clear out staging, leave prod alone".
      */
@@ -1062,6 +1100,10 @@ class Workspace {
      */
     private retain(pane: PaneId, keep: (tab: Tab) => boolean): void {
         const state = this.panes[pane];
+        // A pinned tab survives every predicate. "Close all" is a request about
+        // the things you opened, and the cluster tree is not one of them: it is
+        // how you opened them.
+        keep = pinnedFirst(keep);
         const survivors = state.tabs.filter(keep);
         if (survivors.length === state.tabs.length) return;
 
@@ -1425,16 +1467,35 @@ class Workspace {
             };
         }
 
+        this.ensureClustersTab();
+
         const first = this.panes.main.tabs[0];
-        if (first && !isSettingsTab(first)) this.selectContext(first.contextId);
+        if (first && first.view === 'resource' && !isSettingsTab(first)) {
+            this.selectContext(first.contextId);
+        }
+    }
+
+    /**
+     * Puts the cluster tree back if nothing has it.
+     *
+     * The store repairs this too, but a session restored with tabs turned off
+     * never reaches the store's copy: it starts from empty panes, and empty
+     * would mean a window with no way to open anything.
+     */
+    private ensureClustersTab(): void {
+        if (this.paneOf(CLUSTERS_TAB_ID) !== null) return;
+        this.panes.left.tabs = [clustersTab(), ...this.panes.left.tabs];
+        this.panes.left.activeId = CLUSTERS_TAB_ID;
+        this.panes.left.open = true;
     }
 
     /** Drops tabs whose context disappeared from disk between syncs. */
     private dropTabsForMissingContexts(): void {
         const known = new Set(this.contexts.map((c) => c.id));
         for (const pane of PANE_IDS) {
-            // The settings tab survives every sync: it does not depend on a
-            // kubeconfig, so losing every cluster must not close it.
+            // The settings tab survives every sync, as the cluster tree does:
+            // neither depends on a kubeconfig, so losing every cluster must not
+            // close them.
             this.retain(pane, (tab) => isSettingsTab(tab) || known.has(tab.contextId));
         }
     }
@@ -1873,9 +1934,9 @@ class Workspace {
         this.persistLayout();
     }
 
+    /** Sets the cluster tree's pane width. The settings view still calls it this. */
     setSidebarWidth(px: number): void {
-        this.settings.layout.sidebarWidth = Math.round(px);
-        this.persistLayout();
+        this.setPaneSize('left', px);
     }
 
     // ----- preferences ---------------------------------------------------

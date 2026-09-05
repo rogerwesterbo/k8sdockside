@@ -28,6 +28,15 @@
         hint?: string;
         /** Draws an unsaved-changes marker in place of the close button. */
         modified?: boolean;
+        /**
+         * Whether the tab has a close button. Default true.
+         *
+         * A tab without one is a tab the user cannot strand themselves by
+         * closing -- the cluster tree, which is how everything else gets
+         * opened. It can still be moved to another pane, and its pane can
+         * still be hidden.
+         */
+        closable?: boolean;
     }
 </script>
 
@@ -172,10 +181,10 @@
         }
     }
 
-    function onPointerDown(event: MouseEvent, id: string): void {
-        if (event.button === 1) {
+    function onPointerDown(event: MouseEvent, tab: StripTab): void {
+        if (event.button === 1 && tab.closable !== false) {
             event.preventDefault();
-            onclose(id);
+            onclose(tab.id);
         }
     }
 
@@ -443,7 +452,7 @@
                     style:--tab-fg={active ? textOn(tab.color) : 'var(--text-dim)'}
                     style:--tab-rule={tab.color}
                     onclick={() => onactivate(tab.id)}
-                    onmousedown={(e) => onPointerDown(e, tab.id)}
+                    onmousedown={(e) => onPointerDown(e, tab)}
                     oncontextmenu={(e) => openMenu(e, tab)}
                     onkeydown={(e) => onKeyDown(e, index)}
                     ondragstart={(e) => startDrag(e, index)}
@@ -456,6 +465,7 @@
                     {#if tab.subtitle}
                         <span class="context">{tab.subtitle}</span>
                     {/if}
+                    {#if tab.closable !== false}
                     <button
                         class="close"
                         class:modified={tab.modified}
@@ -476,6 +486,7 @@
                         <span class="mark"><Icon name="dot" size={13} /></span>
                         <span class="cross"><Icon name="close" size={12} /></span>
                     </button>
+                    {/if}
                 </div>
             {/each}
         </div>

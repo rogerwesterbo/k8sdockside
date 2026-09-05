@@ -31,6 +31,7 @@
         currentTabDrag,
         iconForView,
         isDocumentView,
+        isHorizontal,
         type PaneId,
     } from '../state/panes';
     import { isSettingsTab, workspace } from '../state/workspace.svelte';
@@ -40,6 +41,7 @@
     import PluginOverview from './PluginOverview.svelte';
     import PortForwards from './PortForwards.svelte';
     import ResourceTable from './ResourceTable.svelte';
+    import Sidebar from './Sidebar.svelte';
     import TabStrip, { type StripTab } from './TabStrip.svelte';
     import TerminalView from './TerminalView.svelte';
     import YamlEditor from './YamlEditor.svelte';
@@ -61,6 +63,11 @@
      * anybody finds that out.
      */
     const STRIPS: Record<PaneId, { label: string; hint?: string; foldable: boolean }> = {
+        left: {
+            label: 'Left panel',
+            hint: 'Drag a tab here to keep it beside the main view.',
+            foldable: false,
+        },
         main: { label: 'Open views', foldable: false },
         right: {
             label: 'Right panel',
@@ -101,6 +108,19 @@
     let tabs = $derived(
         contents.tabs.map((tab): StripTab => {
             const cluster = contextName(tab.contextId);
+            if (tab.view === 'clusters') {
+                return {
+                    id: tab.id,
+                    title: tab.title,
+                    icon: iconForView(tab.view),
+                    // The app's own accent rather than a cluster's: the tree is
+                    // about all of them, so borrowing one's colour would say
+                    // something untrue about what it is showing.
+                    color: 'var(--accent)',
+                    hint: 'Every kubeconfig context found on this machine',
+                    closable: false,
+                };
+            }
             if (tab.view === 'resource') {
                 return {
                     id: tab.id,
@@ -180,8 +200,8 @@
     let paneEl = $state<HTMLElement | null>(null);
     let resizing = $state(false);
 
-    /** Which way the pane is measured: the right panel by width, the bottom by height. */
-    let horizontal = $derived(pane === 'right');
+    /** Which way the pane is measured: the side panels by width, the bottom by height. */
+    let horizontal = $derived(isHorizontal(pane));
 
     function startResize(event: PointerEvent): void {
         event.preventDefault();
@@ -194,9 +214,16 @@
         // Measured from the pane's own far edge, so the arithmetic does not
         // depend on where the sidebar or the status bar happens to be.
         const box = paneEl.getBoundingClientRect();
-        const size = horizontal ? box.right - event.clientX : box.bottom - event.clientY;
+        // The left panel grows rightwards from its own left edge; everything
+        // else is measured back from its far edge.
+        const size =
+            pane === 'left'
+                ? event.clientX - box.left
+                : horizontal
+                  ? box.right - event.clientX
+                  : box.bottom - event.clientY;
         const limit = horizontal
-            ? window.innerWidth - PANE_HEADROOM.right
+            ? window.innerWidth - PANE_HEADROOM[pane]
             : window.innerHeight - PANE_HEADROOM.bottom;
         workspace.setPaneSize(pane, Math.max(MIN_PANE_SIZE[pane], Math.min(size, limit)));
     }
@@ -209,10 +236,12 @@
     /** Arrow keys resize the pane for anyone not using a pointer. */
     function onHandleKey(event: KeyboardEvent): void {
         const step = event.shiftKey ? 48 : 16;
-        const grow = horizontal ? 'ArrowLeft' : 'ArrowUp';
-        const shrink = horizontal ? 'ArrowRight' : 'ArrowDown';
+        // Growing is always "away from the pane's own outer edge", which is the
+        // opposite direction on the left from everywhere else.
+        const grow = pane === 'left' ? 'ArrowRight' : horizontal ? 'ArrowLeft' : 'ArrowUp';
+        const shrink = pane === 'left' ? 'ArrowLeft' : horizontal ? 'ArrowRight' : 'ArrowDown';
         const limit = horizontal
-            ? window.innerWidth - PANE_HEADROOM.right
+            ? window.innerWidth - PANE_HEADROOM[pane]
             : window.innerHeight - PANE_HEADROOM.bottom;
 
         if (event.key === grow) {
@@ -232,7 +261,14 @@
      * The side panels earn their room by holding something -- or by having a
      * tab hovering over them, which is how an empty one is aimed at.
      */
-    let present = $derived(pane === 'main' || strip.foldable || contents.tabs.length > 0 || receiving);
+    let present = $derived(
+        pane === 'main' ||
+            strip.foldable ||
+            (contents.tabs.length > 0 && contents.open) ||
+            receiving,
+    );
+    /** On screen only as somewhere to drop the thing being dragged. */
+    let bare = $derived(contents.tabs.length === 0);
 </script>
 
 <svelte:window ondragstart={watchDragStart} ondragend={endDrag} ondrop={endDrag} />
@@ -242,11 +278,12 @@
         class="pane {pane}"
         class:open
         class:receiving
+        class:bare
         class:sized={pane !== 'main'}
         bind:this={paneEl}
         style:--size="{contents.size}px"
     >
-        {#if pane !== 'main' && (open || contents.tabs.length > 0)}
+        {#if pane !== 'main' && !bare}
             <!-- A focusable separator is the ARIA "window splitter" pattern; the
                  a11y rules below only key off the role, which they treat as static. -->
             <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -287,7 +324,9 @@
         <div class="body" ondragover={dragOverBody} ondrop={dropOnBody}>
             {#if open && active}
                 {#key active.id}
-                    {#if active.view === 'resource'}
+                    {#if active.view === 'clusters'}
+                        <Sidebar />
+                    {:else if active.view === 'resource'}
                         {#if active.kind === SETTINGS}
                             <SettingsView />
                         {:else if active.kind === DASHBOARD}
@@ -329,7 +368,14 @@
 
 {#snippet tabMenu(tab: StripTab, dismiss: () => void)}
     {@const contextId = contents.tabs.find((t) => t.id === tab.id)?.contextId ?? ''}
-    <button role="menuitem" onclick={() => run(() => workspace.closeTab(tab.id), dismiss)}>Close</button>
+    <!-- A pinned tab has no close button, so it gets no Close item either.
+         "Close Others" and "Close All" stay: they are about the rest, and the
+         store spares the pinned one whatever the predicate says. -->
+    {#if tab.closable !== false}
+        <button role="menuitem" onclick={() => run(() => workspace.closeTab(tab.id), dismiss)}>
+            Close
+        </button>
+    {/if}
     <button role="menuitem" onclick={() => run(() => workspace.closeOtherTabsIn(pane, tab.id), dismiss)}>
         Close Others
     </button>
@@ -341,7 +387,7 @@
          the discoverable one: a menu item says the panes exist, which a drop
          target nobody has dragged anything over does not. -->
     <hr />
-    {#each ['main', 'right', 'bottom'] as const as target (target)}
+    {#each ['left', 'main', 'right', 'bottom'] as const as target (target)}
         {#if target !== pane}
             <button
                 role="menuitem"
@@ -389,8 +435,17 @@
         background: var(--bg-panel);
     }
 
+    .pane.left,
     .pane.right {
         width: var(--size);
+    }
+
+    .pane.left {
+        border-right: 1px solid var(--border);
+        background: var(--bg-sidebar);
+    }
+
+    .pane.right {
         border-left: 1px solid var(--border);
     }
 
@@ -401,7 +456,8 @@
 
     /* An empty side panel exists only while something is being dragged at it,
        and then only as a target wide enough to aim for. */
-    .pane.right:not(.open) {
+    .pane.left.bare,
+    .pane.right.bare {
         width: 220px;
     }
 
@@ -427,6 +483,15 @@
         cursor: col-resize;
     }
 
+    /* The left panel's seam is on its right, where it meets the view. */
+    .pane.left .handle {
+        top: 0;
+        bottom: 0;
+        right: -3px;
+        width: 7px;
+        cursor: col-resize;
+    }
+
     .pane.bottom .handle {
         left: 0;
         right: 0;
@@ -442,6 +507,8 @@
     }
 
     .body {
+        display: flex;
+        flex-direction: column;
         flex: 1 1 auto;
         min-height: 0;
         min-width: 0;

@@ -897,3 +897,77 @@ func TestSetPluginEnabledRefusesABlankID(t *testing.T) {
 		t.Error("expected an error for a plugin id that is empty")
 	}
 }
+
+// The sidebar was a fixed strip with its width in Layout. It is a pane holding
+// the cluster tree now, so an upgrade has to carry that width across and put the
+// tree in it -- otherwise the window comes back with no way to navigate.
+func TestASettingsFileFromBeforeTheSidebarWasAPane(t *testing.T) {
+	path := tempSettings(t)
+
+	legacy := `{"contexts":{},"layout":{"detailDock":"right","detailSize":520,"sidebarWidth":345,"zoom":1}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := store.Get().Panes.Left
+
+	if left.Size != 345 {
+		t.Errorf("left pane size = %d, want the sidebar's own width 345", left.Size)
+	}
+	if len(left.Tabs) != 1 || left.Tabs[0].Type != ViewClusters {
+		t.Fatalf("left pane = %+v, want the cluster tree in it", left.Tabs)
+	}
+	if !left.Open {
+		t.Error("the left pane came back hidden, so the tree would be nowhere")
+	}
+}
+
+// The tree is the one view that cannot be closed, so a file that has lost it --
+// hand-edited, or written by a build where it was not yet a tab -- is repaired
+// rather than obeyed.
+func TestAFileMissingTheClusterTreeGetsItBack(t *testing.T) {
+	path := tempSettings(t)
+
+	none := `{"contexts":{},"panes":{"left":{"tabs":[],"open":true,"size":260},` +
+		`"main":{"tabs":[],"open":true},"right":{"tabs":[]},"bottom":{"tabs":[],"size":320}}}`
+	if err := os.WriteFile(path, []byte(none), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	left := store.Get().Panes.Left
+	if len(left.Tabs) != 1 || left.Tabs[0].Type != ViewClusters {
+		t.Errorf("left pane = %+v, want the tree put back", left.Tabs)
+	}
+}
+
+// ...but a tree the user has moved is left where they put it.
+func TestAClusterTreeMovedToAnotherPaneStaysThere(t *testing.T) {
+	path := tempSettings(t)
+
+	moved := `{"contexts":{},"panes":{"left":{"tabs":[],"open":true,"size":260},` +
+		`"main":{"tabs":[],"open":true},` +
+		`"right":{"tabs":[{"type":"clusters","kind":"clusters"}],"open":true,"size":420},` +
+		`"bottom":{"tabs":[],"size":320}}}`
+	if err := os.WriteFile(path, []byte(moved), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store.Get().Panes
+
+	if len(got.Left.Tabs) != 0 {
+		t.Errorf("left pane = %+v, want it left empty", got.Left.Tabs)
+	}
+	if len(got.Right.Tabs) != 1 || got.Right.Tabs[0].Type != ViewClusters {
+		t.Errorf("right pane = %+v, want the tree the user moved there", got.Right.Tabs)
+	}
+}

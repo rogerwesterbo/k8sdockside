@@ -17,16 +17,20 @@
 /**
  * The places a tab can be.
  *
- * Three fixed containers rather than a tree of splits. That is a deliberate
- * ceiling: it covers what people actually reach for -- a list here, its logs
- * under it, an editor beside it -- while keeping the layout a flat record that
- * can be written to the settings file and read back without a migration every
- * time the shape grows a case.
+ * Four fixed containers rather than a tree of splits. That is a deliberate
+ * ceiling: it covers what people actually reach for -- the cluster tree down
+ * one side, a list in the middle, its logs under it, an editor beside it --
+ * while keeping the layout a flat record that can be written to the settings
+ * file and read back without a migration every time the shape grows a case.
+ *
+ * Left and right are hidden outright when they hold nothing; the bottom one
+ * keeps its strip, because it is the pane the details panel's buttons send
+ * things to and a place has to be visible before anything can be put in it.
  */
-export type PaneId = 'main' | 'right' | 'bottom';
+export type PaneId = 'left' | 'main' | 'right' | 'bottom';
 
 /** Every pane, in the order the drop menu and the settings file list them. */
-export const PANE_IDS: PaneId[] = ['main', 'right', 'bottom'];
+export const PANE_IDS: PaneId[] = ['left', 'main', 'right', 'bottom'];
 
 /** Whether a string names a pane, for reading a settings file we did not write. */
 export function isPaneId(value: string): value is PaneId {
@@ -37,13 +41,21 @@ export function isPaneId(value: string): value is PaneId {
  * What a tab shows.
  *
  * `resource` is a collection -- the pods of a cluster, a plugin's view, the
- * dashboard, the settings. The other four are views onto one object, and carry
- * that object's namespace and name.
+ * dashboard, the settings. `clusters` is the kubeconfig tree, which belongs to
+ * the window rather than to any cluster. The other four are views onto one
+ * object, and carry that object's namespace and name.
  */
-export type TabView = 'resource' | 'edit' | 'helmvalues' | 'logs' | 'shell';
+export type TabView = 'clusters' | 'resource' | 'edit' | 'helmvalues' | 'logs' | 'shell';
 
 /** Every view, used to reject a type a hand-edited settings file made up. */
-export const TAB_VIEWS: TabView[] = ['resource', 'edit', 'helmvalues', 'logs', 'shell'];
+export const TAB_VIEWS: TabView[] = [
+    'clusters',
+    'resource',
+    'edit',
+    'helmvalues',
+    'logs',
+    'shell',
+];
 
 export function isTabView(value: string): value is TabView {
     return (TAB_VIEWS as string[]).includes(value);
@@ -86,6 +98,15 @@ export interface Tab {
     name: string;
     /** What the strip shows: the kind's label, or the object's own name. */
     title: string;
+    /**
+     * A tab that cannot be closed, only moved or hidden with its pane.
+     *
+     * One view is: the kubeconfig tree. It is how anything else gets opened, so
+     * a close button on it is a button that strands you in an empty window with
+     * no way out. Hiding the pane does the job people actually want, and gives
+     * it back again.
+     */
+    pinned?: boolean;
 }
 
 /** One pane's contents. Which pane it is lives in the record's key. */
@@ -93,11 +114,12 @@ export interface PaneState {
     tabs: Tab[];
     activeId: string | null;
     /**
-     * Whether the pane is showing its contents rather than just its tabs.
+     * Whether the pane is showing at all.
      *
-     * Only the bottom pane can be folded shut while keeping its strip -- that
-     * is what makes it a dock and not a panel, and it is the one pane that is
-     * on screen with nothing in it. The others are simply absent when empty.
+     * The bottom one is the exception: folded, it keeps its strip and gives
+     * back only the room under it, which is what makes it a dock rather than a
+     * panel. The side panels fold away entirely -- that is what hiding the
+     * cluster tree means, and it is the gesture Cmd/Ctrl+B does.
      */
     open: boolean;
     /** How much room the pane takes along its own axis, in px. */
@@ -131,12 +153,15 @@ export function resourceTabId(contextId: string, kind: string): string {
  * concerned, and reopening it must not drag it back.
  */
 export function defaultPaneFor(view: TabView): PaneId {
+    if (view === 'clusters') return 'left';
     return view === 'resource' ? 'main' : 'bottom';
 }
 
 /** The icon a view's tab wears, before the resource catalogue has its say. */
 export function iconForView(view: TabView): string {
     switch (view) {
+        case 'clusters':
+            return 'server';
         case 'logs':
             return 'rows';
         case 'shell':
@@ -150,6 +175,7 @@ export function iconForView(view: TabView): string {
 
 /** How a pane names itself to a screen reader, and in its own drop hint. */
 export const PANE_LABELS: Record<PaneId, string> = {
+    left: 'Left panel',
     main: 'Main',
     right: 'Right panel',
     bottom: 'Bottom panel',
@@ -162,6 +188,7 @@ export function emptyPane(size: number): PaneState {
 
 /** The default sizes, matching appconfig.Defaults on the Go side. */
 export const DEFAULT_PANE_SIZE: Record<PaneId, number> = {
+    left: 260,
     main: 0, // fills what is left; never read
     right: 420,
     bottom: 320,
@@ -170,6 +197,11 @@ export const DEFAULT_PANE_SIZE: Record<PaneId, number> = {
 /** The panes of a window nothing has been opened in yet. */
 export function defaultPanes(): Record<PaneId, PaneState> {
     return {
+        left: {
+            ...emptyPane(DEFAULT_PANE_SIZE.left),
+            tabs: [clustersTab()],
+            activeId: CLUSTERS_TAB_ID,
+        },
         main: emptyPane(DEFAULT_PANE_SIZE.main),
         right: emptyPane(DEFAULT_PANE_SIZE.right),
         // The one pane that starts folded: it is on screen from launch, and an
@@ -183,8 +215,40 @@ export function defaultPanes(): Record<PaneId, PaneState> {
  * of the window. Below these a pane shows its strip and three lines of content,
  * which is not a view of anything.
  */
-export const MIN_PANE_SIZE: Record<PaneId, number> = { main: 0, right: 260, bottom: 160 };
-export const PANE_HEADROOM: Record<PaneId, number> = { main: 0, right: 420, bottom: 220 };
+export const MIN_PANE_SIZE: Record<PaneId, number> = { left: 200, main: 0, right: 260, bottom: 160 };
+export const PANE_HEADROOM: Record<PaneId, number> = { left: 420, main: 0, right: 420, bottom: 220 };
+
+/** Whether a pane is measured across rather than down. */
+export function isHorizontal(pane: PaneId): boolean {
+    return pane === 'left' || pane === 'right';
+}
+
+/**
+ * The kubeconfig tree, as a tab.
+ *
+ * There is exactly one, it belongs to no cluster, and it cannot be closed --
+ * see Tab.pinned. It is a tab at all so that it can be put where the user wants
+ * it: on the right, at the foot, or beside a table in the middle.
+ */
+export const CLUSTERS_TAB_ID = tabIdFor('clusters', {
+    contextId: '',
+    kind: 'clusters',
+    namespace: '',
+    name: '',
+});
+
+export function clustersTab(): Tab {
+    return {
+        id: CLUSTERS_TAB_ID,
+        view: 'clusters',
+        contextId: '',
+        kind: 'clusters',
+        namespace: '',
+        name: '',
+        title: 'Clusters',
+        pinned: true,
+    };
+}
 
 /**
  * The tab being dragged, for the moment it is in the air.

@@ -129,6 +129,10 @@ type PaneState struct {
 // covers a list here, its logs under it and an editor beside it, while staying a
 // shape that can be written and read back without the file learning recursion.
 type Panes struct {
+	// Left holds the kubeconfig tree by default. It is a pane like the others,
+	// so the tree can be moved out of it -- what cannot happen is the tree being
+	// closed, which the frontend enforces by pinning its tab.
+	Left   PaneState `json:"left"`
 	Main   PaneState `json:"main"`
 	Right  PaneState `json:"right"`
 	Bottom PaneState `json:"bottom"`
@@ -136,9 +140,11 @@ type Panes struct {
 
 // Layout is the arrangement the user last left the window in.
 type Layout struct {
-	DetailDock   string `json:"detailDock"`   // right | bottom | left
-	DetailSize   int    `json:"detailSize"`   // px along the docked edge
-	SidebarWidth int    `json:"sidebarWidth"` // px
+	DetailDock string `json:"detailDock"` // right | bottom | left
+	DetailSize int    `json:"detailSize"` // px along the docked edge
+	// SidebarWidth is superseded by Panes.Left.Size and is read only to bring
+	// a file written before the sidebar became a pane across. See migratePanes.
+	SidebarWidth int `json:"sidebarWidth"`
 	// Zoom is the webview scale, 1 being normal size. Persisted so the window
 	// comes back the size the user left it readable at.
 	Zoom float64 `json:"zoom"`
@@ -428,6 +434,11 @@ func Defaults() Settings {
 		TabOrder:        []TabRef{},
 		Dock:            Dock{Tabs: []DockTabRef{}},
 		Panes: &Panes{
+			Left: PaneState{
+				Tabs: []PaneTabRef{{Type: ViewClusters, Kind: KindClusters}},
+				Open: true,
+				Size: 260,
+			},
 			Main:  PaneState{Tabs: []PaneTabRef{}, Open: true},
 			Right: PaneState{Tabs: []PaneTabRef{}, Size: 420},
 			// The one pane that starts folded. It is on screen from launch --
@@ -1046,15 +1057,27 @@ func migratePanes(s Settings) Settings {
 			bottom = append(bottom, PaneTabRef(ref))
 		}
 		s.Panes = &Panes{
+			// The sidebar was a fixed strip with its width in Layout; it is a
+			// pane holding the cluster tree now, and that width is its size.
+			Left: PaneState{
+				Tabs: []PaneTabRef{{Type: ViewClusters, Kind: KindClusters}},
+				Open: true,
+				Size: s.Layout.SidebarWidth,
+			},
 			Main:   PaneState{Tabs: main, Open: true},
 			Right:  PaneState{Tabs: []PaneTabRef{}},
 			Bottom: PaneState{Tabs: bottom, Open: s.Dock.Open, Size: s.Dock.Size},
 		}
 	}
+	// The tree cannot be closed, so a file that has lost it -- hand-edited, or
+	// written by a build where it was not yet a tab -- gets it back rather than
+	// opening a window with no way to navigate.
+	s.Panes = withClustersTab(s.Panes)
 	s.TabOrder = []TabRef{}
 	s.Dock = Dock{Tabs: []DockTabRef{}}
 
 	def := Defaults().Panes
+	s.Panes.Left = normalisePane(s.Panes.Left, def.Left)
 	s.Panes.Main = normalisePane(s.Panes.Main, def.Main)
 	s.Panes.Right = normalisePane(s.Panes.Right, def.Right)
 	s.Panes.Bottom = normalisePane(s.Panes.Bottom, def.Bottom)
@@ -1062,6 +1085,24 @@ func migratePanes(s Settings) Settings {
 	// and the other two are arranged around it.
 	s.Panes.Main.Open = true
 	return s
+}
+
+// withClustersTab guarantees the kubeconfig tree is open somewhere.
+//
+// It is the one view that cannot be closed -- it is how everything else gets
+// opened -- so its absence is a broken file rather than a choice, and the repair
+// is to put it back where it started.
+func withClustersTab(p *Panes) *Panes {
+	for _, pane := range []PaneState{p.Left, p.Main, p.Right, p.Bottom} {
+		for _, tab := range pane.Tabs {
+			if tab.Type == ViewClusters {
+				return p
+			}
+		}
+	}
+	p.Left.Tabs = append([]PaneTabRef{{Type: ViewClusters, Kind: KindClusters}}, p.Left.Tabs...)
+	p.Left.Open = true
+	return p
 }
 
 // normalisePane fills in what one pane's record does not say. The minimum size
@@ -1081,12 +1122,20 @@ func normalisePane(p PaneState, def PaneState) PaneState {
 // the store writes one into every PaneTabRef and has to be able to say which
 // ones it wrote.
 const (
+	// ViewClusters is the kubeconfig tree, which belongs to the window rather
+	// than to any cluster and so carries no context.
+	ViewClusters   = "clusters"
 	ViewResource   = "resource"
 	ViewEdit       = "edit"
 	ViewHelmValues = "helmvalues"
 	ViewLogs       = "logs"
 	ViewShell      = "shell"
 )
+
+// KindClusters is the kind a clusters tab carries. A tab is identified by its
+// view and its target, and this one has no target, so the kind stands in for it
+// and keeps every tab the same shape.
+const KindClusters = "clusters"
 
 // minPaneSize is the smallest a pane may be recorded at, below which the size is
 // taken to be missing rather than chosen. A file written before panes existed

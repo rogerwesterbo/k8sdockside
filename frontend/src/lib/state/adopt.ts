@@ -205,6 +205,7 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             ]),
         ),
         panes: {
+            left: adoptPane(settings.panes?.left, true, 260),
             main: adoptPane(settings.panes?.main, true, 0),
             right: adoptPane(settings.panes?.right, true, 420),
             // Folded until something is opened in it, which is what an older

@@ -110,7 +110,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
 }));
 
-const { workspace } = await import('../state/workspace.svelte');
+const { workspace, CLUSTERS_TAB_ID, clustersTab } = await import('../state/workspace.svelte');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 
@@ -150,6 +150,12 @@ beforeEach(() => {
     workspace.closeAllTabsIn('main');
     workspace.closeAllTabsIn('right');
     workspace.closeAllTabsIn('bottom');
+    // Put the tree back where it starts, since one of these tests moves it.
+    if (workspace.paneOf(CLUSTERS_TAB_ID) === null) {
+        workspace.panes.left.tabs = [clustersTab()];
+    }
+    workspace.moveTabToPane(CLUSTERS_TAB_ID, 'left');
+    workspace.setPaneOpen('left', true);
     withClusters();
 });
 
@@ -205,4 +211,27 @@ test('a moved editor is still the same editor', async () => {
 
     expect(workspace.panes.main.tabs[0].id).toBe(before);
     expect(workspace.isEditing(WEB)).toBe(true);
+});
+
+// The cluster tree is a pane's tab now, with one difference from the rest: no
+// close button, because closing it would leave no way to open anything.
+test('the cluster tree has no close button, unlike every other tab', async () => {
+    render(Pane, { pane: 'left' });
+    render(Pane, { pane: 'main' });
+    workspace.openTab(PROD, 'pods');
+    await expect.element(page.getByRole('tab', { name: /Clusters/ })).toBeVisible();
+
+    expect(page.getByRole('button', { name: 'Close Clusters' }).elements()).toHaveLength(0);
+    // ...while an ordinary tab beside it has one.
+    await expect.element(page.getByRole('button', { name: 'Close Pods' })).toBeVisible();
+});
+
+test('the tree can still be dragged into another pane', async () => {
+    render(Pane, { pane: 'left' });
+    render(Pane, { pane: 'bottom' });
+    await expect.element(page.getByRole('tab', { name: /Clusters/ })).toBeVisible();
+
+    dragOnto(await page.getByRole('tab', { name: /Clusters/ }).element(), stripFor('Dock'));
+
+    expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('bottom');
 });

@@ -85,7 +85,8 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
 }));
 
-const { workspace, isSettingsTab, resourceTabId } = await import('./workspace.svelte');
+const { workspace, isSettingsTab, resourceTabId, CLUSTERS_TAB_ID, clustersTab } =
+    await import('./workspace.svelte');
 const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
@@ -2077,5 +2078,98 @@ describe('moving a view between panes', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+});
+
+// The cluster tree is a view like the others -- it can be moved -- with one
+// difference: it cannot be closed, because it is how everything else is opened.
+describe('the cluster tree', () => {
+    beforeEach(() => {
+        workspace.closeAllTabsIn('main');
+        workspace.closeAllTabsIn('right');
+        workspace.closeAllTabsIn('bottom');
+        if (workspace.paneOf(CLUSTERS_TAB_ID) === null) {
+            workspace.panes.left.tabs = [clustersTab()];
+        }
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'left');
+        workspace.setPaneOpen('left', true);
+    });
+
+    test('starts in the left panel', () => {
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+    });
+
+    test('closing it does nothing, because there would be no way back', () => {
+        workspace.closeTab(CLUSTERS_TAB_ID);
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+    });
+
+    test('"close all" in its pane spares it and takes the rest', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.moveTabToPane(resourceTabId(PROD, 'pods'), 'left');
+
+        workspace.closeAllTabsIn('left');
+
+        expect(workspace.panes.left.tabs.map((t) => t.id)).toEqual([CLUSTERS_TAB_ID]);
+    });
+
+    test('but it can be moved, like anything else', () => {
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'right');
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('right');
+        expect(workspace.panes.left.tabs).toHaveLength(0);
+    });
+
+    // Hiding is the reversible thing a close button looks like it would do.
+    test('hiding it folds the pane it is in, and asking again brings it back', () => {
+        workspace.toggleClusters();
+        expect(workspace.isPaneOpen('left')).toBe(false);
+
+        workspace.toggleClusters();
+        expect(workspace.isPaneOpen('left')).toBe(true);
+        expect(workspace.panes.left.activeId).toBe(CLUSTERS_TAB_ID);
+    });
+
+    test('hiding follows it to whichever pane it was moved to', () => {
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'bottom');
+
+        workspace.toggleClusters();
+
+        expect(workspace.isPaneOpen('bottom')).toBe(false);
+        expect(workspace.isPaneOpen('left')).toBe(false);
+    });
+
+    // A settings file that has lost it -- hand-edited, or written before it was
+    // a tab -- must not open a window with no way to navigate.
+    test('a restored session with no tree in it gets one back', async () => {
+        workspace.settings.panes.left.tabs = [];
+        workspace.settings.panes.main.tabs = [];
+        workspace.settings.panes.right.tabs = [];
+        workspace.settings.panes.bottom.tabs = [];
+        workspace.settings.preferences.restoreTabs = true;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+    });
+
+    // ...including with tab restoring turned off, which starts from empty panes
+    // and so never reaches the copy the store keeps.
+    test('it is there even when last session is deliberately not restored', async () => {
+        workspace.settings.preferences.restoreTabs = false;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).not.toBeNull();
+        workspace.settings.preferences.restoreTabs = true;
+    });
+
+    test('losing every cluster does not take it away', async () => {
+        workspace.files = [];
+
+        await workspace.sync();
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).not.toBeNull();
     });
 });
