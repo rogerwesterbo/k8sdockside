@@ -40,9 +40,38 @@
     --text-faint: #8593a3;
 
     --accent: #4a86ff;
+    /* Text drawn on --accent: the one token that has to contrast with another
+       token rather than with a surface. A theme that only changes --accent and
+       forgets this one is the commonest way to end up with an unreadable
+       button, so the loader checks the pair -- see internal/themes/contrast.go. */
+    --accent-text: #ffffff;
     --ok: #5fd39b;
     --warn: #efb567;
     --error: #f4787f;
+
+    /* The scrollbar thumb. A token rather than a hardcoded white alpha, which
+       is invisible on any light theme. */
+    --scrollbar: rgba(255, 255, 255, 0.11);
+    --scrollbar-hover: rgba(255, 255, 255, 0.2);
+
+    /* The chart series palette: eight hues in a fixed order, assigned in
+       sequence and never cycled. The order is the colourblind-safety mechanism,
+       not a preference -- it is what keeps neighbouring series apart under
+       protanopia and deuteranopia -- so a theme may restep these but must not
+       reorder them.
+
+       Kept apart from --ok/--warn/--error deliberately. Those mean something;
+       a series that merely happens to be fourth must not wear the colour that
+       means "failing". */
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #008300;
+    --chart-7: #9085e9;
+    --chart-8: #e66767;
+    --chart-grid: rgba(255, 255, 255, 0.1);
 
     --radius: 6px;
     --radius-sm: 4px;
@@ -66,39 +95,28 @@
 /*
    The theme seam.
 
-   The shell resolves the user's choice -- system, light or dark -- against the
-   OS and stamps the answer on the root as data-theme. Every rule below keys off
-   that attribute alone: no component asks what the theme is, and no media query
-   decides it, because "system" has already been resolved by the time it gets
-   here. That keeps one source of truth for what the app is currently wearing.
+   The tokens above are the K8s Dockside Dark palette, which is what this app
+   has always been. They are here as the state the window is in before anything
+   has loaded -- the theme itself is a *file*, read by the Go side and written
+   onto this element as custom properties by lib/theme/apply.ts.
 
-   The tokens above are the dark palette, which is what this app has always
-   been, so [data-theme='dark'] adds nothing to them. The light palette is not
-   built yet -- these values are a placeholder so the control is not wired to
-   nothing, and the component-by-component audit that makes light actually
-   habitable is its own piece of work.
+   That is the whole design. There is no rule in this stylesheet, or in any
+   component, that names a theme or keys off which one is on; every rule asks
+   for var(--token) and gets whatever the current theme put there. It is what
+   makes a theme something a stranger can add by dropping a JSON file in a
+   folder rather than something that has to be written into the app.
+
+   The one thing a palette cannot express in custom properties is color-scheme,
+   because it changes what the *browser* draws -- the caret, form controls, and
+   any scrollbar we have not styled. So a theme also says whether it is light or
+   dark, and that lands here as data-theme-base.
 */
-:root[data-theme='light'] {
-    --bg: #f6f7f9;
-    --bg-sidebar: #eef0f4;
-    --bg-panel: #ffffff;
-    --bg-raised: #e7eaf0;
-    --bg-hover: rgba(0, 0, 0, 0.045);
-    --bg-active: rgba(0, 0, 0, 0.075);
-
-    --border: #d5dae2;
-    --border-soft: rgba(0, 0, 0, 0.07);
-
-    --text: #1b2430;
-    --text-dim: #55616f;
-    --text-faint: #7c8794;
-
-    --accent: #2f6fe4;
-    --ok: #1f8a58;
-    --warn: #a96b16;
-    --error: #c8384a;
-
+:root[data-theme-base='light'] {
     color-scheme: light;
+}
+
+:root[data-theme-base='dark'] {
+    color-scheme: dark;
 }
 
 * {
@@ -182,14 +200,14 @@ input[type="search"]:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.11);
+    background: var(--scrollbar);
     border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 6px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--scrollbar-hover);
     background-clip: content-box;
 }
 

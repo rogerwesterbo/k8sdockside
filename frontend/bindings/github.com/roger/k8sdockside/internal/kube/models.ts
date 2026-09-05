@@ -103,6 +103,20 @@ export interface DrainProgress {
 }
 
 /**
+ * FieldPath addresses one value inside an object, in the two shapes a
+ * Kubernetes status is actually written in:
+ * 
+ * 	status.health.status          a plain dotted path
+ * 	status.conditions[Ready]      the status of the condition of that type
+ * 
+ * The second form exists because conditions are the near-universal Kubernetes
+ * idiom and a dotted path cannot reach into a list. It is deliberately not a
+ * general query language: a plugin file comes from outside the app, and "an
+ * address" is a much smaller thing to accept than "an expression".
+ */
+export type FieldPath = string;
+
+/**
  * File is a kubeconfig file on disk together with the contexts parsed out of
  * it. A file that failed to parse is still returned, with Error set, so the
  * sidebar can show it as broken rather than silently dropping it.

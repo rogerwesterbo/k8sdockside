@@ -2,6 +2,7 @@ package kube
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,8 +94,19 @@ type subscription struct {
 	contextID string
 	kind      string
 	namespace string
-	columns   []column
-	live      *liveInformer
+	// selector narrows the rows to objects carrying certain labels, which is
+	// how a solution plugin ships a view of "the parts of this cluster that
+	// belong to Argo CD" rather than of a whole kind.
+	//
+	// It is applied here rather than passed to the informer on purpose. The
+	// informer is shared by every tab on the same resource, so a selector on it
+	// would either need an informer per selector -- a second watch, a second
+	// cache of the same objects -- or would narrow what the other tabs see.
+	// Filtering the cache on the way out costs a label match per row and keeps
+	// one watch per kind, which is the same trade the namespace filter makes.
+	selector labels.Selector
+	columns  []column
+	live     *liveInformer
 
 	dirty chan struct{} // buffered(1): a pending "something changed"
 	done  chan struct{}
@@ -104,7 +116,23 @@ type subscription struct {
 // returns as soon as the watch is started; the first snapshot arrives through
 // emit once the informer's cache has synced, so the caller never blocks on the
 // network.
-func (w *Watcher) Subscribe(kc Context, kind, namespace string) (string, error) {
+//
+// selector is an optional label selector narrowing the rows; empty means every
+// object of the kind. See subscription.selector for why it is not pushed down
+// to the informer.
+func (w *Watcher) Subscribe(kc Context, kind, namespace, selector string) (string, error) {
+	// Left nil when there is no selector, rather than labels.Everything(): the
+	// overwhelming majority of tabs have none, and nil is what lets project()
+	// skip the match entirely instead of asking a selector that always says yes.
+	var chosen labels.Selector
+	if strings.TrimSpace(selector) != "" {
+		parsed, err := labels.Parse(selector)
+		if err != nil {
+			return "", fmt.Errorf("label selector %q: %w", selector, err)
+		}
+		chosen = parsed
+	}
+
 	cl, err := w.clusterFor(kc)
 	if err != nil {
 		return "", err
@@ -133,6 +161,7 @@ func (w *Watcher) Subscribe(kc Context, kind, namespace string) (string, error) 
 		contextID: kc.ID,
 		kind:      kind,
 		namespace: namespace,
+		selector:  chosen,
 		columns:   cols,
 		live:      live,
 		dirty:     make(chan struct{}, 1),
@@ -380,6 +409,9 @@ func (w *Watcher) project(sub *subscription, namespace string) Table {
 			continue
 		}
 		if namespace != AllNamespaces && u.GetNamespace() != namespace {
+			continue
+		}
+		if sub.selector != nil && !sub.selector.Matches(labels.Set(u.GetLabels())) {
 			continue
 		}
 		items = append(items, u)

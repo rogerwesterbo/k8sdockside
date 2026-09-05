@@ -2,8 +2,8 @@
   The app-wide settings, opened as a tab like any other view.
 
   It is a nav rail and one section at a time rather than a single long scroll:
-  the four sections have nothing to do with each other, and a scroll would put
-  the About text between the user and the sources list they came for.
+  the sections have nothing to do with each other, and a scroll would put the
+  About text between the user and the sources list they came for.
 
   The section you are on survives leaving the tab and coming back. It has to be
   module state rather than component state: the shell wraps the active view in
@@ -17,6 +17,8 @@
 <script lang="ts" module>
     const SECTIONS = [
         { id: 'appearance', label: 'Appearance', icon: 'sun' },
+        { id: 'themes', label: 'Themes', icon: 'display' },
+        { id: 'plugins', label: 'Plugins', icon: 'puzzle' },
         { id: 'behaviour', label: 'Behaviour', icon: 'sliders' },
         { id: 'sources', label: 'Kubeconfig sources', icon: 'folder' },
         { id: 'about', label: 'About', icon: 'info' },
@@ -35,6 +37,8 @@
     import AppearanceSection from './AppearanceSection.svelte';
     import BehaviourSection from './BehaviourSection.svelte';
     import SourcesSection from './SourcesSection.svelte';
+    import PluginsSection from './PluginsSection.svelte';
+    import ThemesSection from './ThemesSection.svelte';
 
     let active = $state<SectionId>(remembered);
 
@@ -87,7 +91,11 @@
         tabindex="-1"
     >
         {#if active === 'appearance'}
-            <AppearanceSection />
+            <AppearanceSection onshowthemes={() => show('themes')} />
+        {:else if active === 'themes'}
+            <ThemesSection />
+        {:else if active === 'plugins'}
+            <PluginsSection />
         {:else if active === 'behaviour'}
             <BehaviourSection />
         {:else if active === 'sources'}

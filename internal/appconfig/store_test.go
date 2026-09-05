@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/roger/k8sdockside/internal/themes"
 )
 
 // tempSettings is a throwaway settings file for one test. Tests must never
@@ -470,7 +472,7 @@ func TestPreferencesRoundTrip(t *testing.T) {
 	}
 	off := false
 	if _, err := store.SetPreferences(Preferences{
-		Theme:                ThemeLight,
+		Theme:                "k8sdockside-light",
 		Density:              DensityCompact,
 		RestoreTabs:          &off,
 		ConfirmSourceRemoval: true,
@@ -484,7 +486,7 @@ func TestPreferencesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := reopened.Get().Preferences
-	if got.Theme != ThemeLight || got.Density != DensityCompact {
+	if got.Theme != "k8sdockside-light" || got.Density != DensityCompact {
 		t.Errorf("preferences = %+v, want light and compact", got)
 	}
 	if !got.ConfirmSourceRemoval {
@@ -525,11 +527,10 @@ func TestRestoreTabsIsNilUntilTheUserChooses(t *testing.T) {
 func TestUnknownPreferenceValuesFallBackToTheDefaults(t *testing.T) {
 	path := tempSettings(t)
 
-	// Hand-edited: a theme that does not exist and a density that does not
-	// exist. fontSize is deliberately still here -- it was a real field once,
-	// and a settings file written by that version must not fail to parse now
-	// that it is gone.
-	body := `{"contexts":{},"preferences":{"theme":"solarized","density":"roomy","fontSize":400}}`
+	// Hand-edited: a density that does not exist. fontSize is deliberately
+	// still here -- it was a real field once, and a settings file written by
+	// that version must not fail to parse now that it is gone.
+	body := `{"contexts":{},"preferences":{"density":"roomy","fontSize":400}}`
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -539,11 +540,82 @@ func TestUnknownPreferenceValuesFallBackToTheDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := store.Get().Preferences
-	if got.Theme != ThemeSystem {
-		t.Errorf("theme = %q, want %q", got.Theme, ThemeSystem)
+	if got.Theme != themes.DefaultID {
+		t.Errorf("theme = %q, want %q", got.Theme, themes.DefaultID)
 	}
 	if got.Density != DensityComfortable {
 		t.Errorf("density = %q, want %q", got.Density, DensityComfortable)
+	}
+}
+
+// A theme id the store does not recognise is kept rather than reset. The store
+// cannot know what themes exist -- one may live in a folder that has not been
+// read, or on a machine this file has not reached -- so resetting would quietly
+// throw away a choice that is about to become valid again.
+func TestAnUnknownThemeIDIsKept(t *testing.T) {
+	path := tempSettings(t)
+	body := `{"contexts":{},"preferences":{"theme":"someone-elses-theme"}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get().Preferences.Theme; got != "someone-elses-theme" {
+		t.Errorf("theme = %q, want it left alone", got)
+	}
+}
+
+// The three values Theme held before the app had a gallery are rewritten to the
+// themes that replaced them, so upgrading does not repaint anyone's app.
+func TestLegacyThemeValuesAreMigrated(t *testing.T) {
+	for old, want := range map[string]string{
+		"dark":   themes.DefaultID,
+		"light":  "k8sdockside-light",
+		"system": themes.DefaultID,
+	} {
+		t.Run(old, func(t *testing.T) {
+			path := tempSettings(t)
+			body := `{"contexts":{},"preferences":{"theme":"` + old + `"}}`
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			store, err := openAt(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := store.Get().Preferences.Theme; got != want {
+				t.Errorf("theme %q migrated to %q, want %q", old, got, want)
+			}
+		})
+	}
+}
+
+func TestThemeFolders(t *testing.T) {
+	store := openIn(t)
+
+	if _, err := store.AddThemeFolder("/home/u/themes"); err != nil {
+		t.Fatalf("AddThemeFolder: %v", err)
+	}
+	// Adding the same folder twice is a no-op, not a duplicate row in the UI.
+	if _, err := store.AddThemeFolder("/home/u/themes"); err != nil {
+		t.Fatalf("AddThemeFolder again: %v", err)
+	}
+	if got := store.ThemeFolders(); len(got) != 1 || got[0] != "/home/u/themes" {
+		t.Fatalf("folders = %v, want the one", got)
+	}
+	if _, err := store.AddThemeFolder(""); err == nil {
+		t.Error("an empty path was accepted")
+	}
+
+	if _, err := store.RemoveThemeFolder("/home/u/themes"); err != nil {
+		t.Fatalf("RemoveThemeFolder: %v", err)
+	}
+	if got := store.ThemeFolders(); len(got) != 0 {
+		t.Errorf("folders = %v, want none", got)
 	}
 }
 
@@ -554,7 +626,7 @@ func TestPreferencesCopyThePointerField(t *testing.T) {
 
 	on := true
 	if _, err := store.SetPreferences(Preferences{
-		Theme:       ThemeDark,
+		Theme:       themes.DefaultID,
 		Density:     DensityComfortable,
 		RestoreTabs: &on,
 	}); err != nil {
@@ -678,7 +750,7 @@ func TestTurningLineNumbersOffSurvivesAReopen(t *testing.T) {
 	}
 	off := false
 	if _, err := store.SetPreferences(Preferences{
-		Theme:           ThemeDark,
+		Theme:           themes.DefaultID,
 		Density:         DensityComfortable,
 		ShowLineNumbers: &off,
 	}); err != nil {

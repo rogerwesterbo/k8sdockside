@@ -31,6 +31,24 @@ func defaultPath() (string, error) {
 	return filepath.Join(dir, "k8sdockside", settingsFile), nil
 }
 
+// ThemesDir is where a user's own theme files live: a folder beside the
+// settings file, so that everything this app reads or writes for a user is in
+// one place they can back up, sync or delete as a unit.
+//
+// It is a function on the store rather than a constant because the settings
+// path is resolved at runtime, and the two must not be able to disagree about
+// which directory that is.
+func (s *Store) ThemesDir() string {
+	return filepath.Join(filepath.Dir(s.path), "themes")
+}
+
+// PluginsDir is where a user's own solution plugins live, beside the settings
+// file and the themes folder for the same reason: everything this app reads or
+// writes for a user is in one place they can back up, sync or delete as a unit.
+func (s *Store) PluginsDir() string {
+	return filepath.Join(filepath.Dir(s.path), "plugins")
+}
+
 // legacyPath is where releases before the move wrote the file: whatever
 // os.UserConfigDir picks for the platform. On Windows and on a Linux box with
 // no XDG_CONFIG_HOME set it is the same path defaultPath returns, which is why

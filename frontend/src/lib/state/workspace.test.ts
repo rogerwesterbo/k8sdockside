@@ -18,6 +18,27 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
         Open: vi.fn().mockResolvedValue('logs-1'),
         Close: vi.fn(),
     },
+    MetricsService: {
+        Source: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
+        SetEndpoint: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
+        Rediscover: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
+        Charts: vi.fn().mockResolvedValue({ source: { endpoint: {}, available: false, error: '', configured: '' }, charts: [], range: 60 }),
+        Attachments: vi.fn().mockResolvedValue([]),
+    },
+    PluginService: {
+        List: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        Reload: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        Summary: vi.fn().mockResolvedValue({ pluginId: '', installed: false, checked: true, requirements: [], cards: [], error: '' }),
+    },
+    ThemeService: {
+        List: vi.fn().mockResolvedValue({ themes: [], dir: '', folders: [], problems: [] }),
+        Tokens: vi.fn().mockResolvedValue([]),
+        RevealDir: vi.fn().mockResolvedValue(undefined),
+        CreateExample: vi.fn().mockResolvedValue(''),
+        AddFolder: vi.fn().mockResolvedValue({}),
+        RemoveFolder: vi.fn().mockResolvedValue({}),
+        BrowseForFolder: vi.fn().mockResolvedValue({}),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
@@ -30,9 +51,10 @@ vi.mock('../../../bindings/github.com/roger/k8sdockside', () => ({
 }));
 
 const { workspace, isSettingsTab } = await import('./workspace.svelte');
+const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
-const { ResourceService, KubeconfigService, SettingsService } = await import(
+const { ResourceService, KubeconfigService, SettingsService, ThemeService, PluginService } = await import(
     '../../../bindings/github.com/roger/k8sdockside',
 );
 
@@ -1069,38 +1091,19 @@ describe('the settings tab', () => {
 describe('preferences', () => {
     beforeEach(() => {
         workspace.settings.preferences = {
-            theme: 'system',
+            theme: 'k8sdockside-dark',
             density: 'comfortable',
             restoreTabs: true,
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
             showLineNumbers: true,
+            metricsRange: 60,
         };
     });
 
-    test('a chosen theme is used as-is', () => {
-        workspace.setTheme('light');
-        expect(workspace.resolvedTheme).toBe('light');
-
-        workspace.setTheme('dark');
-        expect(workspace.resolvedTheme).toBe('dark');
-    });
-
-    test('system follows what the OS is asking for', () => {
-        workspace.setTheme('system');
-
-        workspace.systemPrefersDark = true;
-        expect(workspace.resolvedTheme).toBe('dark');
-
-        workspace.systemPrefersDark = false;
-        expect(workspace.resolvedTheme).toBe('light');
-    });
-
-    test('a chosen theme ignores the OS', () => {
-        workspace.setTheme('light');
-        workspace.systemPrefersDark = true;
-
-        expect(workspace.resolvedTheme).toBe('light');
+    test('the chosen theme is stored by id', () => {
+        workspace.setTheme('nord');
+        expect(workspace.theme).toBe('nord');
     });
 
     test('turning tab restore off is a choice that sticks', () => {
@@ -1537,5 +1540,319 @@ describe('the detail panel', () => {
         await workspace.refreshDetail();
 
         expect(workspace.detailRevision).toBe(changes.revision(WEB));
+    });
+});
+
+// The catalogue is the one piece of state that can name something that is not
+// there: a settings file survives the theme it asks for being deleted, the
+// folder it came from being dropped, or being opened on another machine.
+describe('themes', () => {
+    /** A theme as the Go side hands one over. */
+    function theme(id: string, extra: Record<string, unknown> = {}) {
+        return {
+            id,
+            name: id,
+            tagline: '',
+            base: 'dark',
+            author: '',
+            tokens: { bg: '#000000' },
+            resolved: { bg: '#000000', text: '#ffffff' },
+            origin: 'builtin',
+            pack: '',
+            warnings: [],
+            ...extra,
+        };
+    }
+
+    beforeEach(() => {
+        workspace.themeCatalogue = { themes: [], dir: '', folders: [], problems: [] };
+        workspace.settings.preferences = { ...workspace.settings.preferences, theme: 'k8sdockside-dark' };
+    });
+
+    test('loads the catalogue and the token documentation', async () => {
+        vi.mocked(ThemeService.List).mockResolvedValueOnce({
+            themes: [theme('k8sdockside-dark'), theme('nord')],
+            dir: '/home/u/.config/k8sdockside/themes',
+            folders: ['/home/u/dotfiles/themes'],
+            problems: [{ path: '/tmp/bad.json', message: 'not valid JSON' }],
+        });
+        vi.mocked(ThemeService.Tokens).mockResolvedValueOnce([{ name: 'bg', help: 'The window.' }]);
+
+        await workspace.loadThemes();
+
+        expect(workspace.themes.map((t) => t.id)).toEqual(['k8sdockside-dark', 'nord']);
+        expect(workspace.themeDir).toBe('/home/u/.config/k8sdockside/themes');
+        expect(workspace.themeFolders).toEqual(['/home/u/dotfiles/themes']);
+        expect(workspace.themeProblems).toHaveLength(1);
+        expect(workspace.themeTokens.map((t) => t.name)).toEqual(['bg']);
+    });
+
+    test('a null theme list does not become undefined further in', async () => {
+        vi.mocked(ThemeService.List).mockResolvedValueOnce({
+            themes: null,
+            dir: '',
+            folders: null,
+            problems: null,
+        });
+
+        await workspace.loadThemes();
+
+        expect(workspace.themes).toEqual([]);
+        expect(workspace.themeFolders).toEqual([]);
+        expect(workspace.themeProblems).toEqual([]);
+    });
+
+    test('the active theme is the one the settings name', async () => {
+        vi.mocked(ThemeService.List).mockResolvedValueOnce({
+            themes: [theme('k8sdockside-dark'), theme('nord')],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+        await workspace.loadThemes();
+
+        workspace.setTheme('nord');
+
+        expect(workspace.activeTheme?.id).toBe('nord');
+        expect(workspace.themeMissing).toBe(false);
+    });
+
+    // Falling back rather than failing, and saying so rather than silently
+    // rewriting the choice: the theme may be one folder away from coming back.
+    test('a theme that is not installed falls back to the default and is flagged', async () => {
+        vi.mocked(ThemeService.List).mockResolvedValueOnce({
+            themes: [theme('k8sdockside-dark')],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+        await workspace.loadThemes();
+
+        workspace.setTheme('someone-elses-theme');
+
+        expect(workspace.activeTheme?.id).toBe('k8sdockside-dark');
+        expect(workspace.themeMissing).toBe(true);
+        // The choice itself is untouched, so reinstalling the theme restores it.
+        expect(workspace.theme).toBe('someone-elses-theme');
+    });
+
+    test('nothing is missing before the catalogue has loaded', () => {
+        workspace.setTheme('nord');
+        expect(workspace.themeMissing).toBe(false);
+        expect(workspace.activeTheme).toBeNull();
+    });
+
+    test('dropping a folder replaces the catalogue with what the service returns', async () => {
+        vi.mocked(ThemeService.RemoveFolder).mockResolvedValueOnce({
+            themes: [theme('k8sdockside-dark')],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+
+        await workspace.removeThemeFolder('/home/u/dotfiles/themes');
+
+        expect(workspace.themeFolders).toEqual([]);
+        expect(ThemeService.RemoveFolder).toHaveBeenCalledWith('/home/u/dotfiles/themes');
+    });
+});
+
+// The distinction this whole feature turns on: a plugin is installed on *this
+// machine*, and the solution it describes is installed in a *cluster*. Those
+// come apart constantly, and the sidebar has to say which it means.
+describe('solution plugins', () => {
+    function plugin(id: string, requires: { kind: string; optional?: boolean }[] = []) {
+        return {
+            id,
+            name: id,
+            tagline: '',
+            icon: 'puzzle',
+            author: '',
+            docs: '',
+            description: '',
+            requires: requires.map((r) => ({ kind: r.kind, label: r.kind, optional: r.optional ?? false })),
+            views: [{ id: 'things', label: 'Things', icon: 'box', type: 'table', kind: 'pods', namespace: '', selector: '' }],
+            origin: 'builtin',
+            pack: '',
+        };
+    }
+
+    /** Says the cluster's definitions have been read, and what they contain. */
+    function clusterServes(contextId: string, kinds: string[]) {
+        workspace.customKinds = {
+            ...workspace.customKinds,
+            [contextId]: {
+                status: 'ready',
+                message: '',
+                groups: [
+                    {
+                        group: 'argoproj.io',
+                        kinds: kinds.map((kind) => ({
+                            kind,
+                            label: kind,
+                            group: 'argoproj.io',
+                            plural: kind,
+                            scoped: true,
+                        })),
+                    },
+                ],
+            },
+        };
+    }
+
+    beforeEach(() => {
+        workspace.pluginCatalogue = { plugins: [], dir: '', folders: [], problems: [] };
+        workspace.customKinds = {};
+        workspace.expandedPlugins = [];
+    });
+
+    test('loads the catalogue and registers its views for tab titles', async () => {
+        vi.mocked(PluginService.List).mockResolvedValueOnce({
+            plugins: [
+                {
+                    id: 'argocd',
+                    name: 'Argo CD',
+                    tagline: 'GitOps',
+                    icon: 'rocket',
+                    author: '',
+                    docs: '',
+                    description: '',
+                    requires: [{ kind: 'crd:applications.argoproj.io', label: 'Applications', optional: false }],
+                    views: [
+                        {
+                            id: 'applications',
+                            label: 'Applications',
+                            icon: 'rocket',
+                            type: 'table',
+                            kind: 'crd:applications.argoproj.io',
+                            namespace: '',
+                            selector: '',
+                        },
+                    ],
+                    origin: 'builtin',
+                    pack: '',
+                },
+            ],
+            dir: '/home/u/.config/k8sdockside/plugins',
+            folders: [],
+            problems: [],
+        });
+
+        await workspace.loadPlugins();
+
+        expect(workspace.plugins.map((p) => p.id)).toEqual(['argocd']);
+        expect(workspace.pluginDir).toBe('/home/u/.config/k8sdockside/plugins');
+        // The tab bar titles a plugin view through labelFor, which only knows
+        // what loadPlugins registered.
+        expect(labelFor('plugin:argocd/applications')).toBe('Applications');
+        // Every plugin has an overview whether or not it declares one.
+        expect(labelFor('plugin:argocd/overview')).toBe('Argo CD');
+    });
+
+    test('a null plugin list does not become undefined further in', async () => {
+        vi.mocked(PluginService.List).mockResolvedValueOnce({
+            plugins: null,
+            dir: '',
+            folders: null,
+            problems: null,
+        });
+
+        await workspace.loadPlugins();
+
+        expect(workspace.plugins).toEqual([]);
+        expect(workspace.pluginFolders).toEqual([]);
+        expect(workspace.pluginProblems).toEqual([]);
+    });
+
+    // Before the definitions have been read we genuinely do not know. A row
+    // that said "not installed" before it had looked would be wrong more often
+    // than right.
+    test('presence is unknown until the cluster has been asked', () => {
+        const argo = plugin('argocd', [{ kind: 'crd:applications.argoproj.io' }]);
+        expect(workspace.pluginInstalledIn(PROD, argo)).toBeNull();
+    });
+
+    test('a cluster serving every required CRD counts as installed', () => {
+        clusterServes(PROD, ['crd:applications.argoproj.io', 'crd:appprojects.argoproj.io']);
+        const argo = plugin('argocd', [
+            { kind: 'crd:applications.argoproj.io' },
+            { kind: 'crd:appprojects.argoproj.io' },
+        ]);
+
+        expect(workspace.pluginInstalledIn(PROD, argo)).toBe(true);
+    });
+
+    test('one missing required CRD is enough to count as not installed', () => {
+        clusterServes(PROD, ['crd:applications.argoproj.io']);
+        const argo = plugin('argocd', [
+            { kind: 'crd:applications.argoproj.io' },
+            { kind: 'crd:appprojects.argoproj.io' },
+        ]);
+
+        expect(workspace.pluginInstalledIn(PROD, argo)).toBe(false);
+    });
+
+    // Argo CD without ApplicationSets is still Argo CD.
+    test('an optional CRD does not decide it', () => {
+        clusterServes(PROD, ['crd:applications.argoproj.io']);
+        const argo = plugin('argocd', [
+            { kind: 'crd:applications.argoproj.io' },
+            { kind: 'crd:applicationsets.argoproj.io', optional: true },
+        ]);
+
+        expect(workspace.pluginInstalledIn(PROD, argo)).toBe(true);
+    });
+
+    // A requirement on a built-in kind is served by every cluster worth
+    // connecting to, and cannot be looked up in a list of custom resources.
+    test('a requirement on a built-in kind is taken as met', () => {
+        clusterServes(PROD, []);
+        expect(workspace.pluginInstalledIn(PROD, plugin('x', [{ kind: 'deployments' }]))).toBe(true);
+    });
+
+    test('a plugin with no requirements is taken at its word', () => {
+        clusterServes(PROD, []);
+        expect(workspace.pluginInstalledIn(PROD, plugin('x'))).toBe(true);
+    });
+
+    test('unfolding a plugin is per context', () => {
+        workspace.togglePlugin(PROD, 'argocd');
+
+        expect(workspace.isPluginExpanded(PROD, 'argocd')).toBe(true);
+        expect(workspace.isPluginExpanded(STAGING, 'argocd')).toBe(false);
+
+        workspace.togglePlugin(PROD, 'argocd');
+        expect(workspace.isPluginExpanded(PROD, 'argocd')).toBe(false);
+    });
+
+    test('a view that pins a namespace reports it, and one that does not reports nothing', async () => {
+        vi.mocked(PluginService.List).mockResolvedValueOnce({
+            plugins: [
+                {
+                    ...plugin('argocd'),
+                    views: [
+                        { id: 'free', label: 'Free', icon: 'box', type: 'table', kind: 'pods', namespace: '', selector: '' },
+                        { id: 'pinned', label: 'Pinned', icon: 'box', type: 'table', kind: 'pods', namespace: 'argocd', selector: '' },
+                    ],
+                },
+            ],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+        await workspace.loadPlugins();
+
+        expect(workspace.pinnedNamespace('plugin:argocd/pinned')).toBe('argocd');
+        expect(workspace.pinnedNamespace('plugin:argocd/free')).toBe('');
+        // A kind that is not a plugin view at all, which is nearly every tab.
+        expect(workspace.pinnedNamespace('pods')).toBe('');
+        // A plugin that is not installed cannot pin anything.
+        expect(workspace.pinnedNamespace('plugin:gone/anything')).toBe('');
+    });
+
+    test('opening the overview opens a tab on the plugin, not on a resource', () => {
+        workspace.openPluginOverview(PROD, 'argocd');
+
+        expect(workspace.activeTab?.kind).toBe('plugin:argocd/overview');
     });
 });

@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+
+	"github.com/roger/k8sdockside/internal/themes"
 )
 
 // ContextPrefs is what the user decided about one kubeconfig context. Alias
@@ -24,6 +26,16 @@ import (
 type ContextPrefs struct {
 	Alias string `json:"alias"`
 	Color string `json:"color"`
+	// Metrics overrides where this cluster's Prometheus is found, for the charts
+	// a solution plugin draws. Empty means "look for it", which is what almost
+	// every cluster wants: a Prometheus installed by the Operator or the
+	// community chart is discoverable, and reaching it through the API server
+	// needs no address at all.
+	//
+	// Two forms are accepted -- `namespace/service:port` and an http(s) URL --
+	// because there are two genuinely different situations behind them; see
+	// metrics.ParseEndpoint.
+	Metrics string `json:"metrics,omitzero"`
 	// CollapsedGroups overrides Layout.CollapsedGroups for this context alone.
 	// Nil means "follow the global setting", which is the usual case -- a
 	// cluster only carries its own list once the user folds a group for it
@@ -100,9 +112,17 @@ type Layout struct {
 // is "where the user left the furniture", which is written on every splitter
 // drag, while these are settings someone sat down and chose.
 type Preferences struct {
-	// Theme is system, light or dark. Empty means system, which follows the
-	// OS. The frontend resolves it to a data-theme attribute; nothing here
-	// knows what a colour is.
+	// Theme is the id of the theme the user chose -- a built-in one, or one
+	// they installed. Empty means the default.
+	//
+	// It is stored as a free string and deliberately not validated against a
+	// list, because the store has no way to know what themes exist: a theme
+	// may live in a folder that has not been read yet, or on a machine this
+	// settings file has not reached. An id nothing answers to is kept as
+	// written and falls back to the default at the point it is applied, so
+	// that a theme temporarily missing does not silently unset the choice.
+	//
+	// Nothing here knows what a colour is; see internal/themes.
 	Theme string `json:"theme"`
 	// Density is comfortable or compact, and drives the table row height.
 	// Empty means comfortable.
@@ -130,6 +150,13 @@ type Preferences struct {
 	// are the same, so a settings file written before this field existed reads
 	// as "hidden", which is exactly right.
 	ShowKubeconfigNames bool `json:"showKubeconfigNames"`
+	// MetricsRange is how far back a chart looks, in minutes. Persisted because
+	// it is a way of working rather than a moment: somebody watching a rollout
+	// wants fifteen minutes every time they open a pod, and somebody reviewing
+	// capacity wants a day.
+	//
+	// Zero means never chosen and resolves to an hour.
+	MetricsRange int `json:"metricsRange,omitzero"`
 	// ShowLineNumbers draws a line-number gutter down the side of the YAML
 	// editor in the bottom dock.
 	//
@@ -151,7 +178,17 @@ type Settings struct {
 	// ExcludedFiles are kubeconfigs found by discovery that the user has said
 	// they do not want. A discovered file cannot simply be forgotten -- the
 	// next scan would find it again -- so refusing it has to be recorded.
-	ExcludedFiles []string                `json:"excludedFiles"`
+	ExcludedFiles []string `json:"excludedFiles"`
+	// ThemeFolders are extra directories to read themes from, on top of the
+	// themes folder beside this file. They sit here rather than in Preferences
+	// for the same reason ManualFolders does: this is where something comes
+	// from, not a choice about how the app behaves.
+	ThemeFolders []string `json:"themeFolders"`
+	// PluginFolders is the same for solution plugins. Kept separate from
+	// ThemeFolders rather than merged into one list of "add-on folders":
+	// somebody who syncs a folder of themes has not asked for plugins out of
+	// it, and one list would mean every folder was scanned for both.
+	PluginFolders []string                `json:"pluginFolders"`
 	Contexts      map[string]ContextPrefs `json:"contexts"`
 	TabOrder      []TabRef                `json:"tabOrder"`
 	// Dock is the bottom strip: its tabs in the order the user left them, and
@@ -171,11 +208,13 @@ func Defaults() Settings {
 		ManualFiles:   []string{},
 		ManualFolders: []string{},
 		ExcludedFiles: []string{},
+		ThemeFolders:  []string{},
+		PluginFolders: []string{},
 		Contexts:      map[string]ContextPrefs{},
 		TabOrder:      []TabRef{},
 		Dock:          Dock{Size: 320, Tabs: []DockTabRef{}},
 		Layout:        Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
-		Preferences:   Preferences{Theme: ThemeSystem, Density: DensityComfortable},
+		Preferences:   Preferences{Theme: themes.DefaultID, Density: DensityComfortable},
 	}
 }
 
@@ -188,18 +227,31 @@ const (
 	MaxZoom = 2.0
 )
 
-// The values Preferences.Theme and Preferences.Density may take. They are
-// strings rather than an enum so the settings file stays readable and so an
-// unknown value from a hand-edited file normalises back to the default instead
-// of failing to parse.
+// The values Preferences.Density may take. They are strings rather than an enum
+// so the settings file stays readable and so an unknown value from a
+// hand-edited file normalises back to the default instead of failing to parse.
 const (
-	ThemeSystem = "system"
-	ThemeLight  = "light"
-	ThemeDark   = "dark"
-
 	DensityComfortable = "comfortable"
 	DensityCompact     = "compact"
 )
+
+// MaxMetricsRange bounds how far back a chart may look, in minutes. A week of
+// samples is already more than a line four hundred pixels wide can say.
+const MaxMetricsRange = 7 * 24 * 60
+
+// legacyThemes maps what Preferences.Theme held before the app had themes onto
+// the theme ids that replaced them.
+//
+// "system" is here because following the OS appearance is no longer a thing the
+// app does: with a gallery of themes there is no pair for the OS to choose
+// between, and the setting became "which theme", full stop. Anyone who was on
+// it lands on the dark palette they were most likely already looking at, which
+// is also what the app defaults to.
+var legacyThemes = map[string]string{
+	"system": themes.DefaultID,
+	"dark":   themes.DefaultID,
+	"light":  "k8sdockside-light",
+}
 
 // Store is the settings file plus the lock guarding it. Wails calls service
 // methods from multiple goroutines, so every read and write goes through the
@@ -238,7 +290,7 @@ func Open() (*Store, error) {
 func openAt(path string) (*Store, error) {
 	s := &Store{path: path, data: Defaults()}
 
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the app's own settings file
 	if errors.Is(err, fs.ErrNotExist) {
 		return s, nil
 	}
@@ -306,11 +358,40 @@ func (s *Store) SetContextPrefs(id string, prefs ContextPrefs) (Settings, error)
 		// A folding override is a preference in its own right, so a context
 		// carrying only that one is kept. An empty override is meaningful: it
 		// says "show every group here", which is not the same as no override.
-		if prefs.Alias == "" && prefs.Color == "" && prefs.CollapsedGroups == nil {
+		if prefs.Alias == "" && prefs.Color == "" && prefs.Metrics == "" && prefs.CollapsedGroups == nil {
 			delete(d.Contexts, id)
 			return
 		}
 		d.Contexts[id] = prefs
+	})
+}
+
+// MetricsEndpoint returns where a context's Prometheus was configured to be,
+// empty when the user has not said and discovery should look.
+func (s *Store) MetricsEndpoint(contextID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Contexts[contextID].Metrics
+}
+
+// SetMetricsEndpoint records where a context's Prometheus is. An empty value
+// clears the override rather than recording an empty one, which is what puts
+// discovery back in charge.
+func (s *Store) SetMetricsEndpoint(contextID, value string) (Settings, error) {
+	if contextID == "" {
+		return s.Get(), errors.New("context id is required")
+	}
+	return s.update(func(d *Settings) {
+		prefs := d.Contexts[contextID]
+		prefs.Metrics = value
+		// The same emptiness rule SetContextPrefs applies: a context with
+		// nothing left to say about it is forgotten rather than kept as a blank
+		// entry cluttering the settings file.
+		if prefs.Alias == "" && prefs.Color == "" && prefs.Metrics == "" && prefs.CollapsedGroups == nil {
+			delete(d.Contexts, contextID)
+			return
+		}
+		d.Contexts[contextID] = prefs
 	})
 }
 
@@ -393,6 +474,62 @@ func (s *Store) RemoveManualFolder(path string) (Settings, error) {
 	})
 }
 
+// ThemeFolders returns the extra directories themes are read from.
+func (s *Store) ThemeFolders() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.ThemeFolders)
+}
+
+// AddThemeFolder remembers a directory to read themes from. Adding one that is
+// already known is a no-op rather than an error.
+func (s *Store) AddThemeFolder(path string) (Settings, error) {
+	if path == "" {
+		return s.Get(), errors.New("path is required")
+	}
+	return s.update(func(d *Settings) {
+		if !slices.Contains(d.ThemeFolders, path) {
+			d.ThemeFolders = append(d.ThemeFolders, path)
+		}
+	})
+}
+
+// RemoveThemeFolder stops reading themes from a directory. Nothing is deleted
+// from disk; the themes simply stop being offered.
+func (s *Store) RemoveThemeFolder(path string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.ThemeFolders = slices.DeleteFunc(d.ThemeFolders, func(p string) bool { return p == path })
+	})
+}
+
+// PluginFolders returns the extra directories plugins are read from.
+func (s *Store) PluginFolders() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.PluginFolders)
+}
+
+// AddPluginFolder remembers a directory to read plugins from. Adding one that
+// is already known is a no-op rather than an error.
+func (s *Store) AddPluginFolder(path string) (Settings, error) {
+	if path == "" {
+		return s.Get(), errors.New("path is required")
+	}
+	return s.update(func(d *Settings) {
+		if !slices.Contains(d.PluginFolders, path) {
+			d.PluginFolders = append(d.PluginFolders, path)
+		}
+	})
+}
+
+// RemovePluginFolder stops reading plugins from a directory. Nothing is deleted
+// from disk; the plugins in it just stop being offered.
+func (s *Store) RemovePluginFolder(path string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.PluginFolders = slices.DeleteFunc(d.PluginFolders, func(p string) bool { return p == path })
+	})
+}
+
 // SetLayout records the sidebar width and detail-panel dock and size.
 func (s *Store) SetLayout(l Layout) (Settings, error) {
 	return s.update(func(d *Settings) { d.Layout = l })
@@ -460,7 +597,7 @@ var settingsFormat = json.JoinOptions(
 // write cannot leave a half-written config behind. The caller holds the lock.
 func (s *Store) flush() error {
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
 
@@ -475,14 +612,15 @@ func (s *Store) flush() error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename below has succeeded
+	// no-op once the rename below has succeeded
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -502,6 +640,12 @@ func normalise(s Settings) Settings {
 	}
 	if s.ExcludedFiles == nil {
 		s.ExcludedFiles = []string{}
+	}
+	if s.ThemeFolders == nil {
+		s.ThemeFolders = []string{}
+	}
+	if s.PluginFolders == nil {
+		s.PluginFolders = []string{}
 	}
 	if s.Contexts == nil {
 		s.Contexts = map[string]ContextPrefs{}
@@ -537,15 +681,23 @@ func normalise(s Settings) Settings {
 	}
 
 	p := Defaults().Preferences
-	switch s.Preferences.Theme {
-	case ThemeSystem, ThemeLight, ThemeDark:
-	default:
+	// Only the three legacy values are rewritten. Anything else is a theme id
+	// and is kept as written even if nothing currently answers to it -- see
+	// Preferences.Theme for why.
+	if replacement, legacy := legacyThemes[s.Preferences.Theme]; legacy {
+		s.Preferences.Theme = replacement
+	} else if s.Preferences.Theme == "" {
 		s.Preferences.Theme = p.Theme
 	}
 	switch s.Preferences.Density {
 	case DensityComfortable, DensityCompact:
 	default:
 		s.Preferences.Density = p.Density
+	}
+	// A hand-edited file could ask for a year of samples at fifteen-second
+	// resolution, which is a query no cluster should be asked to answer.
+	if s.Preferences.MetricsRange < 0 || s.Preferences.MetricsRange > MaxMetricsRange {
+		s.Preferences.MetricsRange = 0
 	}
 	// RestoreTabs and ShowLineNumbers are deliberately not defaulted: nil is a
 	// value in its own right for both, meaning "never chosen", and the frontend
@@ -558,6 +710,8 @@ func clone(s Settings) Settings {
 	out.ManualFiles = slices.Clone(s.ManualFiles)
 	out.ManualFolders = slices.Clone(s.ManualFolders)
 	out.ExcludedFiles = slices.Clone(s.ExcludedFiles)
+	out.ThemeFolders = slices.Clone(s.ThemeFolders)
+	out.PluginFolders = slices.Clone(s.PluginFolders)
 	out.TabOrder = slices.Clone(s.TabOrder)
 	out.Dock.Tabs = slices.Clone(s.Dock.Tabs)
 	// slices.Clone keeps nil as nil, which is what preserves "never chosen".

@@ -1,0 +1,26 @@
+{
+    "id": "signal-flags",
+    "name": "Signal Flags",
+    "tagline": "playful · saturated status colors",
+    "base": "light",
+    "tokens": {
+        "bg": "#ffffff",
+        "bg-sidebar": "#f3f4f7",
+        "bg-panel": "#ffffff",
+        "bg-raised": "#eaecf1",
+        "bg-hover": "rgba(20, 25, 35, 0.05)",
+        "bg-active": "rgba(20, 25, 35, 0.09)",
+        "border": "#c8cdd6",
+        "border-soft": "rgba(20, 25, 35, 0.08)",
+        "text": "#14181f",
+        "text-dim": "#474f5b",
+        "text-faint": "#626975",
+        "accent": "#d8203a",
+        "accent-text": "#ffffff",
+        "ok": "#00804a",
+        "warn": "#a35c00",
+        "error": "#b3121f",
+        "scrollbar": "rgba(20, 25, 35, 0.2)",
+        "scrollbar-hover": "rgba(20, 25, 35, 0.34)"
+    }
+}

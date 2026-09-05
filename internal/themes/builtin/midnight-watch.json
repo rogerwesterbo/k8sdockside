@@ -1,0 +1,26 @@
+{
+    "id": "midnight-watch",
+    "name": "Midnight Watch",
+    "tagline": "very dark · low glare for on-call",
+    "base": "dark",
+    "tokens": {
+        "bg": "#0a0c0f",
+        "bg-sidebar": "#0d1014",
+        "bg-panel": "#11151a",
+        "bg-raised": "#181d24",
+        "bg-hover": "rgba(180, 200, 225, 0.06)",
+        "bg-active": "rgba(180, 200, 225, 0.1)",
+        "border": "#39434f",
+        "border-soft": "rgba(180, 200, 225, 0.05)",
+        "text": "#c3ccd8",
+        "text-dim": "#98a3b1",
+        "text-faint": "#828d9b",
+        "accent": "#5c7ea6",
+        "accent-text": "#f0f4f9",
+        "ok": "#6faa87",
+        "warn": "#b8975a",
+        "error": "#bd6f77",
+        "scrollbar": "rgba(180, 200, 225, 0.09)",
+        "scrollbar-hover": "rgba(180, 200, 225, 0.17)"
+    }
+}

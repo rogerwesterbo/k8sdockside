@@ -1,0 +1,24 @@
+{
+    "id": "bioluminescence",
+    "name": "Bioluminescence",
+    "tagline": "dark · cyan and green glow",
+    "base": "dark",
+    "tokens": {
+        "bg": "#040d11",
+        "bg-sidebar": "#071419",
+        "bg-panel": "#0a1b22",
+        "bg-raised": "#11272f",
+        "bg-hover": "rgba(0, 230, 200, 0.09)",
+        "bg-active": "rgba(0, 230, 200, 0.16)",
+        "border": "#26596a",
+        "border-soft": "rgba(0, 230, 200, 0.09)",
+        "text": "#dcf7f2",
+        "text-dim": "#96c9c2",
+        "text-faint": "#7cb0aa",
+        "accent": "#00d4bb",
+        "accent-text": "#02201c",
+        "ok": "#4dffab",
+        "warn": "#ffd166",
+        "error": "#ff7594"
+    }
+}

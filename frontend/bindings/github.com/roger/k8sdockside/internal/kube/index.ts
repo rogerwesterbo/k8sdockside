@@ -8,6 +8,7 @@ export type {
     CustomResourceGroup,
     CustomResourceKind,
     DrainProgress,
+    FieldPath,
     File,
     Gauge,
     LogBatch,

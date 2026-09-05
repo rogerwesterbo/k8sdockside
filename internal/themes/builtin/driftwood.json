@@ -1,0 +1,26 @@
+{
+    "id": "driftwood",
+    "name": "Driftwood",
+    "tagline": "warm light · sand + rust",
+    "base": "light",
+    "tokens": {
+        "bg": "#f3ece1",
+        "bg-sidebar": "#eae1d2",
+        "bg-panel": "#fbf7f0",
+        "bg-raised": "#e5dac7",
+        "bg-hover": "rgba(90, 60, 30, 0.06)",
+        "bg-active": "rgba(90, 60, 30, 0.1)",
+        "border": "#c9b99f",
+        "border-soft": "rgba(90, 60, 30, 0.09)",
+        "text": "#32281c",
+        "text-dim": "#655544",
+        "text-faint": "#6a5c4b",
+        "accent": "#a84d22",
+        "accent-text": "#fdf7f0",
+        "ok": "#3f6f38",
+        "warn": "#8a5c14",
+        "error": "#a83a2e",
+        "scrollbar": "rgba(90, 60, 30, 0.2)",
+        "scrollbar-hover": "rgba(90, 60, 30, 0.34)"
+    }
+}

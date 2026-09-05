@@ -1,0 +1,103 @@
+{
+    "id": "argocd",
+    "name": "Argo CD",
+    "tagline": "GitOps continuous delivery",
+    "icon": "rocket",
+    "docs": "https://argo-cd.readthedocs.io",
+    "description": "Argo CD keeps a cluster matching what is in Git. An Application is one thing it is keeping in sync, and carries two answers worth reading together: whether the cluster matches Git (sync), and whether what is deployed is actually working (health).",
+    "requires": [
+        {
+            "kind": "crd:applications.argoproj.io",
+            "label": "Applications"
+        },
+        {
+            "kind": "crd:appprojects.argoproj.io",
+            "label": "App Projects"
+        },
+        {
+            "kind": "crd:applicationsets.argoproj.io",
+            "label": "Application Sets",
+            "optional": true
+        }
+    ],
+    "views": [
+        {
+            "id": "applications",
+            "label": "Applications",
+            "icon": "rocket",
+            "kind": "crd:applications.argoproj.io"
+        },
+        {
+            "id": "applicationsets",
+            "label": "Application Sets",
+            "icon": "copies",
+            "kind": "crd:applicationsets.argoproj.io"
+        },
+        {
+            "id": "projects",
+            "label": "App Projects",
+            "icon": "folder",
+            "kind": "crd:appprojects.argoproj.io"
+        },
+        {
+            "id": "components",
+            "label": "Argo CD's own workloads",
+            "icon": "server",
+            "kind": "deployments",
+            "selector": "app.kubernetes.io/part-of=argocd"
+        }
+    ],
+    "cards": [
+        {
+            "label": "Applications by health",
+            "kind": "crd:applications.argoproj.io",
+            "groupBy": "status.health.status",
+            "tones": {
+                "Healthy": "ok",
+                "Progressing": "warn",
+                "Suspended": "info",
+                "Missing": "warn",
+                "Degraded": "error",
+                "Unknown": "info"
+            }
+        },
+        {
+            "label": "Applications by sync",
+            "kind": "crd:applications.argoproj.io",
+            "groupBy": "status.sync.status",
+            "tones": {
+                "Synced": "ok",
+                "OutOfSync": "warn",
+                "Unknown": "info"
+            }
+        },
+        {
+            "label": "Application Sets",
+            "kind": "crd:applicationsets.argoproj.io"
+        },
+        {
+            "label": "App Projects",
+            "kind": "crd:appprojects.argoproj.io"
+        }
+    ],
+    "charts": [
+        {
+            "id": "apps-by-health",
+            "label": "Applications by health",
+            "attach": "overview",
+            "unit": "count",
+            "legend": "health_status",
+            "description": "From Argo CD's own metrics service. Needs its ServiceMonitor scraped.",
+            "query": "sum by (health_status) (argocd_app_info)"
+        },
+        {
+            "id": "apps-by-sync",
+            "label": "Applications by sync",
+            "attach": "overview",
+            "unit": "count",
+            "legend": "sync_status",
+            "description": "From Argo CD's own metrics service.",
+            "query": "sum by (sync_status) (argocd_app_info)"
+        }
+    ]
+}

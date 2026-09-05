@@ -1,5 +1,20 @@
 import { describe, expect, test } from 'vitest';
-import { DASHBOARD, DASHBOARD_ITEM, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, groupForKind, iconFor, labelFor, singularFor } from './catalogue';
+import {
+    DASHBOARD,
+    DASHBOARD_ITEM,
+    DEFAULT_COLLAPSED_GROUPS,
+    NAV_GROUPS,
+    PLUGIN_OVERVIEW,
+    SOLUTIONS_GROUP,
+    groupForKind,
+    iconFor,
+    isPluginOverview,
+    labelFor,
+    parsePluginKind,
+    pluginKindFor,
+    registerPluginViews,
+    singularFor,
+} from './catalogue';
 import { PATHS } from './components/Icon.svelte';
 
 const ITEMS = NAV_GROUPS.flatMap((group) => group.items);
@@ -17,9 +32,16 @@ describe('the resource catalogue', () => {
         expect(missing).toEqual([]);
     });
 
-    test('every group has a label and at least one item', () => {
+    // Solutions is the one exception, and deliberately so: its rows are the
+    // plugins installed on this machine, which this list cannot know about. It
+    // is still a group so that it folds and is remembered folded with the rest.
+    test('every group has a label, and items unless its rows come from elsewhere', () => {
         for (const group of NAV_GROUPS) {
             expect(group.label).not.toBe('');
+            if (group.label === SOLUTIONS_GROUP) {
+                expect(group.items).toHaveLength(0);
+                continue;
+            }
             expect(group.items.length).toBeGreaterThan(0);
         }
     });
@@ -122,5 +144,61 @@ describe('the default folding', () => {
 
     test('follows the sections rather than a list kept in step by hand', () => {
         expect(DEFAULT_COLLAPSED_GROUPS).toHaveLength(NAV_GROUPS.length);
+    });
+});
+
+
+// A plugin view is a tab kind like any other, which is the whole point: the tab
+// bar, the persisted session and the reveal machinery all handle it without
+// knowing that plugins exist.
+describe('plugin view kinds', () => {
+    test('round-trip through the kind string', () => {
+        const kind = pluginKindFor('argocd', 'applications');
+        expect(kind).toBe('plugin:argocd/applications');
+        expect(parsePluginKind(kind)).toEqual({ pluginId: 'argocd', viewId: 'applications' });
+    });
+
+    test.each(['pods', 'crd:applications.argoproj.io', 'plugin:', 'plugin:argocd', 'plugin:/applications', 'plugin:argocd/'])(
+        'refuses %s',
+        (kind) => {
+            expect(parsePluginKind(kind)).toBeNull();
+        },
+    );
+
+    test('the overview is told apart from a listing', () => {
+        expect(isPluginOverview(pluginKindFor('argocd', PLUGIN_OVERVIEW))).toBe(true);
+        expect(isPluginOverview(pluginKindFor('argocd', 'applications'))).toBe(false);
+        expect(isPluginOverview('pods')).toBe(false);
+    });
+});
+
+// A `crd:` kind carries its own name; a plugin view's name lives in a file, so
+// it has to be registered before anything can title a tab with it.
+describe('registered plugin views', () => {
+    test('take their label and icon from the registry', () => {
+        registerPluginViews([
+            { kind: 'plugin:argocd/applications', label: 'Applications', icon: 'rocket' },
+        ]);
+
+        expect(labelFor('plugin:argocd/applications')).toBe('Applications');
+        expect(iconFor('plugin:argocd/applications')).toBe('rocket');
+    });
+
+    // What a tab restored before its plugin has loaded shows for an instant,
+    // and what one whose plugin was uninstalled shows for good. The whole
+    // `plugin:x/y` string would be worse than the view's own name.
+    test('fall back to the view id when the plugin is not loaded', () => {
+        registerPluginViews([]);
+
+        expect(labelFor('plugin:argocd/applications')).toBe('applications');
+        expect(iconFor('plugin:argocd/applications')).toBe('puzzle');
+    });
+
+    test('registering replaces what was there rather than adding to it', () => {
+        registerPluginViews([{ kind: 'plugin:a/one', label: 'One', icon: 'box' }]);
+        registerPluginViews([{ kind: 'plugin:b/two', label: 'Two', icon: 'box' }]);
+
+        expect(labelFor('plugin:a/one')).toBe('one');
+        expect(labelFor('plugin:b/two')).toBe('Two');
     });
 });

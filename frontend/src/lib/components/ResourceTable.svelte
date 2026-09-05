@@ -36,6 +36,19 @@
     /** Bumped by the retry button; the subscribing effect reads it as a dependency. */
     let attempt = $state(0);
 
+    /**
+     * The namespace a solution plugin's view fixes, or "" when the tab is free
+     * to filter for itself.
+     *
+     * A pinned view is answering a narrower question than "what is in this
+     * cluster" -- "Argo CD's own workloads" is not a question about kube-system
+     * -- so the picker is replaced with a statement of where you are. The pin is
+     * applied by the backend either way; offering a control that the backend
+     * would then override is the one thing that would be worse than not
+     * offering it.
+     */
+    let pinned = $derived(workspace.pinnedNamespace(kind));
+
     let color = $derived(workspace.colorOf(contextId));
     let context = $derived(workspace.contexts.find((c) => c.id === contextId) ?? null);
     let selectedRowId = $derived(
@@ -151,7 +164,12 @@
 
 <div class="view" style:--ctx-tint={alpha(color, 0.1)}>
     <div class="toolbar">
-        {#if table?.namespaced}
+        {#if pinned}
+            <span class="ns pinned" title="This view is fixed to the {pinned} namespace by the plugin that provides it">
+                <Icon name="pin" size={12} />
+                <span>{pinned}</span>
+            </span>
+        {:else if table?.namespaced}
             <label class="ns">
                 <span>Namespace</span>
                 <select bind:value={namespace}>
@@ -216,6 +234,18 @@
         gap: 7px;
         font-size: 11px;
         color: var(--text-dim);
+    }
+
+    /* Where the picker would be, so the toolbar keeps its shape, but plainly a
+       statement rather than a control. */
+    .ns.pinned {
+        gap: 5px;
+        padding: 3px 9px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-raised);
+        box-shadow: inset 0 0 0 1px var(--border-soft);
+        font-family: var(--mono);
+        color: var(--text-faint);
     }
 
     select {

@@ -10,7 +10,10 @@
 import {
     KubeconfigService,
     ResourceService,
+    MetricsService,
+    PluginService,
     SettingsService,
+    ThemeService,
 } from '../../../bindings/github.com/roger/k8sdockside';
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
@@ -18,8 +21,25 @@ import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './ado
 import { changes } from './changes.svelte';
 import { editors } from './editor.svelte';
 import { logs } from './logs.svelte';
-import { DASHBOARD, DEFAULT_COLLAPSED_GROUPS, NAV_GROUPS, SETTINGS, groupForKind, labelFor } from '../catalogue';
+import {
+    DASHBOARD,
+    DEFAULT_COLLAPSED_GROUPS,
+    NAV_GROUPS,
+    PLUGIN_OVERVIEW,
+    SETTINGS,
+    SOLUTIONS_GROUP,
+    groupForKind,
+    labelFor,
+    parsePluginKind,
+    pluginKindFor,
+    registerPluginViews,
+} from '../catalogue';
 import { defaultColorFor } from '../colors';
+import { adoptPluginCatalogue } from '../plugins/adopt';
+import { emptyPluginCatalogue, type Plugin, type PluginCatalogue } from '../plugins/types';
+import { adoptSource, type MetricsSource } from '../charts/adopt';
+import { adoptCatalogue, adoptTokens, emptyCatalogue } from '../theme/adopt';
+import { DEFAULT_THEME_ID, pickTheme, type Theme, type ThemeCatalogue, type ThemeToken } from '../theme/apply';
 
 export type DockSide = 'right' | 'bottom' | 'left';
 
@@ -128,16 +148,19 @@ function defaultSettings(): Settings {
         manualFiles: [],
         manualFolders: [],
         excludedFiles: [],
+        themeFolders: [],
+        pluginFolders: [],
         contexts: {},
         tabOrder: [],
         dock: { open: false, size: 320, tabs: [] },
         preferences: {
-            theme: 'system',
+            theme: DEFAULT_THEME_ID,
             density: 'comfortable',
             restoreTabs: true,
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
             showLineNumbers: true,
+            metricsRange: 60,
         },
         layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
@@ -292,11 +315,33 @@ class Workspace {
     private revealCount = 0;
 
     /**
-     * Whether the OS is asking for a dark appearance. Only consulted while the
-     * theme is `system`; kept up to date by watchSystemTheme so that changing
-     * the OS setting repaints the app straight away.
+     * Every theme available: the ones that ship with the app, and the ones read
+     * out of the user's theme folders. It arrives from the Go side already
+     * resolved -- each theme carrying its complete token set -- so the settings
+     * gallery can draw a true preview of all of them without a call per swatch.
      */
-    systemPrefersDark = $state(true);
+    themeCatalogue = $state<ThemeCatalogue>(emptyCatalogue());
+    /**
+     * The tokens a theme may set, with what each is for. Fetched once and shown
+     * in the settings view, so writing a theme does not mean reading the source.
+     */
+    themeTokens = $state<ThemeToken[]>([]);
+
+    /**
+     * The solution plugins installed on this machine: the ones that ship with
+     * the app, and whatever is in the user's plugin folders.
+     *
+     * Nothing here is per-cluster. Whether the solution a plugin describes is
+     * actually in the cluster in front of you is a different question, answered
+     * by pluginInstalledIn below and, authoritatively, by the plugin's overview.
+     */
+    pluginCatalogue = $state<PluginCatalogue>(emptyPluginCatalogue());
+    /**
+     * Which plugins are unfolded in the sidebar, as `contextId\0pluginId`.
+     * Not persisted, for the same reason expandedApiGroups is not: it is where
+     * you are looking right now rather than how you like the sidebar.
+     */
+    expandedPlugins = $state<string[]>([]);
 
     syncing = $state(false);
     loaded = $state(false);
@@ -346,16 +391,65 @@ class Workspace {
     readonly maxZoom = MAX_ZOOM;
     readonly zoomStep = ZOOM_STEP;
 
-    /** What the user chose: system, light or dark. */
+    /** The id of the theme the user chose. May name one that is not installed. */
     theme = $derived(this.settings.preferences.theme);
+    /** The themes on offer, in the order the gallery shows them. */
+    themes = $derived(this.themeCatalogue.themes);
+    /** The folder user themes are read from by default. */
+    themeDir = $derived(this.themeCatalogue.dir);
+    /** The extra folders the user has added themes from. */
+    themeFolders = $derived(this.themeCatalogue.folders);
+    /** Theme files that could not be read, surfaced rather than dropped. */
+    themeProblems = $derived(this.themeCatalogue.problems);
+
     /**
-     * The theme actually in force, with `system` resolved against the OS. It
-     * tracks `systemPrefersDark`, which a media query listener keeps current,
-     * so switching the OS appearance repaints without a restart.
+     * Where each context's metrics come from, once anything has asked. Keyed by
+     * context id and filled in lazily, because working it out costs a list of
+     * every Service in the cluster and most contexts are never looked at.
      */
-    resolvedTheme = $derived(
-        this.theme === 'system' ? (this.systemPrefersDark ? 'dark' : 'light') : this.theme,
+    metricsSources = $state<Record<string, MetricsSource>>({});
+    /**
+     * The surfaces some installed plugin draws charts on: resource kinds,
+     * `dashboard`, `overview`.
+     *
+     * Known before any cluster is asked, because it depends only on which
+     * plugins are installed. That is what lets a chart panel decide whether to
+     * exist at all without first flashing a heading and then taking it away --
+     * and it means a pod in a cluster with no charting plugin costs nothing.
+     */
+    metricsAttachments = $state<string[]>([]);
+
+    /** Whether any installed plugin charts this surface. */
+    chartsAttachTo(surface: string): boolean {
+        return this.metricsAttachments.includes(surface);
+    }
+    /**
+     * The theme actually in force. Null only before the catalogue has loaded,
+     * when the app is wearing whatever style.css and the cache last left it in.
+     *
+     * It falls back rather than failing when the chosen id names nothing,
+     * because a theme can be removed from under a settings file that still
+     * names it -- by deleting the file, dropping the folder it came from, or
+     * opening the same settings on a machine without it installed.
+     */
+    activeTheme = $derived<Theme | null>(pickTheme(this.themes, this.theme));
+    /**
+     * Whether the chosen theme is one we could not find. Distinct from having
+     * no theme at all: the app looks fine either way, so the only place this
+     * shows is the settings view, which says which id is missing.
+     */
+    themeMissing = $derived(
+        this.themes.length > 0 && !this.themes.some((t) => t.id === this.theme),
     );
+
+    /** The plugins on offer, in the order the sidebar shows them. */
+    plugins = $derived(this.pluginCatalogue.plugins);
+    /** The folder user plugins are read from by default. */
+    pluginDir = $derived(this.pluginCatalogue.dir);
+    /** The extra folders the user has added plugins from. */
+    pluginFolders = $derived(this.pluginCatalogue.folders);
+    /** Plugin files that could not be read, surfaced rather than dropped. */
+    pluginProblems = $derived(this.pluginCatalogue.problems);
     density = $derived(this.settings.preferences.density);
     restoreTabsOnLaunch = $derived(this.settings.preferences.restoreTabs);
     confirmSourceRemoval = $derived(this.settings.preferences.confirmSourceRemoval);
@@ -363,6 +457,13 @@ class Workspace {
     showKubeconfigNames = $derived(this.settings.preferences.showKubeconfigNames);
     /** Whether the YAML editor draws a line-number gutter. On by default. */
     showLineNumbers = $derived(this.settings.preferences.showLineNumbers);
+    /**
+     * How far back a metrics chart looks, in minutes. One setting for every
+     * chart on screen: a page whose charts each carried their own window would
+     * be a page whose numbers cannot be compared, and comparing them is the
+     * reason they are next to each other.
+     */
+    metricsRange = $derived(this.settings.preferences.metricsRange || 60);
 
     // ----- loading -------------------------------------------------------
 
@@ -374,8 +475,30 @@ class Workspace {
         } catch (err) {
             this.fail(`Could not read settings: ${message(err)}`);
         }
+        // Before the kubeconfig sync, which talks to clusters and can take a
+        // while: the theme is what the user sees first, and waiting on a
+        // cluster to find out what colour the window is would be the wrong way
+        // round. The plugins go with it because the sidebar draws their rows
+        // and the tab bar titles their tabs, both before any cluster answers.
+        await Promise.all([this.loadThemes(), this.loadPlugins()]);
         await this.sync({ restoreTabs: true });
         this.loaded = true;
+    }
+
+    /**
+     * Reads the theme catalogue. Also the "reload" the settings view offers,
+     * which is how a theme edited in an editor gets picked up without
+     * restarting the app.
+     */
+    async loadThemes(): Promise<void> {
+        try {
+            this.themeCatalogue = adoptCatalogue(await ThemeService.List());
+            if (this.themeTokens.length === 0) {
+                this.themeTokens = adoptTokens(await ThemeService.Tokens());
+            }
+        } catch (err) {
+            this.fail(`Could not read themes: ${message(err)}`);
+        }
     }
 
     /**
@@ -534,8 +657,11 @@ class Workspace {
         // The folding override is a separate preference stored on the same
         // record; renaming or recolouring a context must not discard it.
         const collapsedGroups = this.settings.contexts[contextId]?.collapsedGroups ?? null;
-        const prefs = { alias, color, collapsedGroups };
-        if (!alias && !color && collapsedGroups === null) {
+        // Carried through rather than rebuilt: the metrics endpoint is edited
+        // elsewhere, and rewriting the whole record here would drop it.
+        const metrics = this.settings.contexts[contextId]?.metrics ?? '';
+        const prefs = { alias, color, metrics, collapsedGroups };
+        if (!alias && !color && !metrics && collapsedGroups === null) {
             delete this.settings.contexts[contextId];
         } else {
             this.settings.contexts[contextId] = prefs;
@@ -1135,6 +1261,79 @@ class Workspace {
         this.expandedApiGroups = toggled(this.expandedApiGroups, apiGroupKey(contextId, group));
     }
 
+    // ----- solution plugins ----------------------------------------------
+
+    /** Whether a plugin's views are unfolded under a context in the sidebar. */
+    isPluginExpanded(contextId: string, pluginId: string): boolean {
+        return this.expandedPlugins.includes(apiGroupKey(contextId, pluginId));
+    }
+
+    togglePlugin(contextId: string, pluginId: string): void {
+        this.expandedPlugins = toggled(this.expandedPlugins, apiGroupKey(contextId, pluginId));
+    }
+
+    /** Opens a plugin's landing page for a context. */
+    openPluginOverview(contextId: string, pluginId: string): void {
+        this.openTab(contextId, pluginKindFor(pluginId, PLUGIN_OVERVIEW));
+    }
+
+    /**
+     * Whether a cluster serves what a plugin needs, answered from the custom
+     * resource definitions the sidebar has already read.
+     *
+     * Reusing that list is the point: the definitions are loaded lazily and
+     * cached per context, so asking "does this cluster have Argo CD" costs
+     * nothing beyond what the definitions section already fetched, and one
+     * refresh button updates both. The plugin's own overview asks the cluster
+     * directly and is the authority; this is only what decides how the sidebar
+     * row reads.
+     *
+     * `null` means we do not know yet -- the definitions have not been read for
+     * this context -- which is deliberately distinct from "no". A row that said
+     * "not installed" before it had looked would be wrong more often than
+     * right.
+     */
+    pluginInstalledIn(contextId: string, plugin: Plugin): boolean | null {
+        const loaded = this.customKinds[contextId];
+        if (!loaded || loaded.status !== 'ready') return null;
+
+        const served = new Set(loaded.groups.flatMap((group) => group.kinds.map((kind) => kind.kind)));
+        const required = plugin.requires.filter((req) => !req.optional);
+        if (required.length === 0) return true;
+
+        return required.every((req) => {
+            // Only custom resources can be looked up this way. A requirement on
+            // a built-in kind -- Deployments, say -- is served by every cluster
+            // worth connecting to, so it is taken as met rather than reported
+            // as unknown.
+            if (!req.kind.startsWith('crd:')) return true;
+            return served.has(req.kind);
+        });
+    }
+
+    /** The plugin a `plugin:` tab kind belongs to, if it is installed. */
+    pluginFor(kind: string): Plugin | null {
+        const view = parsePluginKind(kind);
+        if (!view) return null;
+        return this.plugins.find((p) => p.id === view.pluginId) ?? null;
+    }
+
+    /**
+     * The namespace a plugin view pins itself to, or the empty string when it
+     * leaves the tab's own filter free.
+     *
+     * The table asks before drawing its namespace picker: a view that says
+     * "Argo CD's own workloads" is not answering a question about kube-system,
+     * and a filter that silently did nothing would be worse than one that is
+     * not offered.
+     */
+    pinnedNamespace(kind: string): string {
+        const view = parsePluginKind(kind);
+        if (!view) return '';
+        const plugin = this.pluginFor(kind);
+        return plugin?.views.find((v) => v.id === view.viewId)?.namespace ?? '';
+    }
+
     /**
      * Re-reads the definitions of contexts that already had them, so the sync
      * button is the way back from a cluster that was unreachable when its
@@ -1364,10 +1563,11 @@ class Workspace {
         const merged = {
             alias: prefs?.alias ?? '',
             color: prefs?.color ?? '',
+            metrics: prefs?.metrics ?? '',
             collapsedGroups: groups,
         };
 
-        if (!merged.alias && !merged.color && groups === null) {
+        if (!merged.alias && !merged.color && !merged.metrics && groups === null) {
             delete this.settings.contexts[contextId];
         } else {
             this.settings.contexts[contextId] = merged;
@@ -1431,26 +1631,155 @@ class Workspace {
     // ----- preferences ---------------------------------------------------
 
     /**
-     * Starts tracking the OS appearance, and returns the teardown. Called from
-     * the shell on mount rather than from the store's constructor: the store is
-     * built at import time, which in the unit tests is a jsdom without
-     * matchMedia.
+     * Reads the plugin catalogue, and tells the nav catalogue how the views it
+     * found are titled and iconed.
+     *
+     * That registration is what lets labelFor() go on being a pure function of
+     * a kind string everywhere else in the app: a `crd:` kind carries its own
+     * name, but a plugin view's name lives in a file, so it has to be put
+     * somewhere the tab bar can reach without knowing plugins exist.
      */
-    watchSystemTheme(): () => void {
-        if (typeof window === 'undefined' || !window.matchMedia) return () => {};
-
-        const query = window.matchMedia('(prefers-color-scheme: dark)');
-        this.systemPrefersDark = query.matches;
-
-        const onChange = (event: MediaQueryListEvent) => {
-            this.systemPrefersDark = event.matches;
-        };
-        query.addEventListener('change', onChange);
-        return () => query.removeEventListener('change', onChange);
+    async loadPlugins(): Promise<void> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.List());
+            this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
+        } catch (err) {
+            this.fail(`Could not read plugins: ${message(err)}`);
+            return;
+        }
+        this.registerViews();
     }
 
-    setTheme(theme: 'system' | 'light' | 'dark'): void {
+    /** Publishes every installed view's label and icon to the nav catalogue. */
+    private registerViews(): void {
+        registerPluginViews(
+            this.plugins.flatMap((plugin) => [
+                // The overview is not one of the plugin's declared views -- every
+                // plugin has one whether it asks or not -- so it is named here.
+                {
+                    kind: pluginKindFor(plugin.id, PLUGIN_OVERVIEW),
+                    label: plugin.name,
+                    icon: plugin.icon,
+                },
+                ...plugin.views.map((view) => ({
+                    kind: pluginKindFor(plugin.id, view.id),
+                    label: view.label,
+                    icon: view.icon,
+                })),
+            ]),
+        );
+    }
+
+    /** Rereads the plugin folders, picking up a file edited since launch. */
+    async reloadPlugins(): Promise<void> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.Reload());
+            this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
+            this.registerViews();
+            const count = this.plugins.length;
+            this.inform(`${count} plugin${count === 1 ? '' : 's'} available`);
+        } catch (err) {
+            this.fail(`Could not read plugins: ${message(err)}`);
+        }
+    }
+
+    /** Opens the plugins folder in the file manager, creating it if need be. */
+    async revealPluginDir(): Promise<void> {
+        try {
+            await PluginService.RevealDir();
+        } catch (err) {
+            this.fail(`Could not open the plugins folder: ${message(err)}`);
+        }
+    }
+
+    /** Writes a starter plugin into the plugins folder and reloads. */
+    async createExamplePlugin(): Promise<void> {
+        try {
+            const path = await PluginService.CreateExample();
+            await this.loadPlugins();
+            this.inform(`Wrote ${path}`);
+        } catch (err) {
+            this.fail(`Could not write a starter plugin: ${message(err)}`);
+        }
+    }
+
+    /** Opens the native picker and reads plugins from the folder chosen. */
+    async addPluginFolder(): Promise<void> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.BrowseForFolder());
+            this.registerViews();
+            this.settings = adoptSettings(await SettingsService.Get());
+        } catch (err) {
+            this.fail(`Could not add the folder: ${message(err)}`);
+        }
+    }
+
+    /** Stops reading plugins from a folder. Nothing on disk is touched. */
+    async removePluginFolder(path: string): Promise<void> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.RemoveFolder(path));
+            this.registerViews();
+            this.settings = adoptSettings(await SettingsService.Get());
+        } catch (err) {
+            this.fail(`Could not drop the folder: ${message(err)}`);
+        }
+    }
+
+    /** Wears a theme. The id is stored as given, whether or not we have it. */
+    setTheme(theme: string): void {
         this.updatePreferences({ theme });
+    }
+
+    // ----- themes ---------------------------------------------------------
+
+    /** Rereads the theme folders, picking up files edited since launch. */
+    async reloadThemes(): Promise<void> {
+        await this.loadThemes();
+        const count = this.themes.length;
+        this.inform(`${count} theme${count === 1 ? '' : 's'} available`);
+    }
+
+    /** Opens the themes folder in the file manager, creating it if need be. */
+    async revealThemeDir(): Promise<void> {
+        try {
+            await ThemeService.RevealDir();
+        } catch (err) {
+            this.fail(`Could not open the themes folder: ${message(err)}`);
+        }
+    }
+
+    /**
+     * Writes a starter theme into the themes folder and reloads, so "write your
+     * own" begins with a file that already works rather than a blank one.
+     */
+    async createExampleTheme(): Promise<void> {
+        try {
+            const path = await ThemeService.CreateExample();
+            await this.loadThemes();
+            this.inform(`Wrote ${path}`);
+        } catch (err) {
+            this.fail(`Could not write a starter theme: ${message(err)}`);
+        }
+    }
+
+    /** Opens the native picker and reads themes from the folder chosen. */
+    async addThemeFolder(): Promise<void> {
+        try {
+            this.themeCatalogue = adoptCatalogue(await ThemeService.BrowseForFolder());
+            this.settings = adoptSettings(await SettingsService.Get());
+        } catch (err) {
+            this.fail(`Could not add the folder: ${message(err)}`);
+        }
+    }
+
+    /** Stops reading themes from a folder. Nothing on disk is touched. */
+    async removeThemeFolder(path: string): Promise<void> {
+        try {
+            this.themeCatalogue = adoptCatalogue(await ThemeService.RemoveFolder(path));
+            this.settings = adoptSettings(await SettingsService.Get());
+        } catch (err) {
+            this.fail(`Could not drop the folder: ${message(err)}`);
+        }
     }
 
     setDensity(density: 'comfortable' | 'compact'): void {
@@ -1471,6 +1800,59 @@ class Workspace {
 
     setShowLineNumbers(showLineNumbers: boolean): void {
         this.updatePreferences({ showLineNumbers });
+    }
+
+    /** Sets the window every chart on screen covers, in minutes. */
+    setMetricsRange(metricsRange: number): void {
+        this.updatePreferences({ metricsRange });
+    }
+
+    // ----- metrics --------------------------------------------------------
+
+    /**
+     * Where a context's metrics come from, asking the first time it is wanted.
+     *
+     * Returns null until the answer arrives rather than blocking: this is read
+     * from a component's render, and the context settings panel showing "…" for
+     * a moment is better than the sidebar waiting on a cluster.
+     */
+    metricsSourceFor(contextId: string): MetricsSource | null {
+        const known = this.metricsSources[contextId];
+        if (known) return known;
+        void this.loadMetricsSource(contextId);
+        return null;
+    }
+
+    private loading = new Set<string>();
+
+    private async loadMetricsSource(contextId: string): Promise<void> {
+        if (this.loading.has(contextId)) return;
+        this.loading.add(contextId);
+        try {
+            const source = await MetricsService.Source(contextId);
+            this.metricsSources = { ...this.metricsSources, [contextId]: adoptSource(source) };
+        } catch {
+            // Left unanswered rather than recorded as a failure: the panel that
+            // actually draws charts reports its own errors, and this is only
+            // what the settings row shows.
+        } finally {
+            this.loading.delete(contextId);
+        }
+    }
+
+    /**
+     * Points a context at a Prometheus, or clears the override with an empty
+     * value. Returns the reason it was refused, or the empty string.
+     */
+    async setMetricsEndpoint(contextId: string, value: string): Promise<string> {
+        try {
+            const source = await MetricsService.SetEndpoint(contextId, value);
+            this.metricsSources = { ...this.metricsSources, [contextId]: adoptSource(source) };
+            this.settings = adoptSettings(await SettingsService.Get());
+            return '';
+        } catch (err) {
+            return message(err);
+        }
     }
 
     /**

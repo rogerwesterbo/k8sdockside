@@ -11,6 +11,7 @@
 
 import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/roger/k8sdockside/internal/appconfig/models.js';
+import { DEFAULT_THEME_ID } from '../theme/apply';
 
 /** A kubeconfig file and the contexts parsed out of it. */
 export interface ConfigFile {
@@ -25,7 +26,11 @@ export interface Settings {
     manualFiles: string[];
     manualFolders: string[];
     excludedFiles: string[];
-    contexts: Record<string, { alias: string; color: string; collapsedGroups: string[] | null }>;
+    /** Extra folders themes are read from, on top of the default one. */
+    themeFolders: string[];
+    /** Extra folders solution plugins are read from, on top of the default one. */
+    pluginFolders: string[];
+    contexts: Record<string, { alias: string; color: string; metrics: string; collapsedGroups: string[] | null }>;
     tabOrder: { contextId: string; kind: string }[];
     /**
      * The bottom dock: what it has open, whether it is showing it, and how tall
@@ -43,12 +48,19 @@ export interface Settings {
      * concern and nothing downstream should have to know about it.
      */
     preferences: {
-        theme: 'system' | 'light' | 'dark';
+        /**
+         * The id of the chosen theme. A free string rather than a union: the
+         * themes are data, not code, and the set of valid ids is whatever is
+         * installed at the time -- see internal/themes.
+         */
+        theme: string;
         density: 'comfortable' | 'compact';
         restoreTabs: boolean;
         confirmSourceRemoval: boolean;
         showKubeconfigNames: boolean;
         showLineNumbers: boolean;
+        /** How far back a metrics chart looks, in minutes. */
+        metricsRange: number;
     };
     layout: {
         detailDock: string;
@@ -96,12 +108,15 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
         manualFiles: [...(settings.manualFiles ?? [])],
         manualFolders: [...(settings.manualFolders ?? [])],
         excludedFiles: [...(settings.excludedFiles ?? [])],
+        themeFolders: [...(settings.themeFolders ?? [])],
+        pluginFolders: [...(settings.pluginFolders ?? [])],
         contexts: Object.fromEntries(
             Object.entries(settings.contexts ?? {}).map(([id, prefs]) => [
                 id,
                 {
                     alias: prefs?.alias ?? '',
                     color: prefs?.color ?? '',
+                    metrics: prefs?.metrics ?? '',
                     // null is "follows the global folding" and must survive.
                     collapsedGroups: prefs?.collapsedGroups ?? null,
                 },
@@ -123,8 +138,10 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
         },
         preferences: {
             // The store normalises these, so the fallbacks only cover a
-            // service call that failed before it reached the store.
-            theme: (settings.preferences?.theme || 'system') as 'system' | 'light' | 'dark',
+            // service call that failed before it reached the store. An id that
+            // names no installed theme is kept as it is and resolved where the
+            // theme is applied, not here.
+            theme: settings.preferences?.theme || DEFAULT_THEME_ID,
             density: (settings.preferences?.density || 'comfortable') as 'comfortable' | 'compact',
             // null is "never chosen", and the default is on. `??` rather than
             // `||`: an explicit false is a choice and must survive.
@@ -136,6 +153,9 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // On by default, and nullable on the Go side for exactly that
             // reason -- see RestoreTabs above.
             showLineNumbers: settings.preferences?.showLineNumbers ?? true,
+            // Zero from the store means never chosen. An hour is long enough to
+            // show a rollout and short enough to still show a spike.
+            metricsRange: settings.preferences?.metricsRange || 60,
         },
         layout: {
             ...settings.layout,

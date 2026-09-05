@@ -1,0 +1,171 @@
+{
+    "id": "flux",
+    "name": "Flux",
+    "tagline": "GitOps toolkit",
+    "icon": "repeat",
+    "docs": "https://fluxcd.io/flux/",
+    "description": "Flux is a set of controllers that each reconcile one kind of thing: a source fetches, a Kustomization or HelmRelease applies. Every one of them answers the same question the same way \u2014 the Ready condition \u2014 so a red row here is a controller telling you why it has stopped.",
+    "requires": [
+        {
+            "kind": "crd:kustomizations.kustomize.toolkit.fluxcd.io",
+            "label": "Kustomizations"
+        },
+        {
+            "kind": "crd:gitrepositories.source.toolkit.fluxcd.io",
+            "label": "Git Repositories"
+        },
+        {
+            "kind": "crd:helmreleases.helm.toolkit.fluxcd.io",
+            "label": "Helm Releases",
+            "optional": true
+        },
+        {
+            "kind": "crd:imagepolicies.image.toolkit.fluxcd.io",
+            "label": "Image Policies",
+            "optional": true
+        }
+    ],
+    "views": [
+        {
+            "id": "kustomizations",
+            "label": "Kustomizations",
+            "icon": "layers",
+            "kind": "crd:kustomizations.kustomize.toolkit.fluxcd.io"
+        },
+        {
+            "id": "helmreleases",
+            "label": "Helm Releases",
+            "icon": "helm",
+            "kind": "crd:helmreleases.helm.toolkit.fluxcd.io"
+        },
+        {
+            "id": "gitrepositories",
+            "label": "Git Repositories",
+            "icon": "link",
+            "kind": "crd:gitrepositories.source.toolkit.fluxcd.io"
+        },
+        {
+            "id": "ocirepositories",
+            "label": "OCI Repositories",
+            "icon": "box",
+            "kind": "crd:ocirepositories.source.toolkit.fluxcd.io"
+        },
+        {
+            "id": "helmrepositories",
+            "label": "Helm Repositories",
+            "icon": "helm",
+            "kind": "crd:helmrepositories.source.toolkit.fluxcd.io"
+        },
+        {
+            "id": "helmcharts",
+            "label": "Helm Charts",
+            "icon": "file",
+            "kind": "crd:helmcharts.source.toolkit.fluxcd.io"
+        },
+        {
+            "id": "imagepolicies",
+            "label": "Image Policies",
+            "icon": "policy",
+            "kind": "crd:imagepolicies.image.toolkit.fluxcd.io"
+        },
+        {
+            "id": "imagerepositories",
+            "label": "Image Repositories",
+            "icon": "database",
+            "kind": "crd:imagerepositories.image.toolkit.fluxcd.io"
+        },
+        {
+            "id": "imageupdateautomations",
+            "label": "Image Update Automations",
+            "icon": "refresh",
+            "kind": "crd:imageupdateautomations.image.toolkit.fluxcd.io"
+        },
+        {
+            "id": "alerts",
+            "label": "Alerts",
+            "icon": "bell",
+            "kind": "crd:alerts.notification.toolkit.fluxcd.io"
+        },
+        {
+            "id": "providers",
+            "label": "Providers",
+            "icon": "share",
+            "kind": "crd:providers.notification.toolkit.fluxcd.io"
+        },
+        {
+            "id": "receivers",
+            "label": "Receivers",
+            "icon": "webhook",
+            "kind": "crd:receivers.notification.toolkit.fluxcd.io"
+        },
+        {
+            "id": "controllers",
+            "label": "Flux's own controllers",
+            "icon": "server",
+            "kind": "deployments",
+            "selector": "app.kubernetes.io/part-of=flux"
+        }
+    ],
+    "cards": [
+        {
+            "label": "Kustomizations",
+            "kind": "crd:kustomizations.kustomize.toolkit.fluxcd.io",
+            "groupBy": "status.conditions[Ready]",
+            "tones": {
+                "True": "ok",
+                "False": "error",
+                "Unknown": "warn"
+            }
+        },
+        {
+            "label": "Helm Releases",
+            "kind": "crd:helmreleases.helm.toolkit.fluxcd.io",
+            "groupBy": "status.conditions[Ready]",
+            "tones": {
+                "True": "ok",
+                "False": "error",
+                "Unknown": "warn"
+            }
+        },
+        {
+            "label": "Git Repositories",
+            "kind": "crd:gitrepositories.source.toolkit.fluxcd.io",
+            "groupBy": "status.conditions[Ready]",
+            "tones": {
+                "True": "ok",
+                "False": "error",
+                "Unknown": "warn"
+            }
+        },
+        {
+            "label": "OCI Repositories",
+            "kind": "crd:ocirepositories.source.toolkit.fluxcd.io",
+            "groupBy": "status.conditions[Ready]",
+            "tones": {
+                "True": "ok",
+                "False": "error",
+                "Unknown": "warn"
+            }
+        }
+    ],
+    "charts": [
+        {
+            "id": "reconcile-ready",
+            "label": "Resources reconciling cleanly",
+            "attach": "overview",
+            "unit": "count",
+            "legend": "kind",
+            "description": "Flux's own gotk metrics, by kind. Needs the controllers' ServiceMonitors scraped.",
+            "query": "sum by (kind) (gotk_reconcile_condition{type=\"Ready\",status=\"True\"})"
+        },
+        {
+            "id": "reconcile-duration",
+            "label": "Reconcile time (p50)",
+            "attach": "overview",
+            "unit": "seconds",
+            "legend": "kind",
+            "description": "Median time a reconciliation takes, by kind.",
+            "query": "histogram_quantile(0.5, sum by (kind, le) (rate(gotk_reconcile_duration_seconds_bucket[5m])))"
+        }
+    ]
+}

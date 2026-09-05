@@ -1,0 +1,195 @@
+{
+    "id": "prometheus",
+    "name": "Prometheus",
+    "tagline": "monitoring, as the Prometheus Operator installs it",
+    "icon": "gauge",
+    "docs": "https://prometheus-operator.dev/docs/getting-started/introduction/",
+    "description": "The Prometheus Operator turns monitoring into Kubernetes objects: a Prometheus is a running server, and the ServiceMonitors, PodMonitors and ScrapeConfigs around it are what it has been told to scrape. This plugin also draws the graphs on pods, nodes and the cluster dashboard \u2014 those queries assume the metric and label names the kube-prometheus-stack sets up (cAdvisor with a node label, kube-state-metrics). If your Prometheus is set up differently, copy this plugin into your own plugins folder under the same id and change the queries.",
+    "requires": [
+        {
+            "kind": "crd:prometheuses.monitoring.coreos.com",
+            "label": "Prometheus servers"
+        },
+        {
+            "kind": "crd:servicemonitors.monitoring.coreos.com",
+            "label": "Service Monitors"
+        },
+        {
+            "kind": "crd:alertmanagers.monitoring.coreos.com",
+            "label": "Alertmanagers",
+            "optional": true
+        }
+    ],
+    "views": [
+        {
+            "id": "servers",
+            "label": "Prometheus servers",
+            "icon": "server",
+            "kind": "crd:prometheuses.monitoring.coreos.com"
+        },
+        {
+            "id": "alertmanagers",
+            "label": "Alertmanagers",
+            "icon": "bell",
+            "kind": "crd:alertmanagers.monitoring.coreos.com"
+        },
+        {
+            "id": "servicemonitors",
+            "label": "Service Monitors",
+            "icon": "share",
+            "kind": "crd:servicemonitors.monitoring.coreos.com"
+        },
+        {
+            "id": "podmonitors",
+            "label": "Pod Monitors",
+            "icon": "box",
+            "kind": "crd:podmonitors.monitoring.coreos.com"
+        },
+        {
+            "id": "scrapeconfigs",
+            "label": "Scrape Configs",
+            "icon": "sliders",
+            "kind": "crd:scrapeconfigs.monitoring.coreos.com"
+        },
+        {
+            "id": "rules",
+            "label": "Prometheus Rules",
+            "icon": "policy",
+            "kind": "crd:prometheusrules.monitoring.coreos.com"
+        },
+        {
+            "id": "probes",
+            "label": "Probes",
+            "icon": "search",
+            "kind": "crd:probes.monitoring.coreos.com"
+        },
+        {
+            "id": "thanosrulers",
+            "label": "Thanos Rulers",
+            "icon": "layers",
+            "kind": "crd:thanosrulers.monitoring.coreos.com"
+        }
+    ],
+    "cards": [
+        {
+            "label": "Prometheus servers",
+            "kind": "crd:prometheuses.monitoring.coreos.com",
+            "groupBy": "status.conditions[Available]",
+            "tones": {
+                "True": "ok",
+                "False": "error",
+                "Degraded": "warn",
+                "Unknown": "warn"
+            }
+        },
+        {
+            "label": "Alertmanagers",
+            "kind": "crd:alertmanagers.monitoring.coreos.com",
+            "groupBy": "status.conditions[Available]",
+            "tones": {
+                "True": "ok",
+                "False": "error",
+                "Degraded": "warn",
+                "Unknown": "warn"
+            }
+        },
+        {
+            "label": "Service Monitors",
+            "kind": "crd:servicemonitors.monitoring.coreos.com"
+        },
+        {
+            "label": "Pod Monitors",
+            "kind": "crd:podmonitors.monitoring.coreos.com"
+        },
+        {
+            "label": "Prometheus Rules",
+            "kind": "crd:prometheusrules.monitoring.coreos.com"
+        }
+    ],
+    "charts": [
+        {
+            "id": "pod-cpu",
+            "label": "CPU",
+            "attach": "pods",
+            "unit": "cores",
+            "legend": "container",
+            "description": "Cores used per container, averaged over five minutes.",
+            "query": "sum by (container) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "pod-memory",
+            "label": "Memory",
+            "attach": "pods",
+            "unit": "bytes",
+            "legend": "container",
+            "description": "Working set per container \u2014 what the kernel would have to reclaim, which is what the OOM killer looks at.",
+            "query": "sum by (container) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "pod-network",
+            "label": "Network in",
+            "attach": "pods",
+            "unit": "bytes/s",
+            "description": "Bytes received across all of the pod's interfaces.",
+            "query": "sum(rate(container_network_receive_bytes_total{namespace=\"$namespace\",pod=\"$name\"}[5m]))"
+        },
+        {
+            "id": "node-cpu",
+            "label": "CPU",
+            "attach": "nodes",
+            "unit": "cores",
+            "description": "Cores used by everything scheduled on this node.",
+            "query": "sum(rate(container_cpu_usage_seconds_total{node=\"$name\",container!=\"\"}[5m]))"
+        },
+        {
+            "id": "node-memory",
+            "label": "Memory",
+            "attach": "nodes",
+            "unit": "bytes",
+            "description": "Working set of everything scheduled on this node.",
+            "query": "sum(container_memory_working_set_bytes{node=\"$name\",container!=\"\"})"
+        },
+        {
+            "id": "node-pods",
+            "label": "Pods",
+            "attach": "nodes",
+            "unit": "count",
+            "description": "How many pods are placed here. Needs kube-state-metrics.",
+            "query": "count(kube_pod_info{node=\"$name\"})"
+        },
+        {
+            "id": "cluster-cpu",
+            "label": "Cluster CPU",
+            "attach": "dashboard",
+            "unit": "cores",
+            "description": "Cores used across every workload in the cluster.",
+            "query": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]))"
+        },
+        {
+            "id": "cluster-memory",
+            "label": "Cluster memory",
+            "attach": "dashboard",
+            "unit": "bytes",
+            "description": "Working set across every workload in the cluster.",
+            "query": "sum(container_memory_working_set_bytes{container!=\"\"})"
+        },
+        {
+            "id": "cluster-pods",
+            "label": "Pods by phase",
+            "attach": "dashboard",
+            "unit": "count",
+            "legend": "phase",
+            "description": "Needs kube-state-metrics. A rising Pending line is the cluster running out of somewhere to put things.",
+            "query": "sum by (phase) (kube_pod_status_phase)"
+        },
+        {
+            "id": "apiserver-requests",
+            "label": "API server requests",
+            "attach": "dashboard",
+            "unit": "ops/s",
+            "legend": "code",
+            "description": "Requests per second by response code, as the API server itself reports them.",
+            "query": "sum by (code) (rate(apiserver_request_total[5m]))"
+        }
+    ]
+}

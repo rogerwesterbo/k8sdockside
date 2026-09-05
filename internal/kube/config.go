@@ -123,7 +123,7 @@ func parseFile(path, source string) (File, vacant) {
 		return f, false
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- a kubeconfig the user named, $KUBECONFIG, or ~/.kube
 	if err != nil {
 		f.Error = err.Error()
 		return f, false

@@ -191,7 +191,7 @@
 
     .actions .primary {
         background: var(--accent);
-        color: #fff;
+        color: var(--accent-text);
         box-shadow: none;
     }
 

@@ -67,7 +67,7 @@
 
     input:checked + .track .knob {
         transform: translateX(16px);
-        background: #fff;
+        background: var(--accent-text);
     }
 
     input:focus-visible + .track {

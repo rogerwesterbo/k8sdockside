@@ -12,21 +12,20 @@
 -->
 <script lang="ts">
     import { workspace } from '../../state/workspace.svelte';
+    import Icon from '../Icon.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import SettingsRow from './SettingsRow.svelte';
     import SettingsSection from './SettingsSection.svelte';
     import Toggle from './Toggle.svelte';
 
-    const THEMES = [
-        { value: 'system', label: 'System', icon: 'monitor' },
-        { value: 'light', label: 'Light', icon: 'sun' },
-        { value: 'dark', label: 'Dark', icon: 'moon' },
-    ];
-
     const DENSITIES = [
         { value: 'comfortable', label: 'Comfortable' },
         { value: 'compact', label: 'Compact' },
     ];
+
+    // Set by the settings view so the theme row can hand the user over to the
+    // Themes section rather than describing where it is.
+    let { onshowthemes }: { onshowthemes?: () => void } = $props();
 
     /** The scales worth one click, rather than a drag to find them. */
     const PRESETS = [75, 100, 125, 150];
@@ -41,16 +40,12 @@
 <SettingsSection title="Appearance">
     <SettingsRow
         label="Theme"
-        hint={workspace.theme === 'system'
-            ? `Following the system, which is currently ${workspace.resolvedTheme}.`
-            : 'Set for this app alone, whatever the system is doing.'}
+        hint="Which palette the app wears. There is a section of its own for it, because choosing between thirteen of them is picking from pictures rather than setting a value on a line."
     >
-        <SegmentedControl
-            options={THEMES}
-            value={workspace.theme}
-            label="Theme"
-            onchange={(v) => workspace.setTheme(v as 'system' | 'light' | 'dark')}
-        />
+        <button class="jump" onclick={() => onshowthemes?.()}>
+            {workspace.activeTheme?.name ?? 'Loading…'}
+            <Icon name="display" size={13} />
+        </button>
     </SettingsRow>
 
     <SettingsRow
@@ -127,6 +122,24 @@
 </SettingsSection>
 
 <style>
+    /* Reads as the current value with a way in, rather than as a button: what
+       the row is mostly doing is telling you which theme is on. */
+    .jump {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 5px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-raised);
+        box-shadow: inset 0 0 0 1px var(--border);
+        font-size: 12px;
+        color: var(--text);
+    }
+
+    .jump:hover {
+        background: var(--bg-hover);
+    }
+
     .zoom {
         display: flex;
         flex-direction: column;

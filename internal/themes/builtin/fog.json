@@ -1,0 +1,26 @@
+{
+    "id": "fog",
+    "name": "Fog",
+    "tagline": "muted light · low saturation",
+    "base": "light",
+    "tokens": {
+        "bg": "#eff0f1",
+        "bg-sidebar": "#e6e8e9",
+        "bg-panel": "#f8f9fa",
+        "bg-raised": "#dfe1e3",
+        "bg-hover": "rgba(40, 50, 60, 0.05)",
+        "bg-active": "rgba(40, 50, 60, 0.09)",
+        "border": "#c2c7cb",
+        "border-soft": "rgba(40, 50, 60, 0.08)",
+        "text": "#2a2f34",
+        "text-dim": "#585f66",
+        "text-faint": "#5d6268",
+        "accent": "#546b7d",
+        "accent-text": "#f6f8f9",
+        "ok": "#4a7a5c",
+        "warn": "#84632f",
+        "error": "#94484d",
+        "scrollbar": "rgba(40, 50, 60, 0.2)",
+        "scrollbar-hover": "rgba(40, 50, 60, 0.34)"
+    }
+}

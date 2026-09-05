@@ -1,0 +1,24 @@
+{
+    "id": "deep-sea",
+    "name": "Deep Sea",
+    "tagline": "darkest · near-black blue",
+    "base": "dark",
+    "tokens": {
+        "bg": "#05080d",
+        "bg-sidebar": "#080d14",
+        "bg-panel": "#0b111a",
+        "bg-raised": "#141d29",
+        "bg-hover": "rgba(120, 180, 255, 0.07)",
+        "bg-active": "rgba(120, 180, 255, 0.12)",
+        "border": "#33445c",
+        "border-soft": "rgba(160, 200, 255, 0.06)",
+        "text": "#dbe6f4",
+        "text-dim": "#9aa9bd",
+        "text-faint": "#7c8da3",
+        "accent": "#2f6fe0",
+        "accent-text": "#ffffff",
+        "ok": "#4dc78d",
+        "warn": "#e2a95e",
+        "error": "#ea6f79"
+    }
+}

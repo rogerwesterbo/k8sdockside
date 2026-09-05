@@ -30,6 +30,16 @@ export const HELM_RELEASES = 'helmreleases';
  */
 export const DEFINITIONS_GROUP = 'Custom Resource Definitions';
 
+/**
+ * The section holding the solution plugins: Argo CD, Flux, Prometheus, and
+ * whatever the user has installed.
+ *
+ * Its contents come from neither this list nor the cluster, but from the plugin
+ * files on this machine -- so, like the definitions section, it is a heading
+ * here and rows built somewhere else. See ContextTree.
+ */
+export const SOLUTIONS_GROUP = 'Solutions';
+
 export interface NavItem {
     /** Resource kind passed to the backend, or DASHBOARD for the overview. */
     kind: string;
@@ -159,10 +169,19 @@ export const NAV_GROUPS: NavGroup[] = [
         ],
     },
     {
+        // Empty on purpose: what goes here is the solution plugins installed on
+        // this machine, which this list cannot know about. It is a section so
+        // that it folds, is remembered folded, and sits in the order below --
+        // above the definitions, because a plugin is the tidy way to look at
+        // custom resources and the definitions tree is the raw one.
+        label: SOLUTIONS_GROUP,
+        items: [],
+    },
+    {
         // The one section whose contents come from the cluster rather than from
         // this list: below "All definitions" the sidebar shows the API groups
         // the cluster serves and the kinds under each. See ContextTree.
-        label: 'Custom Resource Definitions',
+        label: DEFINITIONS_GROUP,
         items: [{ kind: 'customresourcedefinitions', label: 'All definitions', icon: 'puzzle' }],
     },
 ];
@@ -209,6 +228,69 @@ export function customKindFor(definitionName: string): string {
     return CUSTOM_PREFIX + definitionName;
 }
 
+/**
+ * The prefix marking a tab opened on a solution plugin's view:
+ * `plugin:<pluginId>/<viewId>`.
+ *
+ * Exactly the trick `crd:` plays, and for exactly the same reason: a tab's kind
+ * is persisted, reordered, restored and rendered by machinery that never looks
+ * inside it, so a plugin view becomes a tab without any of that learning a
+ * second shape. Parsed here and in internal/plugins, nowhere else.
+ */
+export const PLUGIN_PREFIX = 'plugin:';
+
+export interface PluginView {
+    pluginId: string;
+    viewId: string;
+}
+
+/** Splits a `plugin:` kind into its plugin and view, or null if it is not one. */
+export function parsePluginKind(kind: string): PluginView | null {
+    if (!kind.startsWith(PLUGIN_PREFIX)) return null;
+
+    const rest = kind.slice(PLUGIN_PREFIX.length);
+    const slash = rest.indexOf('/');
+    if (slash <= 0 || slash === rest.length - 1) return null;
+
+    return { pluginId: rest.slice(0, slash), viewId: rest.slice(slash + 1) };
+}
+
+/** The kind string that opens one of a plugin's views. */
+export function pluginKindFor(pluginId: string, viewId: string): string {
+    return `${PLUGIN_PREFIX}${pluginId}/${viewId}`;
+}
+
+/** The view id the overview takes, matching plugins.OverviewID on the Go side. */
+export const PLUGIN_OVERVIEW = 'overview';
+
+/** True for the kind that opens a plugin's landing page rather than a listing. */
+export function isPluginOverview(kind: string): boolean {
+    return parsePluginKind(kind)?.viewId === PLUGIN_OVERVIEW;
+}
+
+/**
+ * How a plugin view is titled and iconed.
+ *
+ * This is a registry rather than something derived from the kind string,
+ * because unlike a `crd:` kind -- whose plural is right there in it -- a plugin
+ * view's label lives in a file on disk. The workspace fills it in when the
+ * plugin catalogue loads, and everything that titles a tab goes on calling
+ * labelFor() without knowing plugins exist.
+ *
+ * A kind with no entry still renders: it falls back to the view id, which is
+ * what a tab restored before its plugin has loaded shows for an instant, and
+ * what a tab whose plugin has been uninstalled shows for good.
+ */
+const PLUGIN_VIEWS = new Map<string, NavItem>();
+
+/** Replaces what is known about the installed plugins' views. */
+export function registerPluginViews(items: NavItem[]): void {
+    PLUGIN_VIEWS.clear();
+    for (const item of items) {
+        PLUGIN_VIEWS.set(item.kind, item);
+    }
+}
+
 // The dashboard is deliberately absent: it belongs to no section, so there is
 // never one to unfold in order to reach it.
 const GROUP_OF = new Map<string, string>(
@@ -240,8 +322,16 @@ export function labelFor(kind: string): string {
     const known = BY_KIND.get(kind);
     if (known) return known.label;
 
+    const plugin = PLUGIN_VIEWS.get(kind);
+    if (plugin) return plugin.label;
+
     const custom = parseCustomKind(kind);
     if (custom) return custom.plural.charAt(0).toUpperCase() + custom.plural.slice(1);
+
+    // A plugin view whose plugin is not loaded: the view id is the only name we
+    // have, and it reads better than the whole `plugin:x/y` string.
+    const view = parsePluginKind(kind);
+    if (view) return view.viewId;
 
     return kind;
 }
@@ -252,7 +342,11 @@ export function iconFor(kind: string): string {
 
     const known = BY_KIND.get(kind);
     if (known) return known.icon;
-    return parseCustomKind(kind) ? 'puzzle' : 'box';
+
+    const plugin = PLUGIN_VIEWS.get(kind);
+    if (plugin) return plugin.icon;
+
+    return parseCustomKind(kind) || parsePluginKind(kind) ? 'puzzle' : 'box';
 }
 
 /**

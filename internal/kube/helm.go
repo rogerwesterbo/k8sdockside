@@ -30,7 +30,7 @@ import (
 // streaming them.
 
 // HelmReleaseSecretType marks a Secret as one of Helm 3's release records.
-const HelmReleaseSecretType = "helm.sh/release.v1"
+const HelmReleaseSecretType = "helm.sh/release.v1" // #nosec G101 -- a Secret type label, not a credential
 
 // maxReleasePayload caps how much a single release may decompress to. A gzip
 // stream can claim to be far larger than it is, and nothing here should be able

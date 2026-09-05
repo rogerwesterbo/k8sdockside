@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main starts the app: it opens the settings file, wires up the five services
+// main starts the app: it opens the settings file, wires up the eight services
 // the frontend calls, and shows the main window.
 func main() {
 	// The settings store holds the user's kubeconfig paths, context aliases and
@@ -32,6 +32,17 @@ func main() {
 	// opening its own: acting on an object in a context already showing in a
 	// tab should cost no second connection and no second credential exec.
 	resources := NewResourceService(configs)
+	// The plugin service borrows the same watcher, so a plugin's overview
+	// counts through the connection its tabs are already using rather than
+	// opening a second one. The two know about each other because a tab opened
+	// on a plugin's view has to be resolved back to a real kind -- see
+	// ResourceService.view.
+	solutions := NewPluginService(settings, configs, resources.watcher)
+	resources.usePlugins(solutions)
+	// Charts go through the same watcher again: a Prometheus query reaches the
+	// cluster through the API server, so it rides the connection a tab already
+	// has rather than opening its own.
+	graphs := NewMetricsService(settings, configs, resources.watcher, solutions)
 
 	app := application.New(application.Options{
 		Name:        "k8sdockside",
@@ -42,6 +53,9 @@ func main() {
 			application.NewService(resources),
 			application.NewService(NewActionService(configs, resources.watcher)),
 			application.NewService(NewLogService(configs, resources.watcher)),
+			application.NewService(NewThemeService(settings)),
+			application.NewService(solutions),
+			application.NewService(graphs),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

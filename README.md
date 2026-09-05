@@ -41,6 +41,31 @@ cluster you are looking at.
   that writes it back with `⌘S`. A save that the cluster refuses -- a conflict,
   an admission webhook, a missing permission -- is reported in the API server's
   own words, and what you typed stays where it is.
+- **Themes, and themes you add yourself.** Thirteen palettes ship with the app —
+  from `K8s Dockside Dark` through `Deep Sea`, `Driftwood` and `Lighthouse` to
+  ports of Nord and Catppuccin Mocha — chosen from a gallery in
+  **Settings → Themes** that draws each one as a miniature of the app rather
+  than a row of swatches. A theme is a JSON file of colours and nothing else:
+  drop one in the themes folder, or point the app at a folder of them, and it
+  appears alongside the built-ins. It cannot ship CSS or run code, and anything
+  it leaves out is inherited, so a four-colour theme is a real one. See
+  [docs/themes.md](docs/themes.md).
+- **Plugins for what is installed in the cluster.** Argo CD, Flux and Prometheus
+  ship with the app and appear under a **Solutions** section in the sidebar, each
+  unfolding into its own views — Applications, Kustomizations, Service Monitors —
+  instead of leaving those custom resources scattered through the definitions
+  tree under group names. Each has an overview saying whether this cluster
+  actually has it, which of the kinds it needs are served, and a live count of
+  what it manages, worst first. A plugin is a JSON file naming kinds the app
+  already knows how to show, so adding one for your own operator is a file rather
+  than a fork. See [docs/plugins.md](docs/plugins.md).
+- **Graphs, where the cluster can answer for them.** With Prometheus in the
+  cluster, a pod's detail panel gains CPU, memory and network over time, a node
+  gains its own, and the dashboard gains cluster CPU, memory, pods by phase and
+  API server request rate. It is found automatically and reached **through the
+  API server** — no port-forward, no second credential — with a per-cluster
+  override for Thanos or anything outside. The queries are part of the plugin
+  file, so charting your own operator is a few lines of PromQL.
 - **A dock that stays put.** The dock's tabs are always on screen and behave
   like the strip above them: coloured by their cluster, dragged into order,
   scrolled when they no longer fit, right-clicked for what to close, and
@@ -148,16 +173,28 @@ WAILS_SERVER_PORT=9741 ./bin/k8sdockside-server
 ## Layout
 
 ```
-main.go                      window, and the three services the frontend calls
+main.go                      window, and the services the frontend calls
 kubeconfigservice.go         discovery, add/remove, the context cache
 settingsservice.go           aliases, colours, tab order, layout
 resourceservice.go           dashboard, resource tables, describe, editing
+themeservice.go              the theme catalogue, and the folders it is read from
+pluginservice.go             the solution plugins, and each one's per-cluster overview
+metricsservice.go            finding a cluster's Prometheus, and drawing plugin charts
 internal/kube/               kubeconfig parsing, and the stubbed cluster data
 internal/appconfig/          the settings file
+internal/addons/             finding and merging add-on files, shared by the two below
+internal/themes/             the theme format, loader and built-in palettes
+internal/themes/builtin/     the thirteen themes, as JSON in the public format
+internal/plugins/            the plugin format, loader and overview builder
+internal/plugins/builtin/    Argo CD, Flux and Prometheus, in the public format
+internal/metrics/            PromQL, Prometheus discovery, and reading its answers
 frontend/src/
   App.svelte                 shell: sidebar | tabs + view | detail panel | dock
   lib/state/workspace.svelte.ts   all application state
   lib/state/editor.svelte.ts      the documents open in the dock's editor
+  lib/theme/apply.ts         writing a theme's colours onto the document
+  lib/plugins/               the plugin catalogue as the sidebar and overview see it
+  lib/charts/                the SVG line chart, and the panel that hosts them
   lib/catalogue.ts           the resource kinds the sidebar offers
   lib/colors.ts              the context palette
   lib/components/            sidebar, tab bar, tables, detail panel, dock
@@ -165,7 +202,9 @@ frontend/src/
 
 Your settings live in `$XDG_CONFIG_HOME/k8sdockside/settings.json`, falling
 back to `~/.config/k8sdockside/settings.json`, on both macOS and Linux; Windows
-uses `%AppData%`. The path is shown in the status bar.
+uses `%AppData%`. The path is shown in the status bar. Themes you install go in
+`themes/` and `plugins/` folders beside it — see [docs/themes.md](docs/themes.md)
+and [docs/plugins.md](docs/plugins.md).
 
 Releases up to and including the ones that used `os.UserConfigDir` wrote to
 `~/Library/Application Support/k8sdockside/` on macOS. That file is moved to

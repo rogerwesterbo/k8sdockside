@@ -6,6 +6,7 @@
 <script lang="ts">
     import { fly } from 'svelte/transition';
     import { singularFor } from '../catalogue';
+    import MetricsPanel from '../charts/MetricsPanel.svelte';
     import { alpha } from '../colors';
     import { actions } from '../state/actions.svelte';
     import { changes } from '../state/changes.svelte';
@@ -179,6 +180,19 @@
         <ObjectActions object={target} />
 
         <div class="body">
+            <!-- Above the describe report, not below it: what a pod is *doing*
+                 is what someone opening this panel mid-incident came for, and
+                 the report is long enough that anything under it is out of
+                 sight. Draws nothing at all unless an installed plugin has
+                 charts for this kind and the cluster has a Prometheus. -->
+            <MetricsPanel
+                contextId={target.contextId}
+                attach={target.kind}
+                namespace={target.namespace}
+                name={target.name}
+                compact
+            />
+
             {#if workspace.detailLoading}
                 <p class="status">Describing {target.name}…</p>
             {:else if workspace.detailError}

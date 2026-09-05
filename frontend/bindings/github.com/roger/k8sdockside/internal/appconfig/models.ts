@@ -11,6 +11,19 @@ export interface ContextPrefs {
     "color": string;
 
     /**
+     * Metrics overrides where this cluster's Prometheus is found, for the charts
+     * a solution plugin draws. Empty means "look for it", which is what almost
+     * every cluster wants: a Prometheus installed by the Operator or the
+     * community chart is discoverable, and reaching it through the API server
+     * needs no address at all.
+     * 
+     * Two forms are accepted -- `namespace/service:port` and an http(s) URL --
+     * because there are two genuinely different situations behind them; see
+     * metrics.ParseEndpoint.
+     */
+    "metrics"?: string;
+
+    /**
      * CollapsedGroups overrides Layout.CollapsedGroups for this context alone.
      * Nil means "follow the global setting", which is the usual case -- a
      * cluster only carries its own list once the user folds a group for it
@@ -108,9 +121,17 @@ export interface Layout {
  */
 export interface Preferences {
     /**
-     * Theme is system, light or dark. Empty means system, which follows the
-     * OS. The frontend resolves it to a data-theme attribute; nothing here
-     * knows what a colour is.
+     * Theme is the id of the theme the user chose -- a built-in one, or one
+     * they installed. Empty means the default.
+     * 
+     * It is stored as a free string and deliberately not validated against a
+     * list, because the store has no way to know what themes exist: a theme
+     * may live in a folder that has not been read yet, or on a machine this
+     * settings file has not reached. An id nothing answers to is kept as
+     * written and falls back to the default at the point it is applied, so
+     * that a theme temporarily missing does not silently unset the choice.
+     * 
+     * Nothing here knows what a colour is; see internal/themes.
      */
     "theme": string;
 
@@ -153,6 +174,16 @@ export interface Preferences {
     "showKubeconfigNames": boolean;
 
     /**
+     * MetricsRange is how far back a chart looks, in minutes. Persisted because
+     * it is a way of working rather than a moment: somebody watching a rollout
+     * wants fifteen minutes every time they open a pod, and somebody reviewing
+     * capacity wants a day.
+     * 
+     * Zero means never chosen and resolves to an hour.
+     */
+    "metricsRange"?: number;
+
+    /**
      * ShowLineNumbers draws a line-number gutter down the side of the YAML
      * editor in the bottom dock.
      * 
@@ -184,6 +215,22 @@ export interface Settings {
      * next scan would find it again -- so refusing it has to be recorded.
      */
     "excludedFiles": string[] | null;
+
+    /**
+     * ThemeFolders are extra directories to read themes from, on top of the
+     * themes folder beside this file. They sit here rather than in Preferences
+     * for the same reason ManualFolders does: this is where something comes
+     * from, not a choice about how the app behaves.
+     */
+    "themeFolders": string[] | null;
+
+    /**
+     * PluginFolders is the same for solution plugins. Kept separate from
+     * ThemeFolders rather than merged into one list of "add-on folders":
+     * somebody who syncs a folder of themes has not asked for plugins out of
+     * it, and one list would mean every folder was scanned for both.
+     */
+    "pluginFolders": string[] | null;
     "contexts": { [_ in string]?: ContextPrefs } | null;
     "tabOrder": TabRef[] | null;
 

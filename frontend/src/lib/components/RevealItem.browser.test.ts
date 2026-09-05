@@ -51,7 +51,7 @@ beforeEach(async () => {
     workspace.expanded = ['c0'];
     workspace.selectedContextId = 'c0';
     // Everything open, so the tree is as long as it really gets.
-    workspace.settings.contexts = { c0: { alias: '', color: '', collapsedGroups: [] } };
+    workspace.settings.contexts = { c0: { alias: '', color: '', metrics: '', collapsedGroups: [] } };
     workspace.settings.layout.collapsedGroups = [];
     render(Sidebar);
     (document.querySelector('.sidebar') as HTMLElement).style.height = '700px';

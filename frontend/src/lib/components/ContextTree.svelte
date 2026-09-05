@@ -4,7 +4,14 @@
 -->
 <script lang="ts">
     import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
-    import { DASHBOARD_ITEM, DEFINITIONS_GROUP, NAV_GROUPS } from '../catalogue';
+    import {
+        DASHBOARD_ITEM,
+        DEFINITIONS_GROUP,
+        NAV_GROUPS,
+        PLUGIN_OVERVIEW,
+        SOLUTIONS_GROUP,
+        pluginKindFor,
+    } from '../catalogue';
     import { classify } from '../errors';
     import { alpha } from '../colors';
     import { workspace, type Health } from '../state/workspace.svelte';
@@ -122,9 +129,41 @@
     // Still lazy: nothing is asked of a cluster whose definitions section is
     // shut, and loadCustomKinds does nothing once a context has an answer.
     $effect(() => {
-        if (!expanded || workspace.isGroupCollapsed(context.id, DEFINITIONS_GROUP)) return;
+        if (!expanded) return;
+        const wanted =
+            !workspace.isGroupCollapsed(context.id, DEFINITIONS_GROUP) ||
+            !workspace.isGroupCollapsed(context.id, SOLUTIONS_GROUP);
+        if (!wanted) return;
         void workspace.loadCustomKinds(context.id);
     });
+
+    /**
+     * How a plugin's row reads for this cluster.
+     *
+     * `unknown` is a real answer and not a placeholder: until the cluster's
+     * definitions have been read we genuinely do not know, and a row that said
+     * "not installed" before it had looked would be wrong more often than
+     * right. The plugin is still openable in every state -- its overview is
+     * where "this cluster does not have it" gets explained properly.
+     */
+    function presence(pluginId: string): 'installed' | 'absent' | 'unknown' {
+        const plugin = workspace.plugins.find((p) => p.id === pluginId);
+        if (!plugin) return 'unknown';
+        const found = workspace.pluginInstalledIn(context.id, plugin);
+        if (found === null) return 'unknown';
+        return found ? 'installed' : 'absent';
+    }
+
+    function presenceTitle(name: string, state: string): string {
+        switch (state) {
+            case 'installed':
+                return `${name} is installed in this cluster`;
+            case 'absent':
+                return `${name} does not appear to be installed in this cluster — open it to see what is missing`;
+            default:
+                return name;
+        }
+    }
 
     function statusTitle(state: Health): string {
         switch (state.status) {
@@ -236,7 +275,11 @@
                     <span>{group.label}</span>
                     <!-- The count only earns its place when the group is shut:
                          open, the items themselves say how many there are. -->
-                    {#if folded}<span class="tally">{group.items.length}</span>{/if}
+                    {#if folded}
+                        <span class="tally">
+                            {group.label === SOLUTIONS_GROUP ? workspace.plugins.length : group.items.length}
+                        </span>
+                    {/if}
                 </button>
 
                 <!-- Only the definitions section can go stale: its contents are
@@ -246,7 +289,7 @@
 
                      Nested inside the heading it would fold the section on its
                      way through, so it sits beside it and stops the click. -->
-                {#if !folded && group.label === DEFINITIONS_GROUP}
+                {#if !folded && (group.label === DEFINITIONS_GROUP || group.label === SOLUTIONS_GROUP)}
                     {@const reading = workspace.customKindsFor(context.id).status === 'loading'}
                     <button
                         class="reload"
@@ -276,6 +319,69 @@
                             <span>{item.label}</span>
                         </button>
                     {/each}
+
+                    <!-- The solutions section: one row per plugin installed on
+                         this machine, each unfolding into its own views. The
+                         rows are the same whatever cluster this is -- a plugin
+                         is installed here, not there -- and whether the cluster
+                         actually has it is said in the margin. -->
+                    {#if group.label === SOLUTIONS_GROUP}
+                        {#if workspace.plugins.length === 0}
+                            <p class="note">No plugins installed</p>
+                        {:else}
+                            {#each workspace.plugins as plugin (plugin.id)}
+                                {@const open = workspace.isPluginExpanded(context.id, plugin.id)}
+                                {@const state = presence(plugin.id)}
+                                <button
+                                    class="plugin {state}"
+                                    onclick={() => workspace.togglePlugin(context.id, plugin.id)}
+                                    aria-expanded={open}
+                                    title={presenceTitle(plugin.name, state)}
+                                >
+                                    <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
+                                    <Icon name={plugin.icon} size={14} />
+                                    <span>{plugin.name}</span>
+                                    {#if state === 'absent'}
+                                        <span class="missing">not installed</span>
+                                    {/if}
+                                </button>
+
+                                {#if open}
+                                    <!-- Always first, and always there whether
+                                         or not the plugin declared it: "is this
+                                         even in this cluster?" is the question
+                                         that has to have somewhere to be
+                                         answered, especially when the CRDs are
+                                         missing and every other row below would
+                                         open onto an error. -->
+                                    {@const overview = pluginKindFor(plugin.id, PLUGIN_OVERVIEW)}
+                                    <button
+                                        class="item nested"
+                                        data-kind={overview}
+                                        class:open={isOpen(overview)}
+                                        onclick={() => workspace.openTab(context.id, overview)}
+                                    >
+                                        <Icon name="dashboard" size={14} />
+                                        <span>Overview</span>
+                                    </button>
+
+                                    {#each plugin.views as view (view.id)}
+                                        {@const kind = pluginKindFor(plugin.id, view.id)}
+                                        <button
+                                            class="item nested"
+                                            data-kind={kind}
+                                            class:open={isOpen(kind)}
+                                            onclick={() => workspace.openTab(context.id, kind)}
+                                            title={view.namespace ? `${view.label} in ${view.namespace}` : view.label}
+                                        >
+                                            <Icon name={view.icon} size={14} />
+                                            <span>{view.label}</span>
+                                        </button>
+                                    {/each}
+                                {/if}
+                            {/each}
+                        {/if}
+                    {/if}
 
                     <!-- The definitions section continues into the cluster: the
                          API groups it serves, each holding its own kinds. -->
@@ -647,9 +753,60 @@
         white-space: nowrap;
     }
 
-    /* A definition sits one level in from its API group. */
+    /* A definition sits one level in from its API group, and a plugin's view
+       one level in from its plugin. */
     .item.nested {
         padding-left: calc(var(--indent) + 16px);
+    }
+
+    /* One plugin: a heading like an API group, but with the solution's own icon
+       and a word about whether this cluster has it. */
+    .plugin {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        min-height: 26px;
+        padding-left: var(--indent);
+        padding-right: 8px;
+        color: var(--text-dim);
+        border-radius: var(--radius-sm);
+        text-align: left;
+    }
+
+    .plugin:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .plugin span:not(.missing) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Dimmed rather than hidden or disabled. The plugin is installed on this
+       machine and its rows are real; it is this cluster that has nothing to
+       show, and the overview is where that gets explained. Hiding the row
+       instead would leave someone who installed a plugin wondering where it
+       went. */
+    .plugin.absent {
+        color: var(--text-faint);
+    }
+
+    /* Named for what it says rather than for the row's state, which the row
+       itself already carries as .absent -- the two sharing a class meant the
+       badge's background was drawn across the whole row. */
+    .missing {
+        margin-left: auto;
+        flex: 0 0 auto;
+        font-size: 9px;
+        letter-spacing: 0.02em;
+        color: var(--text-faint);
+        background: var(--bg-raised);
+        border-radius: 7px;
+        padding: 0 5px;
+        line-height: 13px;
     }
 
     .note {

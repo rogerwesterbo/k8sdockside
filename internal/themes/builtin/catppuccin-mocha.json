@@ -1,0 +1,25 @@
+{
+    "id": "catppuccin-mocha",
+    "name": "Catppuccin Mocha",
+    "tagline": "community port · Catppuccin palette",
+    "base": "dark",
+    "author": "Palette by the Catppuccin project",
+    "tokens": {
+        "bg": "#1e1e2e",
+        "bg-sidebar": "#181825",
+        "bg-panel": "#232338",
+        "bg-raised": "#313244",
+        "bg-hover": "rgba(205, 214, 244, 0.07)",
+        "bg-active": "rgba(205, 214, 244, 0.12)",
+        "border": "#585b70",
+        "border-soft": "rgba(205, 214, 244, 0.07)",
+        "text": "#cdd6f4",
+        "text-dim": "#bac2de",
+        "text-faint": "#a6adc8",
+        "accent": "#cba6f7",
+        "accent-text": "#1e1e2e",
+        "ok": "#a6e3a1",
+        "warn": "#f9e2af",
+        "error": "#f38ba8"
+    }
+}

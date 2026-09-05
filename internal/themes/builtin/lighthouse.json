@@ -1,0 +1,26 @@
+{
+    "id": "lighthouse",
+    "name": "Lighthouse",
+    "tagline": "high contrast · accessibility",
+    "base": "dark",
+    "tokens": {
+        "bg": "#000000",
+        "bg-sidebar": "#000000",
+        "bg-panel": "#0a0a0a",
+        "bg-raised": "#191919",
+        "bg-hover": "rgba(255, 255, 255, 0.16)",
+        "bg-active": "rgba(255, 255, 255, 0.26)",
+        "border": "#8a8a8a",
+        "border-soft": "rgba(255, 255, 255, 0.22)",
+        "text": "#ffffff",
+        "text-dim": "#eaeaea",
+        "text-faint": "#d2d2d2",
+        "accent": "#ffd400",
+        "accent-text": "#000000",
+        "ok": "#4bf58a",
+        "warn": "#ffb300",
+        "error": "#ff6b6b",
+        "scrollbar": "rgba(255, 255, 255, 0.35)",
+        "scrollbar-hover": "rgba(255, 255, 255, 0.55)"
+    }
+}

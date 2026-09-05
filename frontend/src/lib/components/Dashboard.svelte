@@ -4,6 +4,7 @@
     import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
     import { adoptOverview, type Overview } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
+    import MetricsPanel from '../charts/MetricsPanel.svelte';
     import ErrorState from './ErrorState.svelte';
     import SortableTable from './SortableTable.svelte';
 
@@ -106,6 +107,12 @@
                 </div>
             {/each}
         </section>
+
+        <!-- Between the counters and the events: the counters say what the
+             cluster is made of, the charts say what it has been doing, and the
+             events say what went wrong. That is the order someone reads them
+             in. -->
+        <MetricsPanel {contextId} attach="dashboard" title="Metrics" />
 
         <section class="events">
             <h2>Recent events</h2>

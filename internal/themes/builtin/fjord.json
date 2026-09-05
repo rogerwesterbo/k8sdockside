@@ -1,0 +1,24 @@
+{
+    "id": "fjord",
+    "name": "Fjord",
+    "tagline": "Nordic dark · slate blue-gray",
+    "base": "dark",
+    "tokens": {
+        "bg": "#232b36",
+        "bg-sidebar": "#28313d",
+        "bg-panel": "#2f3946",
+        "bg-raised": "#3a4655",
+        "bg-hover": "rgba(200, 220, 245, 0.07)",
+        "bg-active": "rgba(200, 220, 245, 0.12)",
+        "border": "#5a6879",
+        "border-soft": "rgba(200, 220, 245, 0.07)",
+        "text": "#e4eaf2",
+        "text-dim": "#b2bfcf",
+        "text-faint": "#a9b8cb",
+        "accent": "#5b8fd6",
+        "accent-text": "#101822",
+        "ok": "#7fc79c",
+        "warn": "#e0b978",
+        "error": "#e58e8e"
+    }
+}

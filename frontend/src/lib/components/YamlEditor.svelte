@@ -283,7 +283,7 @@
 
     .save {
         background: var(--accent);
-        color: #fff;
+        color: var(--accent-text);
     }
 
     .save:hover:not(:disabled) {

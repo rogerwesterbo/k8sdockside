@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/roger/k8sdockside/internal/kube"
+	"github.com/roger/k8sdockside/internal/plugins"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -27,6 +29,10 @@ func init() {
 type ResourceService struct {
 	configs *KubeconfigService
 	watcher *kube.Watcher
+	// plugins resolves a "plugin:" tab kind back to the kind and filters the
+	// view names. Set after construction because the plugin service needs this
+	// service's watcher, and one of the two has to be built first.
+	plugins *PluginService
 }
 
 // NewResourceService wires the service to the kubeconfig cache it resolves
@@ -36,6 +42,11 @@ func NewResourceService(configs *KubeconfigService) *ResourceService {
 	s.watcher = kube.NewWatcher(s.push)
 	return s
 }
+
+// usePlugins gives the service the plugin catalogue it resolves plugin views
+// against. Unexported so it stays out of the generated bindings: it is wiring
+// between two services in the same package, not something the frontend calls.
+func (s *ResourceService) usePlugins(p *PluginService) { s.plugins = p }
 
 // push forwards one snapshot to the frontend. It is called from the watcher's
 // background goroutines, which is why it tolerates being called before the app
@@ -64,7 +75,45 @@ func (s *ResourceService) Subscribe(contextID, kind, namespace string) (string, 
 	if err != nil {
 		return "", err
 	}
-	return s.watcher.Subscribe(ctx, kind, namespace)
+
+	// A plugin view is a kind like any other as far as the tab machinery is
+	// concerned; it is turned back into a real kind and the filters it pins
+	// here, at the last moment, so nothing between the sidebar and this line
+	// has to know that plugins exist.
+	kind, namespace, selector, err := s.view(kind, namespace)
+	if err != nil {
+		return "", err
+	}
+	return s.watcher.Subscribe(ctx, kind, namespace, selector)
+}
+
+// view resolves a tab's kind, which may name a plugin's view, into the kind to
+// watch and the filters to apply. A kind that is not a plugin view passes
+// through untouched, which is every kind but one.
+//
+// A view that pins a namespace overrides whatever the tab asked for, rather
+// than intersecting with it: the pin is the whole point of the view, and a
+// tab's namespace filter that silently did nothing would be worse than one that
+// is not offered.
+func (s *ResourceService) view(kind, namespace string) (string, string, string, error) {
+	if !strings.HasPrefix(kind, plugins.Prefix) {
+		return kind, namespace, kube.NoSelector, nil
+	}
+	if s.plugins == nil {
+		return "", "", "", fmt.Errorf("plugins are not available")
+	}
+
+	resolved, err := s.plugins.Resolve(kind)
+	if err != nil {
+		return "", "", "", err
+	}
+	if resolved.Overview {
+		return "", "", "", fmt.Errorf("%s is a plugin overview, which is not a resource listing", kind)
+	}
+	if resolved.Namespace != "" {
+		namespace = resolved.Namespace
+	}
+	return resolved.Kind, namespace, resolved.Selector, nil
 }
 
 // Unsubscribe closes a tab's view. The underlying watch stays open if another

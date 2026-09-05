@@ -4,16 +4,24 @@
 import * as ActionService from "./actionservice.js";
 import * as KubeconfigService from "./kubeconfigservice.js";
 import * as LogService from "./logservice.js";
+import * as MetricsService from "./metricsservice.js";
+import * as PluginService from "./pluginservice.js";
 import * as ResourceService from "./resourceservice.js";
 import * as SettingsService from "./settingsservice.js";
+import * as ThemeService from "./themeservice.js";
 export {
     ActionService,
     KubeconfigService,
     LogService,
+    MetricsService,
+    PluginService,
     ResourceService,
-    SettingsService
+    SettingsService,
+    ThemeService
 };
 
 export type {
-    About
+    About,
+    Panel,
+    Source
 } from "./models.js";

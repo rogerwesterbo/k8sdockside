@@ -1,0 +1,24 @@
+{
+    "id": "rusty-hull",
+    "name": "Rusty Hull",
+    "tagline": "warm dark · charcoal + amber",
+    "base": "dark",
+    "tokens": {
+        "bg": "#16130e",
+        "bg-sidebar": "#1c1812",
+        "bg-panel": "#221d16",
+        "bg-raised": "#2e2820",
+        "bg-hover": "rgba(255, 210, 150, 0.07)",
+        "bg-active": "rgba(255, 210, 150, 0.12)",
+        "border": "#57493a",
+        "border-soft": "rgba(255, 220, 170, 0.06)",
+        "text": "#f1e7d9",
+        "text-dim": "#bbab94",
+        "text-faint": "#a09079",
+        "accent": "#cf7d2a",
+        "accent-text": "#1a1509",
+        "ok": "#84c069",
+        "warn": "#e5ae45",
+        "error": "#ea7561"
+    }
+}

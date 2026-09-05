@@ -4,17 +4,19 @@
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { DASHBOARD, SETTINGS } from './lib/catalogue';
+    import { DASHBOARD, SETTINGS, isPluginOverview } from './lib/catalogue';
     import Dashboard from './lib/components/Dashboard.svelte';
     import DetailPanel from './lib/components/DetailPanel.svelte';
     import Dock from './lib/components/Dock.svelte';
     import Icon from './lib/components/Icon.svelte';
+    import PluginOverview from './lib/components/PluginOverview.svelte';
     import ResourceTable from './lib/components/ResourceTable.svelte';
     import SettingsView from './lib/components/settings/SettingsView.svelte';
     import Sidebar from './lib/components/Sidebar.svelte';
     import TabBar from './lib/components/TabBar.svelte';
     import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
+    import { applyTheme } from './lib/theme/apply';
 
     const MIN_SIDEBAR = 200;
     const MAX_SIDEBAR = 520;
@@ -23,8 +25,6 @@
 
     onMount(() => {
         workspace.load();
-        // Returned so the media query listener is torn down with the shell.
-        return workspace.watchSystemTheme();
     });
 
     // Zoom is applied as CSS on the app's own element, not through the window.
@@ -53,11 +53,20 @@
 
     // The appearance preferences are applied to the document root rather than
     // scoped to a component, because they are what every component's own tokens
-    // resolve against. `data-theme` is the seam the light palette hangs off:
-    // set here, read only by style.css.
+    // resolve against.
+    //
+    // The theme is a whole palette written onto the root by applyTheme, not a
+    // class or an attribute a stylesheet keys off. That is what lets a theme be
+    // a file rather than a code change: there is no rule anywhere in the app
+    // that names one, so adding a thirteenth costs nothing but the file, and a
+    // theme somebody wrote this morning goes through the identical path.
+    $effect(() => {
+        const theme = workspace.activeTheme;
+        if (theme) applyTheme(theme);
+    });
+
     $effect(() => {
         const root = document.documentElement;
-        root.dataset.theme = workspace.resolvedTheme;
         const compact = workspace.density === 'compact';
         root.style.setProperty('--row-h', compact ? '24px' : '30px');
         root.style.setProperty('--cell-pad-y', compact ? '3px' : '6px');
@@ -172,6 +181,11 @@
                                 <SettingsView />
                             {:else if workspace.activeTab.kind === DASHBOARD}
                                 <Dashboard contextId={workspace.activeTab.contextId} />
+                            {:else if isPluginOverview(workspace.activeTab.kind)}
+                                <PluginOverview
+                                    contextId={workspace.activeTab.contextId}
+                                    kind={workspace.activeTab.kind}
+                                />
                             {:else}
                                 <ResourceTable
                                     contextId={workspace.activeTab.contextId}

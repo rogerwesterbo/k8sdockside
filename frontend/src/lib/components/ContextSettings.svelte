@@ -1,7 +1,8 @@
 <!--
   The settings panel pinned to the bottom of the sidebar. It edits the selected
-  context: what it is called in this app, and the colour that identifies it in
-  the sidebar and on its tabs. Neither change touches the kubeconfig file.
+  context: what it is called in this app, the colour that identifies it in the
+  sidebar and on its tabs, and where its metrics come from. None of it touches
+  the kubeconfig file.
 -->
 <script lang="ts">
     import type * as kube from '../../../bindings/github.com/roger/k8sdockside/internal/kube/models.js';
@@ -23,6 +24,25 @@
     // value like "#3d7" does not repaint the whole UI mid-keystroke.
     let hexDraft = $state('');
     let editingHex = $state(false);
+
+    /**
+     * Where this cluster's Prometheus is, when the app could not work it out.
+     *
+     * Shown here rather than in the app-wide settings because it is a fact about
+     * one cluster, like its colour: the same install of this app talks to a
+     * dozen clusters and each has its own monitoring, or none.
+     */
+    let metricsDraft = $state('');
+    let editingMetrics = $state(false);
+    let metricsError = $state('');
+
+    let source = $derived(workspace.metricsSourceFor(context.id));
+    let configured = $derived(workspace.settings.contexts[context.id]?.metrics ?? '');
+
+    async function commitMetrics(): Promise<void> {
+        metricsError = await workspace.setMetricsEndpoint(context.id, metricsDraft.trim());
+        if (metricsError === '') editingMetrics = false;
+    }
 
     function rename(event: Event): void {
         const value = (event.currentTarget as HTMLInputElement).value;
@@ -99,6 +119,58 @@
                 </button>
             {/if}
         </div>
+    </div>
+
+    <div class="field">
+        <span>Metrics</span>
+        <div class="metrics">
+            {#if editingMetrics}
+                <input
+                    class="endpoint"
+                    type="text"
+                    bind:value={metricsDraft}
+                    placeholder="monitoring/prometheus-operated:9090"
+                    spellcheck="false"
+                    onkeydown={(e) => {
+                        if (e.key === 'Enter') void commitMetrics();
+                        if (e.key === 'Escape') {
+                            editingMetrics = false;
+                            metricsError = '';
+                        }
+                    }}
+                />
+                <button class="apply" onclick={() => void commitMetrics()}>Save</button>
+            {:else}
+                <button
+                    class="found"
+                    onclick={() => {
+                        metricsDraft = configured;
+                        metricsError = '';
+                        editingMetrics = true;
+                    }}
+                    title={configured
+                        ? 'Set for this cluster — click to change or clear'
+                        : 'Found automatically — click to point at a different Prometheus'}
+                >
+                    {#if source?.available}
+                        <span class="where">{source.describe}</span>
+                        <span class="how">{configured ? 'set here' : 'found'}</span>
+                    {:else if source?.error}
+                        <span class="where none">could not look</span>
+                    {:else}
+                        <span class="where none">none found</span>
+                    {/if}
+                </button>
+            {/if}
+        </div>
+        {#if metricsError}
+            <p class="metrics-note failed">{metricsError}</p>
+        {:else if editingMetrics}
+            <p class="metrics-note">
+                <code>namespace/service:port</code> to go through the API server, or an
+                <code>http(s)://</code> address to go straight there. Empty to look again.
+            </p>
+        {/if}
     </div>
 
     <dl class="meta">
@@ -204,6 +276,88 @@
         grid-column: 1 / -1;
         font-family: var(--mono);
         font-size: 11px;
+    }
+
+    .metrics {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+    }
+
+    /* Reads as the current answer with a way in, rather than as a control: what
+       this row mostly does is tell you whether metrics were found. */
+    .found {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-raised);
+        box-shadow: inset 0 0 0 1px var(--border-soft);
+    }
+
+    .found:hover {
+        background: var(--bg-hover);
+    }
+
+    .where {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--text-dim);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .where.none {
+        color: var(--text-faint);
+        font-style: italic;
+        font-family: var(--font);
+    }
+
+    .how {
+        flex: 0 0 auto;
+        font-size: 9px;
+        color: var(--text-faint);
+    }
+
+    .endpoint {
+        flex: 1 1 auto;
+        min-width: 0;
+        font-family: var(--mono);
+        font-size: 10.5px;
+    }
+
+    .apply {
+        flex: 0 0 auto;
+        padding: 3px 8px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        color: var(--text-dim);
+        box-shadow: inset 0 0 0 1px var(--border);
+    }
+
+    .apply:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .metrics-note {
+        margin: 5px 0 0;
+        font-size: 10.5px;
+        line-height: 1.6;
+        color: var(--text-faint);
+    }
+
+    .metrics-note.failed {
+        color: var(--warn);
+    }
+
+    .metrics-note code {
+        font-family: var(--mono);
+        font-size: 10px;
     }
 
     .meta {

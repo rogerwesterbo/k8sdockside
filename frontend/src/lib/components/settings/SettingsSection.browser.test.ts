@@ -13,6 +13,22 @@ vi.mock('../../../../bindings/github.com/roger/k8sdockside', () => ({
         Open: vi.fn().mockResolvedValue('logs-1'),
         Close: vi.fn(),
     },
+    MetricsService: {
+        Source: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
+        SetEndpoint: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
+        Rediscover: vi.fn().mockResolvedValue({ endpoint: {}, configured: '', available: false, error: '' }),
+        Charts: vi.fn().mockResolvedValue({ source: { endpoint: {}, available: false, error: '', configured: '' }, charts: [], range: 60 }),
+        Attachments: vi.fn().mockResolvedValue([]),
+    },
+    PluginService: {
+        List: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        Reload: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        Summary: vi.fn().mockResolvedValue({ pluginId: '', installed: false, checked: true, requirements: [], cards: [], error: '' }),
+    },
+    ThemeService: {
+        List: vi.fn().mockResolvedValue({ themes: [], dir: '', folders: [], problems: [] }),
+        Tokens: vi.fn().mockResolvedValue([]),
+    },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue('/home/u/.config/k8sdockside/settings.json'),
@@ -45,7 +61,7 @@ test('the sections are ordered with the everyday ones first and About last', asy
     render(SettingsView);
 
     const labels = (await rail().all()).map((item) => item.element().textContent?.trim());
-    expect(labels).toEqual(['Appearance', 'Behaviour', 'Kubeconfig sources', 'About']);
+    expect(labels).toEqual(['Appearance', 'Themes', 'Plugins', 'Behaviour', 'Kubeconfig sources', 'About']);
 });
 
 test('it opens on Appearance', async () => {
