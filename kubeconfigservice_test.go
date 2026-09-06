@@ -305,3 +305,86 @@ func TestWatchedFolderIsRescannedOnSync(t *testing.T) {
 		t.Errorf("got %d files after sync, want 2: %+v", len(files), files)
 	}
 }
+
+// twoContexts is a kubeconfig holding two contexts, for hiding one of them.
+const twoContexts = `apiVersion: v1
+kind: Config
+current-context: one
+clusters:
+- name: one
+  cluster:
+    server: https://10.0.0.1:6443
+- name: two
+  cluster:
+    server: https://10.0.0.2:6443
+contexts:
+- name: one
+  context:
+    cluster: one
+    user: admin
+- name: two
+  context:
+    cluster: two
+    user: admin
+users:
+- name: admin
+`
+
+// Hiding one context leaves the rest of its file alone, and -- like a hidden
+// file -- a rescan must not bring it back. Nothing is written to the kubeconfig.
+func TestHideContextTakesOneContextOutOfItsFile(t *testing.T) {
+	s := service(t)
+	path := write(t, t.TempDir(), "both.config", twoContexts)
+	if _, err := s.AddFile(path); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+
+	files, err := s.HideContext(kube.ContextID(path, "two"))
+	if err != nil {
+		t.Fatalf("HideContext: %v", err)
+	}
+
+	if len(files) != 1 || len(files[0].Contexts) != 1 || files[0].Contexts[0].Name != "one" {
+		t.Errorf("after hiding: %+v, want the file with only context one", files)
+	}
+	if files := s.Sync(); len(files[0].Contexts) != 1 {
+		t.Errorf("a sync brought the hidden context back: %+v", files[0].Contexts)
+	}
+	if got := s.HiddenContexts(); len(got) != 1 || got[0] != kube.ContextID(path, "two") {
+		t.Errorf("HiddenContexts() = %v", got)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Error("the kubeconfig file was changed; hiding must only be remembered in the app's own settings")
+	}
+}
+
+func TestRestoreContextBringsItBack(t *testing.T) {
+	s := service(t)
+	path := write(t, t.TempDir(), "both.config", twoContexts)
+	if _, err := s.AddFile(path); err != nil {
+		t.Fatal(err)
+	}
+	id := kube.ContextID(path, "two")
+	if _, err := s.HideContext(id); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := s.RestoreContext(id)
+	if err != nil {
+		t.Fatalf("RestoreContext: %v", err)
+	}
+	if len(files) != 1 || len(files[0].Contexts) != 2 {
+		t.Errorf("after restoring: %+v, want both contexts", files)
+	}
+	if got := s.HiddenContexts(); len(got) != 0 {
+		t.Errorf("HiddenContexts() = %v, want none", got)
+	}
+}
+
+func TestHideContextRefusesNothing(t *testing.T) {
+	s := service(t)
+	if _, err := s.HideContext(""); err == nil {
+		t.Error("HideContext(\"\") = nil error, want a complaint")
+	}
+}

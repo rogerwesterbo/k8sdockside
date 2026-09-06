@@ -165,3 +165,24 @@ test('the range control says which window is on', async () => {
     await expect.element(page.getByRole('button', { name: '1h' })).toHaveAttribute('aria-pressed', 'true');
     await expect.element(page.getByRole('button', { name: '15m' })).toHaveAttribute('aria-pressed', 'false');
 });
+
+// A query that answers with no series at all is usually a metric nobody is
+// scraping -- Argo CD's ServiceMonitor not selected by the Prometheus, say.
+// The plugin's description of the chart tends to say what it needs, so it is
+// the hint to give, rather than an empty frame.
+test('a chart with no series says so and repeats what the plugin says it needs', async () => {
+    Charts.mockResolvedValue(
+        panel({
+            charts: [{
+                pluginId: 'argocd', pluginName: 'Argo CD', id: 'apps-by-health', label: 'Applications by health',
+                unit: 'count', description: "From Argo CD's own metrics service. Needs its ServiceMonitor scraped.", error: '',
+                series: [],
+            }],
+        }),
+    );
+    render(MetricsPanel, { props: { contextId: PROD, attach: 'overview' } });
+    workspace.metricsAttachments = ['overview'];
+
+    await expect.element(page.getByText('No data came back', { exact: false })).toBeVisible();
+    await expect.element(page.getByText('Needs its ServiceMonitor scraped', { exact: false })).toBeVisible();
+});

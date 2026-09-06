@@ -521,3 +521,35 @@ func TestTheBuiltinPrometheusPluginCarriesUsageQueriesAndCommitmentCharts(t *tes
 		}
 	}
 }
+
+// The Prometheus overview is where somebody goes to ask "is monitoring itself
+// healthy", and Prometheus can always answer that about itself -- these need
+// no exporter beyond the server. So the plugin has to chart there, or the
+// page is a list of CRD counts.
+func TestTheBuiltinPrometheusPluginChartsItsOwnHealthOnItsOverview(t *testing.T) {
+	var prom Plugin
+	for _, p := range Builtin() {
+		if p.ID == "prometheus" {
+			prom = p
+		}
+	}
+	if prom.ID == "" {
+		t.Fatal("no builtin prometheus plugin")
+	}
+
+	overview := prom.ChartsFor(AttachOverview)
+	if len(overview) < 4 {
+		t.Fatalf("the prometheus overview has %d charts, want at least targets, ingestion, series and alerts", len(overview))
+	}
+	for _, want := range []string{"up", "prometheus_tsdb_head_samples_appended_total", "prometheus_tsdb_head_series", "ALERTS"} {
+		found := false
+		for _, c := range overview {
+			if strings.Contains(c.Query, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no overview chart asks about %s", want)
+		}
+	}
+}

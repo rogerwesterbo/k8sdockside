@@ -1,11 +1,9 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
-import SettingsView from './SettingsView.svelte';
+import Sidebar from './Sidebar.svelte';
 
-// The About section asks the backend what this build is the moment it mounts,
-// and the sources section reads the file list; neither is what is under test.
-vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
         Detail: vi.fn().mockResolvedValue({
@@ -20,8 +18,13 @@ vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Uninstall: vi.fn().mockResolvedValue(''),
         ChartVersions: vi.fn().mockResolvedValue([]),
     },
-    KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
-    ResourceService: { Describe: vi.fn().mockResolvedValue('') },
+    KubeconfigService: {
+        Sync: vi.fn().mockResolvedValue([]),
+        Files: vi.fn().mockResolvedValue([]),
+        HideContext: vi.fn().mockResolvedValue([]),
+        RestoreContext: vi.fn().mockResolvedValue([]),
+    },
+    ResourceService: { Describe: vi.fn().mockResolvedValue(''), Ping: vi.fn().mockResolvedValue(undefined) },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
         Open: vi.fn().mockResolvedValue('logs-1'),
@@ -66,80 +69,75 @@ vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
-        ConfigPath: vi.fn().mockResolvedValue('/home/u/.config/k8sdockside/settings.json'),
-        About: vi.fn().mockResolvedValue({ version: 'test', wails: 'test', go: 'test', platform: 'test' }),
+        ConfigPath: vi.fn().mockResolvedValue(''),
         SetPanes: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
         SetPreferences: vi.fn().mockResolvedValue({}),
         SetContextPrefs: vi.fn().mockResolvedValue({}),
     },
-    UpdateService: {
-        Status: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
-        Check: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
-        MarkRead: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
-        OpenRelease: vi.fn().mockResolvedValue(undefined),
-        OpenDownload: vi.fn().mockResolvedValue(undefined),
-    },
 }));
+
+const { workspace } = await import('../state/workspace.svelte');
 
 const TOKENS = `:root{--bg:#10151c;--bg-sidebar:#151b24;--bg-panel:#19202a;--bg-raised:#212b38;
 --border:#46536a;--border-soft:rgba(255,255,255,.05);--bg-hover:rgba(255,255,255,.08);
 --bg-active:rgba(255,255,255,.13);--text:#e8eef7;--text-dim:#a9b6c6;--text-faint:#8593a3;
 --accent:#4a86ff;--ok:#5fd39b;--warn:#efb567;--error:#f4787f;--radius:6px;--radius-sm:4px;
---mono:monospace;--font:-apple-system,sans-serif;font-family:var(--font);font-size:13px}
-body{color:var(--text);margin:0;width:900px}
+--row-h:30px;--mono:monospace;--font:-apple-system,sans-serif;font-family:var(--font);font-size:13px}
+body{color:var(--text);margin:0;width:280px}
 button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}`;
 
-const rail = () => page.getByRole('tab');
+function ctx(file: string, name: string) {
+    return { id: `${file}::${name}`, name, cluster: name, user: 'admin',
+        namespace: '', server: '', file, current: false };
+}
+
+
+// Hiding one context, from its own row. It hides the context in this app and
+// nothing else: the kubeconfig is not written, and the file's other contexts
+// stay. The hidden one is listed under Hidden, where it can be brought back.
+const { KubeconfigService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+
+const CONFIG = '/home/u/.kube/config';
+const PROD = `${CONFIG}::prod`;
+const DEV = `${CONFIG}::dev`;
 
 beforeEach(() => {
     document.body.innerHTML = '';
     const style = document.createElement('style');
     style.textContent = TOKENS;
     document.head.appendChild(style);
-});
 
-test('the sections are ordered with the everyday ones first and About last', async () => {
-    render(SettingsView);
-
-    const labels = (await rail().all()).map((item) => item.element().textContent?.trim());
-    expect(labels).toEqual([
-        'Appearance',
-        'Themes',
-        'Plugins',
-        'Behaviour',
-        'Terminal',
-        'Helm',
-        'Kubeconfig sources',
-        'About',
+    workspace.files = [{ path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod'), ctx(CONFIG, 'dev')] }];
+    workspace.settings.excludedContexts = [];
+    workspace.settings.preferences.showKubeconfigNames = false;
+    workspace.settings.preferences.confirmSourceRemoval = false;
+    vi.mocked(KubeconfigService.HideContext).mockReset().mockResolvedValue([
+        { path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] },
+    ]);
+    vi.mocked(KubeconfigService.RestoreContext).mockReset().mockResolvedValue([
+        { path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod'), ctx(CONFIG, 'dev')] },
     ]);
 });
 
-test('it opens on Appearance', async () => {
-    render(SettingsView);
+test('each context row offers to hide that context, whether or not file names are shown', async () => {
+    render(Sidebar);
 
-    await expect.element(page.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: 'Hide dev' }).click();
+
+    expect(KubeconfigService.HideContext).toHaveBeenCalledWith(DEV);
+    await expect.element(page.getByRole('button', { name: 'Hide prod' })).toBeInTheDocument();
+    expect(document.querySelectorAll('.context').length).toBe(1);
 });
 
-// These two run in order on purpose: together they are one scenario that
-// cannot be written as a single test, because what is being checked is that
-// the choice outlives the component instance that made it.
-//
-// The shell wraps the active view in {#key activeTab.id}, so switching to a
-// cluster tab destroys this component and returning builds a new one. The
-// section therefore cannot live in component state -- it used to, and every
-// visit landed back on the first section.
-test('choosing a section selects it', async () => {
-    render(SettingsView);
+test('a hidden context is listed under Hidden and can be shown again', async () => {
+    workspace.files = [{ path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] }];
+    workspace.settings.excludedContexts = [DEV];
+    render(Sidebar);
 
-    await page.getByRole('tab', { name: 'Behaviour' }).click();
+    await expect.element(page.getByText('Hidden')).toBeVisible();
+    await page.getByRole('button', { name: 'Show dev again' }).click();
 
-    await expect.element(page.getByRole('tab', { name: 'Behaviour' })).toHaveAttribute('aria-selected', 'true');
-});
-
-test('...and a freshly mounted view comes back to it, not to the first section', async () => {
-    render(SettingsView);
-
-    await expect.element(page.getByRole('tab', { name: 'Behaviour' })).toHaveAttribute('aria-selected', 'true');
-    await expect.element(page.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'false');
+    expect(KubeconfigService.RestoreContext).toHaveBeenCalledWith(DEV);
+    expect(document.querySelectorAll('.context').length).toBe(2);
 });

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -189,6 +190,9 @@ type Sources struct {
 	Files    []string // added by hand
 	Folders  []string // scanned on every sync
 	Excluded []string // found, but hidden at the user's request
+	// ExcludedContexts are single contexts hidden at the user's request, by
+	// ContextID. Their files are still read; they are left out of the result.
+	ExcludedContexts []string
 }
 
 // Discover finds every kubeconfig the app should offer: ~/.kube/config, the
@@ -204,6 +208,11 @@ func Discover(sources Sources) []File {
 		if resolved := resolve(p); resolved != "" {
 			excluded[resolved] = true
 		}
+	}
+
+	hiddenContexts := make(map[string]bool, len(sources.ExcludedContexts))
+	for _, id := range sources.ExcludedContexts {
+		hiddenContexts[id] = true
 	}
 
 	var candidates []candidate
@@ -270,6 +279,13 @@ func Discover(sources Sources) []File {
 		if parsed.Error != "" && (c.source == SourceScan || c.source == SourceFolder ||
 			(c.source == SourceDefault && nothingThere)) {
 			continue
+		}
+		// Contexts hidden one at a time. The file stays, with whatever is
+		// left in it: hiding one cluster is not a word against the others.
+		if len(hiddenContexts) > 0 {
+			parsed.Contexts = slices.DeleteFunc(parsed.Contexts, func(kc Context) bool {
+				return hiddenContexts[kc.ID]
+			})
 		}
 		files = append(files, parsed)
 	}

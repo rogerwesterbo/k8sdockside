@@ -60,6 +60,14 @@
         }
     }
 
+    async function openDownload(): Promise<void> {
+        try {
+            await updates.openDownload();
+        } catch {
+            workspace.fail('Could not open the download');
+        }
+    }
+
     /** One sentence on where this build stands. */
     const standing = $derived.by(() => {
         const s = updates.status;
@@ -95,6 +103,9 @@
         <div><dt>Wails</dt><dd class="selectable">{about?.wails || '—'}</dd></div>
         <div><dt>Go</dt><dd class="selectable">{about?.go ?? '…'}</dd></div>
         <div><dt>Platform</dt><dd class="selectable">{about?.platform ?? '…'}</dd></div>
+        {#if updates.status.install}
+            <div><dt>Installed as</dt><dd class="selectable">{updates.status.install}</dd></div>
+        {/if}
         <div>
             <dt>Contexts</dt>
             <dd>{workspace.contexts.length} in {workspace.files.length} kubeconfig files</dd>
@@ -113,6 +124,12 @@
             <Icon name="refresh" size={13} />
             {updates.checking ? 'Checking…' : 'Check for updates'}
         </button>
+        {#if updates.available && updates.download}
+            <button onclick={openDownload} title={updates.downloadName}>
+                <Icon name="download" size={13} />
+                Download {updates.latest?.version} for {updates.status.install}
+            </button>
+        {/if}
         <button onclick={openRelease}>
             <Icon name="link" size={13} />
             {updates.latest ? `Open ${updates.latest.version} on GitHub` : 'Open the releases page'}

@@ -108,6 +108,48 @@
     ],
     "charts": [
         {
+            "id": "targets-by-job",
+            "label": "Scrape targets by job",
+            "attach": "overview",
+            "unit": "count",
+            "legend": "job",
+            "description": "How many targets each job is scraping. A job that drops to nothing has lost its endpoints.",
+            "query": "count by (job) (up)"
+        },
+        {
+            "id": "targets-down",
+            "label": "Targets down",
+            "attach": "overview",
+            "unit": "count",
+            "description": "Targets Prometheus tried and could not scrape. Anything above zero is a metric you are not getting.",
+            "query": "count(up == 0) or vector(0)"
+        },
+        {
+            "id": "samples-ingested",
+            "label": "Samples ingested",
+            "attach": "overview",
+            "unit": "ops/s",
+            "description": "Samples appended to the head block per second, across every Prometheus. The pulse of the monitoring itself.",
+            "query": "sum(rate(prometheus_tsdb_head_samples_appended_total[5m]))"
+        },
+        {
+            "id": "head-series",
+            "label": "Series in memory",
+            "attach": "overview",
+            "unit": "count",
+            "description": "Active time series in the head block. Memory follows this line; a sudden climb is usually a label with too many values.",
+            "query": "sum(prometheus_tsdb_head_series)"
+        },
+        {
+            "id": "firing-alerts",
+            "label": "Firing alerts",
+            "attach": "overview",
+            "unit": "count",
+            "legend": "alertname",
+            "description": "Alerts in the firing state, by name. Watchdog is meant to be there: it proves the alerting path is alive.",
+            "query": "sum by (alertname) (ALERTS{alertstate=\"firing\"})"
+        },
+        {
             "id": "pod-cpu",
             "label": "CPU",
             "attach": "pods",

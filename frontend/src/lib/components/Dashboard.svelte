@@ -59,7 +59,7 @@
     }
 </script>
 
-<div class="dashboard">
+<div class="dashboard" style:--ctx-color={color}>
     {#if loading && !overview}
         <p class="status">Loading cluster overview…</p>
     {:else if error}
@@ -74,14 +74,20 @@
             </dl>
         </header>
 
+        <!-- Each counter is the way into the list it counts: the number says
+             something is not ready, and the list is where to find out what. -->
         <section class="stats">
             {#each overview.stats as stat (stat.label)}
-                <article class="stat {statTone(stat)}">
+                <button
+                    class="stat {statTone(stat)}"
+                    onclick={() => workspace.openTab(contextId, stat.kind)}
+                    title="Open {stat.label}"
+                >
                     <p class="value">
                         {stat.ready}<span class="of">/{stat.total}</span>
                     </p>
                     <p class="label">{stat.label}</p>
-                </article>
+                </button>
             {/each}
         </section>
 
@@ -97,15 +103,23 @@
         <MetricsPanel {contextId} attach="dashboard" title="Metrics" />
 
         <section class="events">
-            <h2>Recent events</h2>
+            <h2>
+                <button class="link" onclick={() => workspace.openTab(contextId, 'events')} title="Open every event">
+                    Recent events
+                </button>
+            </h2>
             {#if overview.events.error}
                 <p class="status quiet">{overview.events.error}</p>
             {:else}
                 <div class="events-table">
+                    <!-- A row opens the event's own report, as a row in the
+                         Events list does. -->
                     <SortableTable
                         columns={overview.events.columns}
                         rows={overview.events.rows}
                         empty="Nothing to report."
+                        onselect={(row) =>
+                            void workspace.openDetail({ contextId, kind: 'events', namespace: row.namespace, name: row.name })}
                     />
                 </div>
             {/if}
@@ -190,6 +204,30 @@
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: 14px 16px;
+        text-align: left;
+        cursor: pointer;
+        font: inherit;
+        color: inherit;
+    }
+
+    .stat:hover {
+        border-color: var(--ctx-color, var(--accent));
+        background: var(--bg-hover);
+    }
+
+    /* The heading is the link into the full list, kept looking like the
+       heading it is until pointed at. */
+    h2 .link {
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+        color: inherit;
+        padding: 0;
+        cursor: pointer;
+    }
+
+    h2 .link:hover {
+        color: var(--accent);
     }
 
     .value {

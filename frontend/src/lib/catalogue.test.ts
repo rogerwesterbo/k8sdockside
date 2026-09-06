@@ -5,7 +5,7 @@ import {
     DEFAULT_COLLAPSED_GROUPS,
     NAV_GROUPS,
     PLUGIN_OVERVIEW,
-    SOLUTIONS_GROUP,
+    PLUGINS_GROUP,
     groupForKind,
     iconFor,
     isPluginOverview,
@@ -32,13 +32,13 @@ describe('the resource catalogue', () => {
         expect(missing).toEqual([]);
     });
 
-    // Solutions is the one exception, and deliberately so: its rows are the
+    // Plugins is the one exception, and deliberately so: its rows are the
     // plugins installed on this machine, which this list cannot know about. It
     // is still a group so that it folds and is remembered folded with the rest.
     test('every group has a label, and items unless its rows come from elsewhere', () => {
         for (const group of NAV_GROUPS) {
             expect(group.label).not.toBe('');
-            if (group.label === SOLUTIONS_GROUP) {
+            if (group.label === PLUGINS_GROUP) {
                 expect(group.items).toHaveLength(0);
                 continue;
             }

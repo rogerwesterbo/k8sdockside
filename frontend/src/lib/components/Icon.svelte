@@ -76,6 +76,8 @@
         // A ship's wheel, which is what Helm is named for.
         helm: ['M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', 'M12 4v5', 'M12 15v5', 'M4 12h5', 'M15 12h5'],
         refresh: ['M20.5 12a8.5 8.5 0 1 1-2.6-6.1', 'M20.5 4v5h-5'],
+        // A tray with an arrow into it: a file coming down to this machine.
+        download: ['M12 4v11', 'M7.5 10.5 12 15l4.5-4.5', 'M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2'],
         // Double chevrons, echoing the single chevron on each context's twisty:
         // one chevron opens a context, two open the lot.
         'expand-all': ['M6 5.5l6 6 6-6', 'M6 12.5l6 6 6-6'],

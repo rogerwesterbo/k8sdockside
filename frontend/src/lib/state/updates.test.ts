@@ -4,6 +4,7 @@ const Status = vi.fn();
 const Check = vi.fn();
 const MarkRead = vi.fn();
 const OpenRelease = vi.fn();
+const OpenDownload = vi.fn();
 
 const events = vi.hoisted(() => ({ handler: (_e: { data: unknown }) => {} }));
 vi.mock('@wailsio/runtime', () => ({
@@ -14,7 +15,7 @@ vi.mock('@wailsio/runtime', () => ({
     },
 }));
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
-    UpdateService: { Status, Check, MarkRead, OpenRelease },
+    UpdateService: { Status, Check, MarkRead, OpenRelease, OpenDownload },
 }));
 
 const { updates } = await import('./updates.svelte');
@@ -24,11 +25,12 @@ const RELEASE = {
     name: 'v0.0.3',
     url: 'https://github.com/rogerwesterbo/k8sdockside/releases/tag/v0.0.3',
     publishedAt: '2026-09-05T16:02:10Z',
+    assets: [],
 };
 
 /** A status as the backend sends it. */
 function status(over: Record<string, unknown> = {}) {
-    return { current: 'v0.0.2', latest: null, newer: false, unread: false, checkedAt: '', error: '', ...over };
+    return { current: 'v0.0.2', latest: null, newer: false, unread: false, checkedAt: '', error: '', install: 'Linux tarball, amd64', download: '', ...over };
 }
 
 const NEWS = status({ latest: RELEASE, newer: true, unread: true, checkedAt: '2026-09-06T10:00:00Z' });
@@ -38,6 +40,7 @@ beforeEach(() => {
     Check.mockReset().mockResolvedValue(status());
     MarkRead.mockReset().mockResolvedValue(status());
     OpenRelease.mockReset().mockResolvedValue(undefined);
+    OpenDownload.mockReset().mockResolvedValue(undefined);
     updates.status = status({ current: '' });
     updates.loaded = false;
 });
@@ -133,4 +136,23 @@ test('opening the release hands off to the backend, which decides the address', 
     await updates.openRelease();
 
     expect(OpenRelease).toHaveBeenCalledOnce();
+});
+
+describe('the download for this install', () => {
+    test('is offered only when the backend found a file for it', async () => {
+        Status.mockResolvedValueOnce(NEWS);
+        await updates.load();
+        expect(updates.download).toBe('');
+
+        Check.mockResolvedValueOnce(status({ ...NEWS, download: 'https://github.com/rogerwesterbo/k8sdockside/releases/download/v0.0.3/k8sdockside-0.0.3-linux-amd64.deb' }));
+        await updates.check();
+        expect(updates.download).toContain('k8sdockside-0.0.3-linux-amd64.deb');
+        expect(updates.downloadName).toBe('k8sdockside-0.0.3-linux-amd64.deb');
+    });
+
+    test('opening it hands off to the backend, which decides the address', async () => {
+        await updates.openDownload();
+
+        expect(OpenDownload).toHaveBeenCalledOnce();
+    });
 });

@@ -54,14 +54,14 @@ export const NETWORK_GROUP = 'Network';
 export const DEFINITIONS_GROUP = 'Custom Resource Definitions';
 
 /**
- * The section holding the solution plugins: Argo CD, Flux, Prometheus, and
+ * The section holding the plugins: Argo CD, Flux, Prometheus, and
  * whatever the user has installed.
  *
  * Its contents come from neither this list nor the cluster, but from the plugin
  * files on this machine -- so, like the definitions section, it is a heading
  * here and rows built somewhere else. See ContextTree.
  */
-export const SOLUTIONS_GROUP = 'Solutions';
+export const PLUGINS_GROUP = 'Plugins';
 
 export interface NavItem {
     /** Resource kind passed to the backend, or DASHBOARD for the overview. */
@@ -200,7 +200,7 @@ export const NAV_GROUPS: NavGroup[] = [
         // that it folds, is remembered folded, and sits in the order below --
         // above the definitions, because a plugin is the tidy way to look at
         // custom resources and the definitions tree is the raw one.
-        label: SOLUTIONS_GROUP,
+        label: PLUGINS_GROUP,
         items: [],
     },
     {

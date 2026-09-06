@@ -56,7 +56,7 @@ import {
     NAV_GROUPS,
     PLUGIN_OVERVIEW,
     SETTINGS,
-    SOLUTIONS_GROUP,
+    PLUGINS_GROUP,
     groupForKind,
     labelFor,
     parsePluginKind,
@@ -243,6 +243,7 @@ function defaultSettings(): Settings {
         manualFiles: [],
         manualFolders: [],
         excludedFiles: [],
+        excludedContexts: [],
         themeFolders: [],
         pluginFolders: [],
         contexts: {},
@@ -446,6 +447,20 @@ class Workspace {
     folders = $derived(this.settings.manualFolders);
     /** Files the user has hidden, so the sidebar can offer to show them again. */
     excluded = $derived(this.settings.excludedFiles);
+
+    /**
+     * The contexts hidden one by one, with the file and name each id was made
+     * from -- the id is `<file>::<name>`, as kube.ContextID builds it -- so
+     * the Hidden list can say which cluster each one is.
+     */
+    hiddenContexts = $derived(
+        this.settings.excludedContexts.map((id) => {
+            const at = id.lastIndexOf('::');
+            return at === -1
+                ? { id, file: '', name: id }
+                : { id, file: id.slice(0, at), name: id.slice(at + 2) };
+        }),
+    );
     /** Every open tab, in every pane. */
     allTabs = $derived(PANE_IDS.flatMap((pane) => this.panes[pane].tabs));
     /**
@@ -772,6 +787,37 @@ class Workspace {
             this.files = adoptFiles(await KubeconfigService.RemoveFile(path));
             this.settings = adoptSettings(await SettingsService.Get());
             this.dropTabsForMissingContexts();
+            this.ensureSelection();
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
+    /**
+     * Hides one context in this app, leaving its file and the rest of the
+     * contexts in it alone. Nothing is written to the kubeconfig; the hiding
+     * is listed under Hidden in the sidebar, where it can be undone.
+     */
+    async hideContext(contextId: string): Promise<void> {
+        const name = this.contexts.find((c) => c.id === contextId)?.name ?? contextId;
+        if (!this.confirmRemoval(`Hide ${name}?\n\nAny tabs open on it will close. The kubeconfig is not changed.`)) {
+            return;
+        }
+        try {
+            this.files = adoptFiles(await KubeconfigService.HideContext(contextId));
+            this.settings = adoptSettings(await SettingsService.Get());
+            this.dropTabsForMissingContexts();
+            this.ensureSelection();
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
+    /** Shows a hidden context again. */
+    async restoreContext(contextId: string): Promise<void> {
+        try {
+            this.files = adoptFiles(await KubeconfigService.RestoreContext(contextId));
+            this.settings = adoptSettings(await SettingsService.Get());
             this.ensureSelection();
         } catch (err) {
             this.fail(message(err));
@@ -1697,6 +1743,22 @@ class Workspace {
         const view = parsePluginKind(kind);
         if (!view) return null;
         return this.plugins.find((p) => p.id === view.pluginId) ?? null;
+    }
+
+    /**
+     * The kind a tab's rows actually are: for a plugin view, the kind the
+     * view lists; for anything else, the kind itself.
+     *
+     * A row opened from a plugin view has to be described, edited and acted
+     * on as what it is -- an Application, not "plugin:argocd/applications",
+     * which the backend rightly refuses as a kind. The backend resolves the
+     * view for the listing itself, so this is the one place the window has to
+     * do the same.
+     */
+    listedKind(kind: string): string {
+        const view = parsePluginKind(kind);
+        if (!view) return kind;
+        return this.pluginFor(kind)?.views.find((v) => v.id === view.viewId)?.kind ?? kind;
     }
 
     /**

@@ -1,14 +1,13 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
-import type { Plugin } from '../plugins/types';
 
 // What is worth testing in a real browser here is the state the whole feature
 // exists for: the plugin is installed on this machine and the solution is not
 // in this cluster. The sidebar has to say so without hiding the plugin, and the
 // overview has to explain it rather than showing four empty tables.
 
-const ARGO: Plugin = {
+const ARGO = {
     id: 'argocd',
     name: 'Argo CD',
     tagline: 'GitOps continuous delivery',
@@ -55,6 +54,8 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
+        Overview: vi.fn(),
+        Budget: vi.fn().mockResolvedValue({ scope: { kind: 'cluster', name: '' }, amounts: [], usage: { source: '', error: '' } }),
         Describe: vi.fn().mockResolvedValue(''),
         Ping: vi.fn().mockResolvedValue(undefined),
         CustomResourceKinds: vi.fn().mockResolvedValue([]),
@@ -107,8 +108,12 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
 }));
 
+
+// The cluster dashboard's counters and events are the way into the rest of
+// the cluster: a tile opens the list it counts, and an event opens itself.
 const { workspace } = await import('../state/workspace.svelte');
-const PluginOverview = (await import('./PluginOverview.svelte')).default;
+const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+const Dashboard = (await import('./Dashboard.svelte')).default;
 
 const PROD = '/home/u/.kube/config::admin@prod';
 
@@ -121,140 +126,58 @@ font-family:var(--font);font-size:13px}
 body{color:var(--text);margin:0;width:900px}
 button{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}`;
 
-/** A summary as the Go side hands one over. */
-function summary(over: Partial<Record<string, unknown>> = {}) {
-    return {
-        pluginId: 'argocd',
-        installed: true,
-        checked: true,
-        requirements: [
-            { kind: 'crd:applications.argoproj.io', label: 'Applications', optional: false, served: true, error: '' },
-            { kind: 'crd:applicationsets.argoproj.io', label: 'Application Sets', optional: true, served: false, error: '' },
-        ],
-        cards: [
-            {
-                label: 'Applications by health',
-                kind: 'crd:applications.argoproj.io',
-                total: 42,
-                grouped: true,
-                buckets: [
-                    { value: 'Degraded', count: 1, tone: 'error' },
-                    { value: 'Progressing', count: 3, tone: 'warn' },
-                    { value: 'Healthy', count: 38, tone: 'ok' },
-                ],
-                error: '',
-            },
-        ],
-        error: '',
-        ...over,
-    };
+function cell(text: string) {
+    return { text, sort: '', tone: '', pills: [] };
 }
+
+const OVERVIEW = {
+    context: 'admin@prod',
+    cluster: 'prod',
+    server: 'https://10.0.0.1:6443',
+    version: 'v1.36.3',
+    distribution: 'Talos',
+    namespaces: ['default'],
+    stats: [
+        { label: 'Nodes', kind: 'nodes', ready: 3, total: 3 },
+        { label: 'Pods', kind: 'pods', ready: 87, total: 88 },
+        { label: 'Deployments', kind: 'deployments', ready: 33, total: 33 },
+        { label: 'Namespaces', kind: 'namespaces', ready: 17, total: 17 },
+    ],
+    events: {
+        kind: 'events',
+        columns: ['Namespace', 'Name', 'Type', 'Reason'],
+        rows: [
+            { id: 'default/web.1', name: 'web.1', namespace: 'default', cells: [cell('default'), cell('web.1'), cell('Warning'), cell('BackOff')] },
+        ],
+        namespaced: true,
+        error: '',
+    },
+};
 
 beforeEach(() => {
     document.body.innerHTML = '';
     const style = document.createElement('style');
     style.textContent = TOKENS;
     document.head.appendChild(style);
-
-    Summary.mockReset().mockResolvedValue(summary());
-    workspace.pluginCatalogue = { plugins: [structuredClone(ARGO)], dir: '', folders: [], problems: [] };
     workspace.closeAllTabs();
+    workspace.detailTarget = null;
+    vi.mocked(ResourceService.Overview).mockReset().mockResolvedValue(OVERVIEW as never);
 });
 
-test('the overview leads with the counts when the solution is installed', async () => {
-    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
+test('a counter opens the list of what it counts', async () => {
+    render(Dashboard, { contextId: PROD });
+    await expect.element(page.getByText('Talos')).toBeVisible();
 
-    await expect.element(page.getByText('installed here')).toBeVisible();
-    await expect.element(page.getByText('42')).toBeVisible();
-    // Worst first: the one Degraded application is why the tile is on screen.
-    await expect.element(page.getByText('Degraded')).toBeVisible();
+    await page.getByRole('button', { name: /Pods/ }).click();
+
+    expect(workspace.tabs.map((t) => [t.contextId, t.kind])).toContainEqual([PROD, 'pods']);
 });
 
-// The state the whole feature exists for.
-test('a cluster without the CRDs is explained, not left as an empty table', async () => {
-    Summary.mockResolvedValue(
-        summary({
-            installed: false,
-            requirements: [
-                {
-                    kind: 'crd:applications.argoproj.io',
-                    label: 'Applications',
-                    optional: false,
-                    served: false,
-                    error: '',
-                },
-            ],
-            cards: [
-                {
-                    label: 'Applications by health',
-                    kind: 'crd:applications.argoproj.io',
-                    total: 0,
-                    grouped: true,
-                    buckets: [],
-                    error: 'this cluster does not serve crd:applications.argoproj.io',
-                },
-            ],
-        }),
-    );
+test('an event opens its own report', async () => {
+    render(Dashboard, { contextId: PROD });
+    await expect.element(page.getByText('BackOff')).toBeVisible();
 
-    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
+    await page.getByText('BackOff').click();
 
-    await expect.element(page.getByText('not installed here')).toBeVisible();
-    await expect.element(page.getByText('does not look installed in this cluster')).toBeVisible();
-    // The missing kind is named, so the reader knows what to go and install.
-    await expect.element(page.getByText('crd:applications.argoproj.io').first()).toBeVisible();
-});
-
-// "Could not ask" and "asked and was told no" call for opposite reactions.
-test('an unreachable cluster does not read as "not installed"', async () => {
-    Summary.mockResolvedValue(
-        summary({
-            installed: false,
-            checked: false,
-            error: 'dial tcp 10.0.0.1:6443: connect: connection refused',
-            requirements: [
-                {
-                    kind: 'crd:applications.argoproj.io',
-                    label: 'Applications',
-                    optional: false,
-                    served: false,
-                    error: 'connection refused',
-                },
-            ],
-        }),
-    );
-
-    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
-
-    await expect.element(page.getByText('could not check')).toBeVisible();
-    await expect.element(page.getByText('This cluster did not answer')).toBeVisible();
-    await expect.element(page.getByText('not installed here')).not.toBeInTheDocument();
-});
-
-test('an optional requirement is marked as optional rather than as a failure', async () => {
-    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
-
-    await expect.element(page.getByText('Application Sets')).toBeVisible();
-    await expect.element(page.getByText('optional')).toBeVisible();
-    // It is missing, yet the plugin still reads as installed.
-    await expect.element(page.getByText('installed here')).toBeVisible();
-});
-
-test('a view can be opened from the overview', async () => {
-    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
-
-    await page.getByRole('button', { name: 'Applications' }).click();
-
-    expect(workspace.activeTab?.kind).toBe('plugin:argocd/applications');
-});
-
-// A tab restored after its plugin's folder was dropped. An empty page would
-// read as "Argo CD has nothing", which is the wrong thing to conclude.
-test('a tab whose plugin is gone says so', async () => {
-    workspace.pluginCatalogue = { plugins: [], dir: '', folders: [], problems: [] };
-
-    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
-
-    await expect.element(page.getByText('This plugin is not installed')).toBeVisible();
-    expect(Summary).not.toHaveBeenCalled();
+    expect(workspace.detailTarget).toEqual({ contextId: PROD, kind: 'events', namespace: 'default', name: 'web.1' });
 });

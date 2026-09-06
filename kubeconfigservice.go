@@ -35,9 +35,10 @@ func NewKubeconfigService(store *appconfig.Store) *KubeconfigService {
 // paths, and the rest of ~/.kube -- and returns what it found.
 func (s *KubeconfigService) Sync() []kube.File {
 	files := kube.Discover(kube.Sources{
-		Files:    s.store.ManualFiles(),
-		Folders:  s.store.ManualFolders(),
-		Excluded: s.store.ExcludedFiles(),
+		Files:            s.store.ManualFiles(),
+		Folders:          s.store.ManualFolders(),
+		Excluded:         s.store.ExcludedFiles(),
+		ExcludedContexts: s.store.ExcludedContexts(),
 	})
 
 	index := make(map[string]kube.Context)
@@ -134,6 +135,34 @@ func (s *KubeconfigService) RestoreFile(path string) ([]kube.File, error) {
 		return s.Files(), err
 	}
 	return s.Sync(), nil
+}
+
+// HideContext takes one context out of the sidebar and leaves the rest of its
+// file there. The kubeconfig itself is not touched -- this app never writes
+// one -- so the hiding is remembered in the app's own settings, and a rescan
+// leaves the context out again.
+func (s *KubeconfigService) HideContext(id string) ([]kube.File, error) {
+	if id == "" {
+		return s.Files(), errors.New("no context given")
+	}
+	if _, err := s.store.ExcludeContext(id); err != nil {
+		return s.Files(), err
+	}
+	return s.Sync(), nil
+}
+
+// RestoreContext shows a hidden context again.
+func (s *KubeconfigService) RestoreContext(id string) ([]kube.File, error) {
+	if _, err := s.store.UnexcludeContext(id); err != nil {
+		return s.Files(), err
+	}
+	return s.Sync(), nil
+}
+
+// HiddenContexts returns the ids of the contexts hidden one by one, so the
+// sidebar can list them and offer to show them again.
+func (s *KubeconfigService) HiddenContexts() []string {
+	return s.store.ExcludedContexts()
 }
 
 // Excluded returns the files the user has hidden, so the sidebar can say how

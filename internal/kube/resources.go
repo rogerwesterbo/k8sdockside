@@ -45,9 +45,11 @@ type Table struct {
 	Error      string   `json:"error"`
 }
 
-// Stat is a ready/total counter on the dashboard.
+// Stat is a ready/total counter on the dashboard. Kind is what it counts, as
+// the sidebar names it, so the tile can open that kind's list.
 type Stat struct {
 	Label string `json:"label"`
+	Kind  string `json:"kind"`
 	Ready int    `json:"ready"`
 	Total int    `json:"total"`
 }

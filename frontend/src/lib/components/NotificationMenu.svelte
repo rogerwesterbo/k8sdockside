@@ -58,6 +58,15 @@
         }
     }
 
+    async function openDownload(): Promise<void> {
+        close();
+        try {
+            await updates.openDownload();
+        } catch {
+            workspace.fail('Could not open the download');
+        }
+    }
+
     /** A date as the user would write it, or nothing for one that is not one. */
     function dayOf(iso: string): string {
         const date = new Date(iso);
@@ -125,6 +134,14 @@
                         </p>
                     </div>
                     <div class="actions">
+                        <!-- The file for this install, when the release has
+                             one. The backend chose it from what this build
+                             is, which the tooltip says. -->
+                        {#if updates.download}
+                            <button onclick={openDownload} title="{updates.downloadName} — for this install: {updates.status.install}">
+                                <Icon name="download" size={12} /> Download for {updates.status.install}
+                            </button>
+                        {/if}
                         <button onclick={openRelease}><Icon name="link" size={12} /> View release</button>
                         {#if updates.unread}
                             <button onclick={markRead}><Icon name="check" size={12} /> Mark as read</button>
