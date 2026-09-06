@@ -1,13 +1,17 @@
 <!--
-  What this build is, and where it keeps things.
+  What this build is, whether there is a newer one, and where it keeps things.
 
   The settings file is the useful part: it is plain JSON, it is the only thing
   the app writes, and deleting it is how you start over. So it is shown in full
   with a way to open it, rather than being a path in a tooltip.
+
+  The update check is here as well as on the bell, because this is where
+  somebody who has switched the automatic check off comes to ask by hand.
 -->
 <script lang="ts">
     import { SettingsService } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside';
     import type { About } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside/models.js';
+    import { updates } from '../../state/updates.svelte';
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';
     import SettingsSection from './SettingsSection.svelte';
@@ -47,6 +51,33 @@
             workspace.inform('Could not open the settings file');
         }
     }
+
+    async function openRelease(): Promise<void> {
+        try {
+            await updates.openRelease();
+        } catch {
+            workspace.fail('Could not open the release page');
+        }
+    }
+
+    /** One sentence on where this build stands. */
+    const standing = $derived.by(() => {
+        const s = updates.status;
+        if (updates.checking) return 'Checking…';
+        if (s.newer && s.latest) return `${s.latest.version} is available. You have ${s.current}.`;
+        if (s.latest && s.latest.version === s.current) return `You have the latest release, ${s.latest.version}.`;
+        if (s.latest) return `The latest release is ${s.latest.version}. This build is ${s.current}.`;
+        if (s.error) return 'Not checked yet.';
+        return workspace.checkForUpdates
+            ? 'Not checked yet. The app checks on its own shortly after launch.'
+            : 'Not checked yet. Automatic checks are off under Behaviour.';
+    });
+
+    function timeOf(iso: string): string {
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
 </script>
 
 <SettingsSection title="About">
@@ -60,6 +91,7 @@
 
     <dl class="facts">
         <div><dt>Version</dt><dd class="selectable">{about?.version ?? '…'}</dd></div>
+        <div><dt>Latest release</dt><dd class="selectable">{updates.latest?.version ?? '—'}</dd></div>
         <div><dt>Wails</dt><dd class="selectable">{about?.wails || '—'}</dd></div>
         <div><dt>Go</dt><dd class="selectable">{about?.go ?? '…'}</dd></div>
         <div><dt>Platform</dt><dd class="selectable">{about?.platform ?? '…'}</dd></div>
@@ -68,6 +100,24 @@
             <dd>{workspace.contexts.length} in {workspace.files.length} kubeconfig files</dd>
         </div>
     </dl>
+
+    <h3 class="heading">Updates</h3>
+    <p class="note" class:news={updates.available}>{standing}</p>
+    {#if updates.status.error}
+        <p class="note problem">Could not check for updates: {updates.status.error}</p>
+    {:else if updates.status.checkedAt}
+        <p class="note">Checked at {timeOf(updates.status.checkedAt)}.</p>
+    {/if}
+    <div class="file updates">
+        <button onclick={() => void updates.check()} disabled={updates.checking}>
+            <Icon name="refresh" size={13} />
+            {updates.checking ? 'Checking…' : 'Check for updates'}
+        </button>
+        <button onclick={openRelease}>
+            <Icon name="link" size={13} />
+            {updates.latest ? `Open ${updates.latest.version} on GitHub` : 'Open the releases page'}
+        </button>
+    </div>
 
     <h3 class="heading">Settings file</h3>
     <p class="note">
@@ -158,6 +208,18 @@
         flex-wrap: wrap;
         align-items: center;
         gap: 8px;
+    }
+
+    .updates {
+        margin-bottom: 28px;
+    }
+
+    .note.news {
+        color: var(--text);
+    }
+
+    .note.problem {
+        color: var(--error);
     }
 
     .file code {

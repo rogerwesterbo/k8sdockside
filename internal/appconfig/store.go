@@ -369,6 +369,16 @@ type Preferences struct {
 	// before this field existed would unmarshal to false and quietly take the
 	// gutter away from everyone who already had it.
 	ShowLineNumbers *bool `json:"showLineNumbers"`
+	// CheckForUpdates lets the app ask GitHub, shortly after launch and every
+	// few hours after, whether a newer release has been published, and say so
+	// on the bell in the title bar. It is the one thing the app does that
+	// reaches beyond this machine and its clusters, which is why it is a
+	// choice; see UpdateService for exactly what is sent.
+	//
+	// Nullable for the same reason RestoreTabs is: the default is *on*, and
+	// nil is how a file that has never said either way is told apart from an
+	// explicit no.
+	CheckForUpdates *bool `json:"checkForUpdates"`
 	// Terminal is how a shell opens: in the dock or in the terminal emulator
 	// the user already has, which shell to try, and what a node shell is made
 	// of. See Terminal.
@@ -376,6 +386,15 @@ type Preferences struct {
 	// Helm is where the helm binary is and how it is run, for the operations
 	// that change a release. See Helm.
 	Helm Helm `json:"helm"`
+}
+
+// Updates is what the app remembers about release checks, which is only what
+// the user has already been told.
+type Updates struct {
+	// ReadVersion is the release the user marked as read from the bell in the
+	// title bar. The bell stays quiet about that version, across restarts, and
+	// speaks up again for the next one. Empty until a notice has been read.
+	ReadVersion string `json:"readVersion,omitzero"`
 }
 
 // Settings is the whole persisted file.
@@ -418,7 +437,11 @@ type Settings struct {
 	// above. It is a pointer so that "this file predates panes" is a state the
 	// store can see: nil means migrate from the two old fields, which normalise
 	// does once, after which it is never nil again.
-	Panes       *Panes      `json:"panes"`
+	Panes *Panes `json:"panes"`
+	// Updates is what the app remembers about release checks. It is not a
+	// preference -- nobody chooses it in the settings view -- but it has to
+	// outlive the process, and this file is where everything that does lives.
+	Updates     Updates     `json:"updates,omitzero"`
 	Layout      Layout      `json:"layout"`
 	Preferences Preferences `json:"preferences"`
 	// PortForwards are the tunnels the user set up, remembered as requests
@@ -865,7 +888,28 @@ func (s *Store) SetPreferences(p Preferences) (Settings, error) {
 			numbers := *p.ShowLineNumbers
 			p.ShowLineNumbers = &numbers
 		}
+		if p.CheckForUpdates != nil {
+			check := *p.CheckForUpdates
+			p.CheckForUpdates = &check
+		}
 		d.Preferences = p
+	})
+}
+
+// CheckForUpdates is whether the app should look for new releases on its own,
+// with "never chosen" resolved to yes. It is read here, on the service's side,
+// rather than passed from the window, so that the loop that asks and the
+// toggle that governs it can never disagree about what was chosen.
+func (s *Store) CheckForUpdates() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.Preferences.CheckForUpdates == nil || *s.data.Preferences.CheckForUpdates
+}
+
+// MarkUpdateRead records that the user has seen the notice about one release.
+func (s *Store) MarkUpdateRead(version string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.Updates.ReadVersion = version
 	})
 }
 
@@ -1041,9 +1085,10 @@ func normalise(s Settings) Settings {
 	if s.PortForwards == nil {
 		s.PortForwards = []PortForward{}
 	}
-	// RestoreTabs and ShowLineNumbers are deliberately not defaulted: nil is a
-	// value in its own right for both, meaning "never chosen", and the frontend
-	// resolves each to true.
+	s.Updates.ReadVersion = strings.TrimSpace(s.Updates.ReadVersion)
+	// RestoreTabs, ShowLineNumbers and CheckForUpdates are deliberately not
+	// defaulted: nil is a value in its own right for each, meaning "never
+	// chosen", and it is resolved to true where it is read.
 	return s
 }
 
@@ -1320,6 +1365,10 @@ func clone(s Settings) Settings {
 	if s.Preferences.ShowLineNumbers != nil {
 		numbers := *s.Preferences.ShowLineNumbers
 		out.Preferences.ShowLineNumbers = &numbers
+	}
+	if s.Preferences.CheckForUpdates != nil {
+		check := *s.Preferences.CheckForUpdates
+		out.Preferences.CheckForUpdates = &check
 	}
 	out.Preferences.Terminal.Shells = slices.Clone(s.Preferences.Terminal.Shells)
 	out.PortForwards = slices.Clone(s.PortForwards)

@@ -73,6 +73,12 @@ vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         SetPreferences: vi.fn().mockResolvedValue({}),
         SetContextPrefs: vi.fn().mockResolvedValue({}),
     },
+    UpdateService: {
+        Status: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
+        Check: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
+        MarkRead: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
+        OpenRelease: vi.fn().mockResolvedValue(undefined),
+    },
 }));
 
 const TOKENS = `:root{--bg:#10151c;--bg-sidebar:#151b24;--bg-panel:#19202a;--bg-raised:#212b38;

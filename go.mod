@@ -3,7 +3,7 @@ module github.com/rogerwesterbo/k8sdockside
 go 1.27.1
 
 require (
-	github.com/wailsapp/wails/v3 v3.0.0-beta.16
+	github.com/wailsapp/wails/v3 v3.0.0-beta.17
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0

@@ -42,7 +42,9 @@ credentials leaving your machine. Free and open source under Apache 2.0.
   read from the CRD itself.
 - **It reads your kubeconfig, and only reads it.** Names and colours are stored
   in the app's own settings; your kubeconfig files are never modified. Nothing
-  dials a cluster at launch.
+  dials a cluster at launch. The one thing it does reach out to is GitHub's
+  releases page, to tell you when a newer version is out — and that can be
+  switched off.
 
 ## Install
 
@@ -172,6 +174,9 @@ See [docs/development.md](docs/development.md).
   [docs/themes.md](docs/themes.md)
 
 **Details that matter**
+- A bell in the title bar says when a new release is out, and can be marked as
+  read — one request to GitHub shortly after launch and every six hours, off
+  under *Settings → Behaviour*, with a check-now button under *About*
 - Secrets are redacted before they enter the informer cache; tables show key
   counts only
 - Tabs and dock contents are restored next launch, and a tab with unsaved
