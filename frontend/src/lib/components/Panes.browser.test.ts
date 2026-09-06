@@ -169,6 +169,11 @@ beforeEach(() => {
     }
     workspace.moveTabToPane(CLUSTERS_TAB_ID, 'left');
     workspace.setPaneOpen('left', true);
+    // And the describe tab's home, for the same reason: one of these tests
+    // drags it to the foot of the window, and remembering that is the point of
+    // it -- so the next test has to be told where it starts.
+    workspace.closeDetail();
+    workspace.settings.layout.detailPane = 'right';
     withClusters();
 });
 

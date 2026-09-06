@@ -2377,8 +2377,10 @@ describe('the describe tab', () => {
 
         const calls = vi.mocked(SettingsService.SetPanes).mock.calls;
         expect(calls.length).toBeGreaterThan(0);
-        const written = calls.at(-1)?.[0] as Record<string, { tabs: { type: string }[] }>;
-        const tabs = Object.values(written).flatMap((pane) => pane.tabs);
+        const written = calls.at(-1)?.[0];
+        const tabs = [written?.main, written?.right, written?.bottom].flatMap(
+            (pane) => pane?.tabs ?? [],
+        );
         // The list it was read from is there; the report itself is not.
         expect(tabs.map((t) => t.type)).toContain('resource');
         expect(tabs.map((t) => t.type)).not.toContain('details');
