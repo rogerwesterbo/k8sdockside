@@ -1,21 +1,20 @@
 <!--
-  The application shell: the sidebar, the panes the user's views are arranged
-  into, and the docked detail panel. All of the state it renders lives in the
-  workspace store.
+  The application shell: the four panes the user's views are arranged into, and
+  nothing else. All of the state it renders lives in the workspace store.
 
-  The four panes are fixed places rather than a tree of splits, and what goes in
-  each of them is the user's choice -- see lib/state/panes.ts. Main fills what
-  the others leave; the side panels are there when they hold something; the
-  bottom one is always there, because a place has to be visible before anything
-  can be put in it.
+  The panes are fixed places rather than a tree of splits, and what goes in each
+  of them is the user's choice -- see lib/state/panes.ts. Main fills what the
+  others leave; the side panels are there when they hold something; the bottom
+  one is always there, because a place has to be visible before anything can be
+  put in it.
 
-  The cluster tree is a tab in the left panel rather than a fixed strip, so it
-  can be moved like anything else. It cannot be closed -- it is how everything
-  else gets opened -- but Cmd/Ctrl+B hides the panel it is in and brings it back.
+  Both of the things that used to have a place of their own here are tabs now:
+  the cluster tree, which cannot be closed but can be moved and hidden with
+  Cmd/Ctrl+B, and the describe panel, which follows the selection into whichever
+  pane it was last dragged to.
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import DetailPanel from './lib/components/DetailPanel.svelte';
     import Icon from './lib/components/Icon.svelte';
     import Pane from './lib/components/Pane.svelte';
     import TopBar from './lib/components/TopBar.svelte';
@@ -136,15 +135,7 @@
 
         <main>
             <div class="upper">
-                <!-- The detail panel docks against the main pane rather than
-                     the window: it describes an object in the list you are
-                     looking at, and the side panel beside it may be showing
-                     something else entirely. -->
-                <div class="stage" class:stack={workspace.dock === 'bottom'}>
-                    <Pane pane="main" empty={welcome} />
-                    <DetailPanel />
-                </div>
-
+                <Pane pane="main" empty={welcome} />
                 <Pane pane="right" />
             </div>
 
@@ -238,17 +229,6 @@
         flex: 1 1 auto;
         min-height: 0;
         min-width: 0;
-    }
-
-    .stage {
-        display: flex;
-        flex: 1 1 0;
-        min-height: 0;
-        min-width: 0;
-    }
-
-    .stage.stack {
-        flex-direction: column;
     }
 
     /* The logo as a watermark behind the idle screen. It fills the empty

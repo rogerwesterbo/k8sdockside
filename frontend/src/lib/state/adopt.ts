@@ -146,8 +146,8 @@ export interface Settings {
      */
     portForwards: SavedForward[];
     layout: {
-        detailDock: string;
-        detailSize: number;
+        /** Which pane the describe tab opens in: left | main | right | bottom. */
+        detailPane: string;
         sidebarWidth: number;
         zoom: number;
         /** null means the user has never chosen; an empty list means "fold nothing". */

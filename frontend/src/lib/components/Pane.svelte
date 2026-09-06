@@ -36,6 +36,7 @@
     } from '../state/panes';
     import { isSettingsTab, workspace } from '../state/workspace.svelte';
     import Dashboard from './Dashboard.svelte';
+    import DetailPanel from './DetailPanel.svelte';
     import Icon from './Icon.svelte';
     import LogView from './LogView.svelte';
     import PluginOverview from './PluginOverview.svelte';
@@ -326,6 +327,12 @@
                 {#key active.id}
                     {#if active.view === 'clusters'}
                         <Sidebar />
+                    {:else if active.view === 'details'}
+                        <!-- Its id is the same whatever it is describing, so the
+                             {#key} above does not remount it as the selection
+                             moves down a list -- which is the difference between
+                             refilling a panel and flickering a new one in. -->
+                        <DetailPanel />
                     {:else if active.view === 'resource'}
                         {#if active.kind === SETTINGS}
                             <SettingsView />
@@ -435,9 +442,28 @@
         background: var(--bg-panel);
     }
 
+    /* The size the user dragged to, but never more than leaves the rest of the
+       window something to be. A pane restored from a session on a wider screen
+       would otherwise take almost all of it, and the view beside it would be a
+       column of ellipses. Expressed against the row the pane sits in rather
+       than the window, so it holds as the window is resized and needs nothing
+       in script to keep it true.
+
+       Never below the pane's own minimum, though: in a window too narrow to
+       give both of them room, a pane capped to nothing would disappear rather
+       than be small, and whatever you had open in it would simply not be
+       there. */
     .pane.left,
     .pane.right {
         width: var(--size);
+    }
+
+    .pane.left {
+        max-width: max(200px, calc(100% - 320px));
+    }
+
+    .pane.right {
+        max-width: max(260px, calc(100% - 320px));
     }
 
     .pane.left {
@@ -452,6 +478,7 @@
     /* Only an open bottom pane has a height of its own; folded, it is its strip. */
     .pane.bottom.open {
         height: var(--size);
+        max-height: max(160px, calc(100% - 160px));
     }
 
     /* An empty side panel exists only while something is being dragged at it,

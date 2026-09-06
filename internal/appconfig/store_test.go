@@ -33,7 +33,7 @@ func TestOpenWithNoFileYieldsDefaults(t *testing.T) {
 	store := openIn(t)
 
 	got := store.Get()
-	if got.Layout.DetailDock != "right" || got.Layout.DetailSize != 520 {
+	if got.Layout.DetailPane != PaneRight {
 		t.Errorf("layout = %+v, want the defaults", got.Layout)
 	}
 	// These are serialised straight to JSON, where nil would become null and
@@ -64,7 +64,7 @@ func TestSettingsSurviveAReopen(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SetLayout(Layout{DetailDock: "bottom", DetailSize: 340, SidebarWidth: 300}); err != nil {
+	if _, err := store.SetLayout(Layout{DetailPane: PaneBottom, SidebarWidth: 300}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +83,7 @@ func TestSettingsSurviveAReopen(t *testing.T) {
 	if main := got.Panes.Main.Tabs; len(main) != 1 || main[0].Kind != "pods" {
 		t.Errorf("main pane = %+v", main)
 	}
-	if got.Layout.DetailDock != "bottom" || got.Layout.DetailSize != 340 {
+	if got.Layout.DetailPane != PaneBottom {
 		t.Errorf("layout = %+v", got.Layout)
 	}
 }
@@ -157,8 +157,8 @@ func TestUnreadableSettingsAreAnErrorRatherThanSilentDefaults(t *testing.T) {
 func TestOlderOrHandEditedFilesAreFilledIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 
-	// No layout at all, and a dock value that is not one of the three edges.
-	if err := os.WriteFile(path, []byte(`{"contexts":{},"layout":{"detailDock":"sideways"}}`), 0o600); err != nil {
+	// No layout at all, and a pane for the describe tab that is not a pane.
+	if err := os.WriteFile(path, []byte(`{"contexts":{},"layout":{"detailPane":"sideways"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,8 +167,8 @@ func TestOlderOrHandEditedFilesAreFilledIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := store.Get()
-	if got.Layout.DetailDock != "right" {
-		t.Errorf("dock = %q, want the default after an invalid value", got.Layout.DetailDock)
+	if got.Layout.DetailPane != PaneRight {
+		t.Errorf("detail pane = %q, want the default after an invalid value", got.Layout.DetailPane)
 	}
 	if got.Layout.SidebarWidth < 180 {
 		t.Errorf("sidebar width = %d, want the default", got.Layout.SidebarWidth)
@@ -922,6 +922,64 @@ func TestASettingsFileFromBeforeTheSidebarWasAPane(t *testing.T) {
 	}
 	if !left.Open {
 		t.Error("the left pane came back hidden, so the tree would be nowhere")
+	}
+}
+
+// The describe panel docked to an edge of the window with a size of its own. It
+// is a tab in a pane now, so the edge has to come across as the pane the tab
+// opens in -- otherwise somebody who had kept their reports at the foot of the
+// window gets them back on the right.
+func TestASettingsFileFromBeforeTheDetailPanelWasATab(t *testing.T) {
+	path := tempSettings(t)
+
+	legacy := `{"contexts":{},"layout":{"detailDock":"bottom","detailSize":340,"zoom":1},` +
+		`"panes":{"left":{"tabs":[{"type":"clusters","kind":"clusters"}],"open":true,"size":260},` +
+		`"main":{"tabs":[],"open":true},"right":{"tabs":[]},"bottom":{"tabs":[],"size":320}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store.Get()
+
+	if got.Layout.DetailPane != PaneBottom {
+		t.Errorf("detail pane = %q, want the edge it was docked to", got.Layout.DetailPane)
+	}
+	// The bottom pane was holding nothing, so nobody has ever sized it while
+	// looking at something in it; the panel's own height is the better guess.
+	if got.Panes.Bottom.Size != 340 {
+		t.Errorf("bottom pane size = %d, want the panel's own 340", got.Panes.Bottom.Size)
+	}
+	// Left in the file, the same setting would be there twice with nothing
+	// keeping the two honest.
+	if got.Layout.DetailDock != "" || got.Layout.DetailSize != 0 {
+		t.Errorf("layout = %+v, want the superseded fields cleared", got.Layout)
+	}
+}
+
+// A pane the user has been working in has a size they arrived at while looking
+// at what is in it. The describe panel's old width is not an improvement on it.
+func TestTheOldPanelWidthDoesNotResizeAPaneInUse(t *testing.T) {
+	path := tempSettings(t)
+
+	legacy := `{"contexts":{},"layout":{"detailDock":"right","detailSize":700,"zoom":1},` +
+		`"panes":{"left":{"tabs":[{"type":"clusters","kind":"clusters"}],"open":true,"size":260},` +
+		`"main":{"tabs":[],"open":true},` +
+		`"right":{"tabs":[{"type":"resource","contextId":"cfg::prod","kind":"pods"}],"open":true,"size":380},` +
+		`"bottom":{"tabs":[],"size":320}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := store.Get()
+
+	if got.Panes.Right.Size != 380 {
+		t.Errorf("right pane size = %d, want the 380 the user left it at", got.Panes.Right.Size)
 	}
 }
 

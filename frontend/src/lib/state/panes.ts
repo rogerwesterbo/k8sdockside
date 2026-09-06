@@ -24,8 +24,8 @@
  * file and read back without a migration every time the shape grows a case.
  *
  * Left and right are hidden outright when they hold nothing; the bottom one
- * keeps its strip, because it is the pane the details panel's buttons send
- * things to and a place has to be visible before anything can be put in it.
+ * keeps its strip, because a place has to be visible before anything can be
+ * dragged into it.
  */
 export type PaneId = 'left' | 'main' | 'right' | 'bottom';
 
@@ -44,12 +44,25 @@ export function isPaneId(value: string): value is PaneId {
  * dashboard, the settings. `clusters` is the kubeconfig tree, which belongs to
  * the window rather than to any cluster. The other four are views onto one
  * object, and carry that object's namespace and name.
+ *
+ * `details` is the odd one: like `clusters` it is a singleton belonging to the
+ * window, but what it shows is whatever row is selected rather than a fixed
+ * thing. It is a tab so that the describe panel can be put where the user
+ * wants it, which is the one thing it could never do as a docked panel.
  */
-export type TabView = 'clusters' | 'resource' | 'edit' | 'helmvalues' | 'logs' | 'shell';
+export type TabView =
+    | 'clusters'
+    | 'details'
+    | 'resource'
+    | 'edit'
+    | 'helmvalues'
+    | 'logs'
+    | 'shell';
 
 /** Every view, used to reject a type a hand-edited settings file made up. */
 export const TAB_VIEWS: TabView[] = [
     'clusters',
+    'details',
     'resource',
     'edit',
     'helmvalues',
@@ -154,6 +167,9 @@ export function resourceTabId(contextId: string, kind: string): string {
  */
 export function defaultPaneFor(view: TabView): PaneId {
     if (view === 'clusters') return 'left';
+    // Beside the list rather than under it: a describe report is read against
+    // the row it belongs to, and the user moves it from here if they disagree.
+    if (view === 'details') return 'right';
     return view === 'resource' ? 'main' : 'bottom';
 }
 
@@ -162,6 +178,8 @@ export function iconForView(view: TabView): string {
     switch (view) {
         case 'clusters':
             return 'server';
+        case 'details':
+            return 'info';
         case 'logs':
             return 'rows';
         case 'shell':
@@ -236,6 +254,38 @@ export const CLUSTERS_TAB_ID = tabIdFor('clusters', {
     namespace: '',
     name: '',
 });
+
+/**
+ * The describe panel, as a tab.
+ *
+ * One id for the window rather than one per object, because this tab follows
+ * the selection: clicking row after row refills it rather than opening a
+ * strip of them. That is the behaviour it had as a docked panel, and the
+ * reason it is a singleton and not content-addressed like the editor.
+ *
+ * It is never written to the settings file. There is no selection to restore
+ * it against, so what persists is only which pane it opens in -- see
+ * Layout.detailPane on the Go side.
+ */
+export const DETAILS_TAB_ID = tabIdFor('details', {
+    contextId: '',
+    kind: 'details',
+    namespace: '',
+    name: '',
+});
+
+/** The describe tab for one object, titled with the object's own name. */
+export function detailsTab(target: TabTarget): Tab {
+    return {
+        id: DETAILS_TAB_ID,
+        view: 'details',
+        contextId: target.contextId,
+        kind: target.kind,
+        namespace: target.namespace,
+        name: target.name,
+        title: target.name || 'Details',
+    };
+}
 
 export function clustersTab(): Tab {
     return {

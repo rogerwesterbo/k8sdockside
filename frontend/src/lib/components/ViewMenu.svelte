@@ -180,7 +180,12 @@
     .menu {
         position: absolute;
         top: calc(100% + 4px);
-        left: 0;
+        /* Anchored to the trigger's right edge, not its left. The trigger is
+           at the right end of the title bar -- the left of that bar belongs to
+           the macOS traffic lights and the middle to the title -- so a menu
+           growing rightwards from it grows off the edge of the window and
+           takes half of every label with it. */
+        right: 0;
         min-width: 230px;
         padding: 4px;
         border: 1px solid var(--border);

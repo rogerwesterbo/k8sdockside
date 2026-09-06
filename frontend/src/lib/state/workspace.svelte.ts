@@ -32,10 +32,12 @@ import { logs } from './logs.svelte';
 import { terminals } from './terminals.svelte';
 import {
     CLUSTERS_TAB_ID,
+    DETAILS_TAB_ID,
     PANE_IDS,
     clustersTab,
     defaultPaneFor,
     defaultPanes,
+    detailsTab,
     isDocumentView,
     isPaneId,
     isTabView,
@@ -68,17 +70,18 @@ import { adoptSource, type MetricsSource } from '../charts/adopt';
 import { adoptCatalogue, adoptTokens, emptyCatalogue } from '../theme/adopt';
 import { DEFAULT_THEME_ID, pickTheme, type Theme, type ThemeCatalogue, type ThemeToken } from '../theme/apply';
 
-export type DockSide = 'right' | 'bottom' | 'left';
 
 // The pane model is the app's vocabulary for "what is open and where", and it
 // is re-exported here so that a component reaching for the store gets the types
 // that go with it from the same place.
 export {
     CLUSTERS_TAB_ID,
+    DETAILS_TAB_ID,
     PANE_IDS,
     PANE_LABELS,
     clustersTab,
     defaultPaneFor,
+    detailsTab,
     isHorizontal,
     isDocumentView,
     isPaneId,
@@ -264,7 +267,7 @@ function defaultSettings(): Settings {
             helm: { path: '', wait: false, atomic: false, timeoutSeconds: 300 },
         },
         portForwards: [],
-        layout: { detailDock: 'right', detailSize: 520, sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
+        layout: { detailPane: 'right', sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
     };
 }
 
@@ -484,8 +487,19 @@ class Workspace {
      */
     anyExpanded = $derived(this.contexts.some((c) => this.expanded.includes(c.id)));
 
-    dock = $derived((this.settings.layout.detailDock || 'right') as DockSide);
-    detailSize = $derived(this.settings.layout.detailSize || 520);
+    /**
+     * The pane the describe tab opens in.
+     *
+     * Remembered rather than fixed, because the tab comes and goes with the
+     * selection and so is never written into `panes` -- there would be nothing
+     * to restore it against. Drag it into the bottom panel and this is what
+     * remembers, so the next row you click describes itself down there.
+     */
+    detailPane = $derived(
+        isPaneId(this.settings.layout.detailPane)
+            ? this.settings.layout.detailPane
+            : defaultPaneFor('details'),
+    );
     /** The cluster tree's pane width. Kept under its old name for the settings view. */
     sidebarWidth = $derived(this.panes.left.size);
     /** How tall the bottom pane stands when it is open, in px. */
@@ -1022,11 +1036,13 @@ class Workspace {
             // pointer, and scrolling it would move it out from under them.
             this.reveal = { contextId: tab.contextId, kind: tab.kind, nonce: ++this.revealCount };
         }
-        // Only when the view actually changed, and only for a collection: the
-        // panel describes an object in the list we just left, so keeping it open
-        // over a different one would be misleading. Bringing an editor forward
-        // is not leaving that list.
-        if (changed && tab.view === 'resource') {
+        // Only when the view actually changed, only for a collection, and only
+        // for a different collection: the report describes an object in a list,
+        // so keeping it over an unrelated one would be misleading -- but going
+        // back to the list the object came from is not leaving it, which is a
+        // round trip you can make now that the report is a tab beside it.
+        // Bringing an editor forward is not leaving the list either.
+        if (changed && tab.view === 'resource' && !this.describesTheListIn(tab)) {
             this.closeDetail();
         }
     }
@@ -1126,16 +1142,33 @@ class Workspace {
         if (!stillActive) {
             state.activeId = successor?.id ?? null;
             if (successor && successor.view === 'resource') this.selectContext(successor.contextId);
-            // Only when the list the panel was describing has gone. Closing an
+            // Only when the list the report was read from has gone. Closing an
             // editor leaves the object it was editing on screen above it, and
-            // taking the description away with it would be gratuitous.
-            if (active && active.view === 'resource') this.closeDetail();
+            // taking the description away with it would be gratuitous -- and so
+            // would taking it away because some other list was closed.
+            if (active && active.view === 'resource' && this.describesTheListIn(active)) {
+                this.closeDetail();
+            }
         }
         // A pane showing nothing is a blank panel taking up a third of the
         // window. The bottom one keeps its strip and hands the room back; the
         // others simply stop being drawn.
-        if (survivors.length === 0 && pane === 'bottom') state.open = false;
+        if (state.tabs.length === 0 && pane === 'bottom') state.open = false;
         this.persistPanes();
+    }
+
+    /**
+     * Whether the report on screen was read from the list this tab shows.
+     *
+     * A report belongs to a collection -- you got to it by clicking a row --
+     * and both of the rules that close it turn on that belonging: leaving the
+     * list, or closing it. Neither should fire for some other list that
+     * happens to be in the way.
+     */
+    private describesTheListIn(tab: Tab): boolean {
+        const target = this.detailTarget;
+        if (!target) return false;
+        return tab.contextId === target.contextId && tab.kind === target.kind;
     }
 
     /**
@@ -1150,6 +1183,7 @@ class Workspace {
     private forget(tab: Tab): void {
         if (tab.view === 'logs') logs.forget(tab.id);
         else if (tab.view === 'shell') terminals.forget(tab.id);
+        else if (tab.view === 'details') this.clearDetail();
         else if (isDocumentView(tab.view)) editors.forget(tab.id);
     }
 
@@ -1223,6 +1257,7 @@ class Workspace {
         this.insertTab(to, tab, { index, atEnd: index === undefined });
         this.panes[to].activeId = id;
         this.panes[to].open = true;
+        if (id === DETAILS_TAB_ID) this.rememberDetailPane(to);
         this.persistPanes();
     }
 
@@ -1276,6 +1311,7 @@ class Workspace {
 
         this.panes = fresh;
         this.focusedTabId = null;
+        this.rememberDetailPane(defaultPaneFor('details'));
         this.persistPanes();
         this.inform('Layout reset');
     }
@@ -1459,19 +1495,28 @@ class Workspace {
         );
     }
 
-    /** One pane in the shape the settings file holds it. */
+    /**
+     * One pane in the shape the settings file holds it.
+     *
+     * The describe tab is left out. It shows whatever row is selected, and a
+     * restored window has no selection, so writing it down would put a tab in
+     * the file that can only come back describing nothing. What does persist
+     * about it is which pane it was in -- see rememberDetailPane.
+     */
     private paneRef(pane: PaneId): appconfig.PaneState {
         const state = this.panes[pane];
         return {
             open: state.open,
             size: state.size,
-            tabs: state.tabs.map((t) => ({
-                type: t.view,
-                contextId: t.contextId,
-                kind: t.kind,
-                namespace: t.namespace,
-                name: t.name,
-            })),
+            tabs: state.tabs
+                .filter((t) => t.view !== 'details')
+                .map((t) => ({
+                    type: t.view,
+                    contextId: t.contextId,
+                    kind: t.kind,
+                    namespace: t.namespace,
+                    name: t.name,
+                })),
         } as appconfig.PaneState;
     }
 
@@ -1758,15 +1803,52 @@ class Workspace {
         }
     }
 
-    // ----- detail panel --------------------------------------------------
+    // ----- the describe tab ----------------------------------------------
 
-    /** Slides in the describe panel for one object. */
+    /**
+     * Describes one object, in the pane the describe tab lives in.
+     *
+     * One tab for the window rather than one per object: clicking row after row
+     * refills it, which is what the panel did before it was a tab and what
+     * anyone reading down a list actually wants. What it costs is the ability
+     * to hold two reports open at once, which is the editor's job anyway.
+     *
+     * A tab already open stays where the user put it; a new one opens in the
+     * pane they last put one in -- see detailPane.
+     */
     async openDetail(target: DetailTarget): Promise<void> {
         this.detailTarget = target;
         this.detailRevision = changes.revision(target);
         this.detailLoading = true;
         this.detailError = null;
+        this.showDetailsTab(target);
         await this.describeInto(target);
+    }
+
+    /**
+     * Puts the describe tab on screen, titled with what it is describing.
+     *
+     * Retitling in place rather than closing and reopening: the tab is the
+     * same tab, and a strip that flickered a tab out and back on every click
+     * down a list would be the wrong answer to "this now describes something
+     * else".
+     */
+    private showDetailsTab(target: DetailTarget): void {
+        const pane = this.paneOf(DETAILS_TAB_ID) ?? this.detailPane;
+        const tab = detailsTab(target);
+
+        const at = this.panes[pane].tabs.findIndex((t) => t.id === DETAILS_TAB_ID);
+        if (at === -1) {
+            this.insertTab(pane, tab, { atEnd: true });
+        } else {
+            this.panes[pane].tabs[at] = tab;
+        }
+        // Not through activateTab: it folds the bottom pane away on a second
+        // click, and selecting a second row is not a request to put the report
+        // you just asked for out of sight.
+        this.panes[pane].activeId = DETAILS_TAB_ID;
+        this.setPaneOpen(pane, true);
+        this.persistPanes();
     }
 
     /**
@@ -1826,7 +1908,26 @@ class Workspace {
         }
     }
 
+    /**
+     * Puts the describe tab away and forgets what it held.
+     *
+     * Called by the tab's own close button, by Escape, and by the store itself
+     * when the list the report belonged to is left or closed. The pane it was
+     * in goes with it if it held nothing else, the way any pane does.
+     */
     closeDetail(): void {
+        this.clearDetail();
+        if (this.paneOf(DETAILS_TAB_ID) !== null) this.closeTab(DETAILS_TAB_ID);
+    }
+
+    /**
+     * Drops the report without touching the tab.
+     *
+     * The half of closing that `forget` needs: the tab is already on its way
+     * out by the time it is called, and going back through closeDetail from
+     * there would send it round the houses to close a tab that has gone.
+     */
+    private clearDetail(): void {
         // Takes the number with it, so whatever is in flight has already lost.
         this.detailLoad++;
         this.detailTarget = null;
@@ -1837,17 +1938,16 @@ class Workspace {
     }
 
     /**
-     * Moves the detail panel to another edge of the window. Called both by
-     * dragging the panel and by the settings view, which sets the edge the next
-     * panel will open on.
+     * Remembers the pane the describe tab was dragged into, so the next
+     * selection opens it there.
+     *
+     * The tab itself is never persisted -- there is no selection to restore it
+     * against -- so without this a move would last only as long as the report
+     * that happened to be open when it was made.
      */
-    setDock(side: DockSide): void {
-        this.settings.layout.detailDock = side;
-        this.persistLayout();
-    }
-
-    setDetailSize(px: number): void {
-        this.settings.layout.detailSize = Math.round(px);
+    private rememberDetailPane(pane: PaneId): void {
+        if (this.settings.layout.detailPane === pane) return;
+        this.settings.layout.detailPane = pane;
         this.persistLayout();
     }
 

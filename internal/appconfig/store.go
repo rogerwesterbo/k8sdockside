@@ -140,8 +140,16 @@ type Panes struct {
 
 // Layout is the arrangement the user last left the window in.
 type Layout struct {
-	DetailDock string `json:"detailDock"` // right | bottom | left
-	DetailSize int    `json:"detailSize"` // px along the docked edge
+	// DetailPane is which pane the describe tab opens in: left, main, right or
+	// bottom. The tab itself is never in Panes -- it comes and goes with the
+	// row that is selected, and a restored window has no selection -- so this
+	// is the whole of what survives about where the user put it.
+	DetailPane string `json:"detailPane"`
+	// DetailDock and DetailSize are superseded by DetailPane and by the size of
+	// the pane the tab lands in. They are read only to bring a file written
+	// before the describe panel became a tab across. See migrateDetailPane.
+	DetailDock string `json:"detailDock,omitempty"`
+	DetailSize int    `json:"detailSize,omitempty"`
 	// SidebarWidth is superseded by Panes.Left.Size and is read only to bring
 	// a file written before the sidebar became a pane across. See migratePanes.
 	SidebarWidth int `json:"sidebarWidth"`
@@ -446,7 +454,7 @@ func Defaults() Settings {
 			// one with nothing in it is a third of the window showing nothing.
 			Bottom: PaneState{Tabs: []PaneTabRef{}, Size: 320},
 		},
-		Layout: Layout{DetailDock: "right", DetailSize: 520, SidebarWidth: 260, Zoom: 1},
+		Layout: Layout{DetailPane: PaneRight, SidebarWidth: 260, Zoom: 1},
 		Preferences: Preferences{
 			Theme:    themes.DefaultID,
 			Density:  DensityComfortable,
@@ -560,16 +568,26 @@ func openAt(path string) (*Store, error) {
 	if err := json.Unmarshal(raw, &loaded); err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
 	}
-	// Whether this file predates panes, which is what decides if the session in
-	// it has to be brought across from TabOrder and Dock. Unmarshalling over
-	// Defaults cannot answer that -- the defaults have already filled the field
-	// in, so an absent key and an empty one look identical afterwards -- so the
-	// question is put to the file itself.
+	// What this file predates, which is what decides which sessions have to be
+	// brought across: panes from TabOrder and Dock, the describe tab's pane
+	// from the edge the panel used to dock to. Unmarshalling over Defaults
+	// cannot answer either question -- the defaults have already filled the
+	// fields in, so an absent key and an empty one look identical afterwards --
+	// so both are put to the file itself, and the answer is written back as the
+	// zero value the migrations look for.
 	var probe struct {
-		Panes *Panes `json:"panes"`
+		Panes  *Panes `json:"panes"`
+		Layout *struct {
+			DetailPane *string `json:"detailPane"`
+		} `json:"layout"`
 	}
-	if err := json.Unmarshal(raw, &probe); err == nil && probe.Panes == nil {
-		loaded.Panes = nil
+	if err := json.Unmarshal(raw, &probe); err == nil {
+		if probe.Panes == nil {
+			loaded.Panes = nil
+		}
+		if probe.Layout == nil || probe.Layout.DetailPane == nil {
+			loaded.Layout.DetailPane = ""
+		}
 	}
 	s.data = normalise(loaded)
 	return s, nil
@@ -977,14 +995,12 @@ func normalise(s Settings) Settings {
 		s.Dock.Tabs = []DockTabRef{}
 	}
 	s = migratePanes(s)
+	s = migrateDetailPane(s)
 	d := Defaults().Layout
-	switch s.Layout.DetailDock {
-	case "right", "bottom", "left":
+	switch s.Layout.DetailPane {
+	case PaneLeft, PaneMain, PaneRight, PaneBottom:
 	default:
-		s.Layout.DetailDock = d.DetailDock
-	}
-	if s.Layout.DetailSize < 200 {
-		s.Layout.DetailSize = d.DetailSize
+		s.Layout.DetailPane = d.DetailPane
 	}
 	if s.Layout.SidebarWidth < 180 {
 		s.Layout.SidebarWidth = d.SidebarWidth
@@ -1087,6 +1103,56 @@ func migratePanes(s Settings) Settings {
 	return s
 }
 
+// migrateDetailPane carries a file written before the describe panel became a
+// tab across to the field that replaces its two.
+//
+// The panel used to dock to an edge of the window with a size of its own; it is
+// a tab in a pane now, so the edge is a pane id and the size is that pane's.
+// The edge and the pane happen to be named the same, which makes the first half
+// a lookup rather than a decision.
+//
+// The size is only carried into a pane holding nothing. A pane with tabs in it
+// has a size the user arrived at while looking at those tabs, and a width
+// chosen for a describe panel is not an improvement on it; an empty pane has
+// never been sized by anyone, so the old panel's width is the better guess.
+//
+// Both old fields are cleared once read, for the reason migratePanes clears
+// its two: the same setting in the file twice, with nothing keeping the copies
+// honest, is only ever noticed once one of them is wrong.
+func migrateDetailPane(s Settings) Settings {
+	if s.Layout.DetailPane == "" {
+		switch s.Layout.DetailDock {
+		case PaneLeft, PaneRight, PaneBottom:
+			s.Layout.DetailPane = s.Layout.DetailDock
+		default:
+			s.Layout.DetailPane = Defaults().Layout.DetailPane
+		}
+
+		if s.Panes != nil && s.Layout.DetailSize >= minPaneSize {
+			switch s.Layout.DetailPane {
+			case PaneLeft:
+				s.Panes.Left = sizeIfEmpty(s.Panes.Left, s.Layout.DetailSize)
+			case PaneRight:
+				s.Panes.Right = sizeIfEmpty(s.Panes.Right, s.Layout.DetailSize)
+			case PaneBottom:
+				s.Panes.Bottom = sizeIfEmpty(s.Panes.Bottom, s.Layout.DetailSize)
+			}
+		}
+	}
+	s.Layout.DetailDock = ""
+	s.Layout.DetailSize = 0
+	return s
+}
+
+// sizeIfEmpty gives a pane a size only if it is holding nothing, so a size the
+// user chose while looking at something is never overwritten.
+func sizeIfEmpty(p PaneState, size int) PaneState {
+	if len(p.Tabs) == 0 {
+		p.Size = size
+	}
+	return p
+}
+
 // withClustersTab guarantees the kubeconfig tree is open somewhere.
 //
 // It is the one view that cannot be closed -- it is how everything else gets
@@ -1136,6 +1202,16 @@ const (
 // view and its target, and this one has no target, so the kind stands in for it
 // and keeps every tab the same shape.
 const KindClusters = "clusters"
+
+// The panes, named so that Layout.DetailPane can be checked against them. The
+// panes themselves are fields on Panes rather than a map, so these exist only
+// for the fields that hold a pane id as a value.
+const (
+	PaneLeft   = "left"
+	PaneMain   = "main"
+	PaneRight  = "right"
+	PaneBottom = "bottom"
+)
 
 // minPaneSize is the smallest a pane may be recorded at, below which the size is
 // taken to be missing rather than chosen. A file written before panes existed

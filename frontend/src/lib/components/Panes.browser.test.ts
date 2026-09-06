@@ -58,6 +58,17 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         ApplyYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
     },
+    // The describe panel is a tab now, so every pane can mount it and its
+    // action bar -- which is why a test about where tabs go needs this.
+    ActionService: {
+        ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] }),
+        Delete: vi.fn().mockResolvedValue(undefined),
+        Scale: vi.fn().mockResolvedValue(undefined),
+        Restart: vi.fn().mockResolvedValue(undefined),
+        Cordon: vi.fn().mockResolvedValue(undefined),
+        Drain: vi.fn().mockResolvedValue('drain-1'),
+        CancelDrain: vi.fn(),
+    },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
         Open: vi.fn().mockResolvedValue('logs-1'),
@@ -110,7 +121,9 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
 }));
 
-const { workspace, CLUSTERS_TAB_ID, clustersTab } = await import('../state/workspace.svelte');
+const { workspace, CLUSTERS_TAB_ID, DETAILS_TAB_ID, clustersTab } = await import(
+    '../state/workspace.svelte',
+);
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 
@@ -234,4 +247,67 @@ test('the tree can still be dragged into another pane', async () => {
     dragOnto(await page.getByRole('tab', { name: /Clusters/ }).element(), stripFor('Dock'));
 
     expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('bottom');
+});
+
+
+// The describe panel was the last thing on screen with a place of its own: it
+// docked to an edge of the window, sized itself, and carried three buttons for
+// moving between the only three edges it knew. It is a tab now, so it is drawn
+// by whichever pane holds it and moved by the same drag as everything else.
+const HT1 = { contextId: PROD, kind: 'nodes', namespace: '', name: 'ht1' };
+const HT2 = { contextId: PROD, kind: 'nodes', namespace: '', name: 'ht2' };
+
+test('the describe panel is drawn by the pane its tab is in', async () => {
+    render(Pane, { pane: 'main' });
+    render(Pane, { pane: 'right' });
+
+    await workspace.openDetail(HT1);
+
+    await expect.element(page.getByRole('tab', { name: /ht1/ })).toBeVisible();
+    // The report itself, in the right panel rather than in a panel of its own.
+    const panel = document.querySelector('.pane.right .panel');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('aria-label')).toBe('Node details');
+});
+
+test('describing another row retitles the tab instead of adding one', async () => {
+    render(Pane, { pane: 'main' });
+    render(Pane, { pane: 'right' });
+    await workspace.openDetail(HT1);
+    await expect.element(page.getByRole('tab', { name: /ht1/ })).toBeVisible();
+
+    await workspace.openDetail(HT2);
+
+    await expect.element(page.getByRole('tab', { name: /ht2/ })).toBeVisible();
+    expect(page.getByRole('tab', { name: /ht1/ }).elements()).toHaveLength(0);
+    expect(workspace.panes.right.tabs).toHaveLength(1);
+});
+
+// What replaces the three dock buttons the panel used to carry.
+test('the describe tab can be dragged to the foot of the window', async () => {
+    render(Pane, { pane: 'right' });
+    render(Pane, { pane: 'bottom' });
+    await workspace.openDetail(HT1);
+    await expect.element(page.getByRole('tab', { name: /ht1/ })).toBeVisible();
+
+    dragOnto(await page.getByRole('tab', { name: /ht1/ }).element(), stripFor('Dock'));
+
+    expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
+    // And that is where the next row describes itself, not back on the right.
+    workspace.closeDetail();
+    await workspace.openDetail(HT2);
+    expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
+});
+
+// Unlike the cluster tree, it is an ordinary closable tab: it comes back the
+// moment another row is selected, so a close button strands nobody.
+test('the describe tab closes from its own close button', async () => {
+    render(Pane, { pane: 'main' });
+    render(Pane, { pane: 'right' });
+    await workspace.openDetail(HT1);
+
+    await page.getByRole('button', { name: 'Close ht1' }).click();
+
+    expect(workspace.detailTarget).toBeNull();
+    expect(workspace.paneOf(DETAILS_TAB_ID)).toBeNull();
 });

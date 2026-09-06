@@ -221,3 +221,20 @@ test('settings can be opened even with the tree hidden', async () => {
 
     expect(workspace.allTabs.some((t) => t.kind === SETTINGS)).toBe(true);
 });
+
+// The trigger sits at the right end of the title bar, because the left of that
+// bar belongs to the macOS traffic lights and the middle to the title. A menu
+// that grows rightwards from a button in that position grows off the edge of
+// the window, and half of every label goes with it. A menu whose whole purpose
+// is to be found cannot be the thing that is half off screen.
+test('the menu opens inside the window, though its button is at the right edge', async () => {
+    render(TopBar);
+
+    await openMenu();
+
+    const menu = document.querySelector('[role="menu"]');
+    expect(menu).not.toBeNull();
+    const box = (menu as HTMLElement).getBoundingClientRect();
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(document.documentElement.clientWidth);
+});

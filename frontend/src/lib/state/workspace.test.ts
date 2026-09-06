@@ -85,8 +85,15 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
 }));
 
-const { workspace, isSettingsTab, resourceTabId, tabIdFor, CLUSTERS_TAB_ID, clustersTab } =
-    await import('./workspace.svelte');
+const {
+    workspace,
+    isSettingsTab,
+    resourceTabId,
+    tabIdFor,
+    CLUSTERS_TAB_ID,
+    DETAILS_TAB_ID,
+    clustersTab,
+} = await import('./workspace.svelte');
 const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
@@ -2249,5 +2256,140 @@ describe('resetting the layout', () => {
         workspace.resetLayout();
 
         expect(workspace.allTabs.filter((t) => t.view === 'clusters')).toHaveLength(1);
+    });
+});
+
+
+// The describe panel used to dock to an edge of the window with a size, a
+// resize handle and three position buttons of its own -- a second layout system
+// for one panel. It is a tab now, so it goes where the user drags it and is
+// sized by the pane it lands in. What it does not become is a tab per object:
+// it follows the selection, because reading down a list is the thing people
+// actually do with it.
+describe('the describe tab', () => {
+    const HT1 = { contextId: PROD, kind: 'nodes', namespace: '', name: 'ht1' };
+    const HT2 = { contextId: PROD, kind: 'nodes', namespace: '', name: 'ht2' };
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    beforeEach(() => {
+        workspace.closeDetail();
+        for (const pane of ['main', 'right', 'bottom'] as const) workspace.closeAllTabsIn(pane);
+        workspace.settings.layout.detailPane = 'right';
+    });
+
+    test('opens beside the list rather than under it', async () => {
+        await workspace.openDetail(HT1);
+
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('right');
+        expect(workspace.isPaneOpen('right')).toBe(true);
+    });
+
+    test('describing a second row refills the tab rather than opening another', async () => {
+        await workspace.openDetail(HT1);
+        await workspace.openDetail(HT2);
+
+        expect(workspace.allTabs.filter((t) => t.view === 'details')).toHaveLength(1);
+        expect(workspace.detailTarget?.name).toBe('ht2');
+    });
+
+    test('wears the name of what it is describing', async () => {
+        await workspace.openDetail(HT1);
+
+        expect(workspace.tabFor(DETAILS_TAB_ID)?.title).toBe('ht1');
+    });
+
+    // The gesture that replaces the three dock buttons.
+    test('stays where it was dragged, and the next selection opens it there', async () => {
+        await workspace.openDetail(HT1);
+        workspace.moveTabToPane(DETAILS_TAB_ID, 'bottom');
+        workspace.closeDetail();
+
+        await workspace.openDetail(HT2);
+
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
+    });
+
+    test('closing it and selecting again brings it back', async () => {
+        await workspace.openDetail(HT1);
+        workspace.closeTab(DETAILS_TAB_ID);
+        expect(workspace.detailTarget).toBeNull();
+
+        await workspace.openDetail(HT2);
+
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('right');
+    });
+
+    // The report describes a row in a list, so it goes when you leave that list.
+    test('closes when a different list is brought forward', async () => {
+        workspace.openTab(PROD, 'nodes');
+        workspace.openTab(PROD, 'pods');
+        // On the nodes list, describing a node in it.
+        workspace.activateTab(resourceTabId(PROD, 'nodes'));
+        await workspace.openDetail(HT1);
+
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
+
+        expect(workspace.detailTarget).toBeNull();
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBeNull();
+    });
+
+    // A round trip you can make now that the report is a tab beside the list:
+    // clicking back to the very list the object came from is not leaving it.
+    test('survives going back to the list the object came from', async () => {
+        workspace.openTab(PROD, 'nodes');
+        await workspace.openDetail(HT1);
+        workspace.moveTabToPane(DETAILS_TAB_ID, 'main');
+
+        workspace.activateTab(resourceTabId(PROD, 'nodes'));
+
+        expect(workspace.detailTarget?.name).toBe('ht1');
+    });
+
+    test('closes when the list it was read from is closed', async () => {
+        workspace.openTab(PROD, 'nodes');
+        await workspace.openDetail(HT1);
+
+        workspace.closeTab(resourceTabId(PROD, 'nodes'));
+
+        expect(workspace.detailTarget).toBeNull();
+    });
+
+    test('is left alone when some other list is closed', async () => {
+        workspace.openTab(PROD, 'nodes');
+        workspace.openTab(PROD, 'pods');
+        await workspace.openDetail(WEB);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
+
+        workspace.closeTab(resourceTabId(PROD, 'nodes'));
+
+        expect(workspace.detailTarget?.name).toBe('web');
+    });
+
+    // It comes and goes with the selection, so there is nothing to restore it
+    // against: a saved tab would come back describing nothing.
+    test('is never written to the settings file', async () => {
+        vi.mocked(SettingsService.SetPanes).mockClear();
+        workspace.openTab(PROD, 'nodes');
+        await workspace.openDetail(HT1);
+        // The panes are written on a 250ms debounce, so the assertion has to
+        // wait for the write it is about rather than race it.
+        await new Promise((r) => setTimeout(r, 400));
+
+        const calls = vi.mocked(SettingsService.SetPanes).mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        const written = calls.at(-1)?.[0] as Record<string, { tabs: { type: string }[] }>;
+        const tabs = Object.values(written).flatMap((pane) => pane.tabs);
+        // The list it was read from is there; the report itself is not.
+        expect(tabs.map((t) => t.type)).toContain('resource');
+        expect(tabs.map((t) => t.type)).not.toContain('details');
+    });
+
+    test('goes back to the pane it opens in when the layout is reset', async () => {
+        await workspace.openDetail(HT1);
+        workspace.moveTabToPane(DETAILS_TAB_ID, 'bottom');
+
+        workspace.resetLayout();
+
+        expect(workspace.settings.layout.detailPane).toBe('right');
     });
 });
