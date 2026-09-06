@@ -94,6 +94,12 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         SetPanes: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
     },
+    UpdateService: {
+        Status: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
+        Check: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
+        MarkRead: vi.fn().mockResolvedValue({ current: 'test', latest: null, newer: false, unread: false, checkedAt: '', error: '' }),
+        OpenRelease: vi.fn().mockResolvedValue(undefined),
+    },
 }));
 
 const { workspace } = await import('../state/workspace.svelte');

@@ -66,6 +66,7 @@ pluginservice.go             the solution plugins, and each one's per-cluster ov
 metricsservice.go            finding a cluster's Prometheus, and drawing plugin charts
 terminalservice.go           shells: the sessions open, and the external terminals
 portforwardservice.go        the tunnels open, and the ones remembered from last time
+updateservice.go             whether a newer release exists, and whether the user has heard
 internal/kube/               kubeconfig parsing, and the stubbed cluster data
 internal/appconfig/          the settings file
 internal/addons/             finding and merging add-on files, shared by the two below
@@ -75,12 +76,14 @@ internal/plugins/            the plugin format, loader and overview builder
 internal/plugins/builtin/    Argo CD, Flux and Prometheus, in the public format
 internal/metrics/            PromQL, Prometheus discovery, and reading its answers
 internal/termapp/            the terminal emulators on this machine, and how to run one in it
+internal/updates/            asking GitHub for the latest release, and ordering versions
 frontend/src/
   App.svelte                 shell: sidebar | tabs + view | detail panel | dock
   lib/state/workspace.svelte.ts   all application state
   lib/state/editor.svelte.ts      the documents open in the dock's editor
   lib/state/terminals.svelte.ts   the shells open in the dock, and their xterm instances
   lib/state/forwards.svelte.ts    the port forwards, live and remembered
+  lib/state/updates.svelte.ts     the newest release known, and whether it is still unread
   lib/theme/apply.ts         writing a theme's colours onto the document
   lib/plugins/               the plugin catalogue as the sidebar and overview see it
   lib/charts/                the SVG line chart, and the panel that hosts them

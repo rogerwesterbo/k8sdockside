@@ -34,10 +34,19 @@ and no account.
 - **Credentials stay in `clientcmd`.** Client certificates, bearer tokens and
   `exec` credential plugins are handled by the standard Kubernetes client
   libraries. The app does not copy secrets out of them or persist them.
-- **Nothing connects at launch.** Contexts are listed from disk. A connection is
-  opened when you open a view, and closed when the last tab using it closes.
-  Port forwards remembered from a previous session are stored as *requests*, not
-  as live connections.
+- **Nothing connects to a cluster at launch.** Contexts are listed from disk. A
+  connection is opened when you open a view, and closed when the last tab using
+  it closes. Port forwards remembered from a previous session are stored as
+  *requests*, not as live connections.
+- **The update check is the one outbound request.** Shortly after launch, and
+  every six hours after, the app asks GitHub's public releases API which
+  release is newest: one unauthenticated `GET` of
+  `api.github.com/repos/rogerwesterbo/k8sdockside/releases/latest`, carrying
+  nothing but the app's name and version in its `User-Agent`. No cluster,
+  kubeconfig or settings data is sent. It can be switched off under
+  *Settings → Behaviour*; the button under *About* checks only when pressed.
+  The page it offers to open is built from the release tag, never taken from
+  the response.
 - **Secrets are redacted before caching.** An informer holds a whole collection
   in memory, so Secret values are stripped on the way in and the tables show key
   counts only. The YAML editor is the deliberate exception: it reads the object

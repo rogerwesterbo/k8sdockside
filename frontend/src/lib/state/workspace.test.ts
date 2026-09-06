@@ -1154,6 +1154,7 @@ describe('preferences', () => {
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
             showLineNumbers: true,
+            checkForUpdates: true,
             metricsRange: 60,
             terminal: {
                 mode: 'app',

@@ -16,7 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// main starts the app: it opens the settings file, wires up the eleven services
+// main starts the app: it opens the settings file, wires up the twelve services
 // the frontend calls, and shows the main window.
 func main() {
 	// The settings store holds the user's kubeconfig paths, context aliases and
@@ -53,6 +53,10 @@ func main() {
 	charts := NewHelmService(configs, resources.watcher, settings)
 	shells := NewTerminalService(configs, resources.watcher, settings)
 	tunnels := NewPortForwardService(configs, resources.watcher, settings)
+	// The one service that reaches beyond this machine and its clusters: it
+	// asks GitHub whether a newer release exists. It reads the settings for
+	// whether it may, and writes them for what the user has already seen.
+	news := NewUpdateService(settings)
 
 	app := application.New(application.Options{
 		Name: "K8s Dockside",
@@ -72,6 +76,7 @@ func main() {
 			application.NewService(charts),
 			application.NewService(shells),
 			application.NewService(tunnels),
+			application.NewService(news),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

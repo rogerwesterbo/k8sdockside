@@ -8,11 +8,13 @@
   from under them.
 
   The title is centred on the window rather than in the space left over, so it
-  does not drift as the panels are resized. The View menu sits in the space
-  that leaves on the right, which is the one part of the window that is there
-  whatever else has been hidden -- see ViewMenu.svelte.
+  does not drift as the panels are resized. The bell and the View menu sit in
+  the space that leaves on the right, which is the one part of the window that
+  is there whatever else has been hidden -- see NotificationMenu.svelte and
+  ViewMenu.svelte.
 -->
 <script lang="ts">
+    import NotificationMenu from './NotificationMenu.svelte';
     import ViewMenu from './ViewMenu.svelte';
 </script>
 
@@ -23,6 +25,7 @@
     </div>
 
     <div class="menus">
+        <NotificationMenu />
         <ViewMenu />
     </div>
 </header>

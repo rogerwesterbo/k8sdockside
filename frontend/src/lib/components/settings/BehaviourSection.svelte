@@ -1,7 +1,7 @@
 <!--
   What the app does on its own: what it reopens at launch, which parts of the
-  sidebar tree start folded, and whether it asks before dropping a kubeconfig
-  source.
+  sidebar tree start folded, whether it asks before dropping a kubeconfig
+  source, and whether it looks for new releases.
 
   Where a panel appears is not here any more. Every view is a tab now, including
   the describe panel, and a tab's place is where it was dragged to -- a
@@ -38,6 +38,17 @@
             checked={workspace.confirmSourceRemoval}
             label="Ask before removing a kubeconfig source"
             onchange={(v) => workspace.setConfirmSourceRemoval(v)}
+        />
+    </SettingsRow>
+
+    <SettingsRow
+        label="Check for new versions"
+        hint="Asks GitHub shortly after launch, and every six hours after, whether a newer release is out, and says so on the bell in the title bar. The request carries nothing but the app's name and version. Off, the About page can still check when you ask it to."
+    >
+        <Toggle
+            checked={workspace.checkForUpdates}
+            label="Check for new versions"
+            onchange={(v) => workspace.setCheckForUpdates(v)}
         />
     </SettingsRow>
 </SettingsSection>

@@ -254,6 +254,7 @@ function defaultSettings(): Settings {
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
             showLineNumbers: true,
+            checkForUpdates: true,
             metricsRange: 60,
             terminal: {
                 mode: 'app',
@@ -595,6 +596,7 @@ class Workspace {
     density = $derived(this.settings.preferences.density);
     restoreTabsOnLaunch = $derived(this.settings.preferences.restoreTabs);
     confirmSourceRemoval = $derived(this.settings.preferences.confirmSourceRemoval);
+    checkForUpdates = $derived(this.settings.preferences.checkForUpdates);
     /** Whether the sidebar groups contexts under the kubeconfig they came from. */
     showKubeconfigNames = $derived(this.settings.preferences.showKubeconfigNames);
     /** Whether the YAML editor draws a line-number gutter. On by default. */
@@ -2261,6 +2263,10 @@ class Workspace {
 
     setConfirmSourceRemoval(confirmSourceRemoval: boolean): void {
         this.updatePreferences({ confirmSourceRemoval });
+    }
+
+    setCheckForUpdates(checkForUpdates: boolean): void {
+        this.updatePreferences({ checkForUpdates });
     }
 
     setShowKubeconfigNames(showKubeconfigNames: boolean): void {

@@ -132,6 +132,8 @@ export interface Settings {
         confirmSourceRemoval: boolean;
         showKubeconfigNames: boolean;
         showLineNumbers: boolean;
+        /** Whether the app asks GitHub, on its own, if a newer release is out. */
+        checkForUpdates: boolean;
         /** How far back a metrics chart looks, in minutes. */
         metricsRange: number;
         /** How a shell opens, and what it opens with. */
@@ -229,6 +231,9 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // On by default, and nullable on the Go side for exactly that
             // reason -- see RestoreTabs above.
             showLineNumbers: settings.preferences?.showLineNumbers ?? true,
+            // On by default, and nullable on the Go side for the same reason
+            // again: an older file must not read as having switched it off.
+            checkForUpdates: settings.preferences?.checkForUpdates ?? true,
             // Zero from the store means never chosen. An hour is long enough to
             // show a rollout and short enough to still show a spike.
             metricsRange: settings.preferences?.metricsRange || 60,
