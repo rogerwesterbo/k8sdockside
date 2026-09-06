@@ -4,6 +4,7 @@ import (
 	json "encoding/json/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1027,5 +1028,30 @@ func TestAClusterTreeMovedToAnotherPaneStaysThere(t *testing.T) {
 	}
 	if len(got.Right.Tabs) != 1 || got.Right.Tabs[0].Type != ViewClusters {
 		t.Errorf("right pane = %+v, want the tree the user moved there", got.Right.Tabs)
+	}
+}
+
+// The sidebar section for plugins was called "Solutions" until it was renamed,
+// and the folded state is remembered under the label. A file from before the
+// rename must not quietly unfold the section for everyone who had it shut.
+func TestTheSolutionsGroupIsRememberedAsPlugins(t *testing.T) {
+	path := tempSettings(t)
+	body := `{"layout":{"collapsedGroups":["Solutions","Admission"]},` +
+		`"contexts":{"/k::a":{"collapsedGroups":["Workloads","Solutions"]}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := store.Get()
+	if want := []string{"Plugins", "Admission"}; !slices.Equal(got.Layout.CollapsedGroups, want) {
+		t.Errorf("layout collapsed groups = %v, want %v", got.Layout.CollapsedGroups, want)
+	}
+	if want := []string{"Workloads", "Plugins"}; !slices.Equal(got.Contexts["/k::a"].CollapsedGroups, want) {
+		t.Errorf("context collapsed groups = %v, want %v", got.Contexts["/k::a"].CollapsedGroups, want)
 	}
 }

@@ -14,8 +14,9 @@ const service = vi.hoisted(() => ({
     Check: vi.fn(),
     MarkRead: vi.fn(),
     OpenRelease: vi.fn(),
+    OpenDownload: vi.fn(),
 }));
-const { Status, Check, MarkRead, OpenRelease } = service;
+const { Status, Check, MarkRead, OpenRelease, OpenDownload } = service;
 
 // The rest of the backend is stubbed whole, the way the View menu's test does
 // it: the bell reports through the workspace, which names every service as it
@@ -119,10 +120,11 @@ const RELEASE = {
     name: 'v0.0.3',
     url: 'https://github.com/rogerwesterbo/k8sdockside/releases/tag/v0.0.3',
     publishedAt: '2026-09-05T16:02:10Z',
+    assets: [],
 };
 
 function status(over: Record<string, unknown> = {}) {
-    return { current: 'v0.0.2', latest: null, newer: false, unread: false, checkedAt: '', error: '', ...over };
+    return { current: 'v0.0.2', latest: null, newer: false, unread: false, checkedAt: '', error: '', install: 'Debian package, amd64', download: '', ...over };
 }
 
 const NEWS = status({ latest: RELEASE, newer: true, unread: true, checkedAt: '2026-09-06T10:00:00Z' });
@@ -140,6 +142,7 @@ beforeEach(() => {
     Check.mockReset().mockResolvedValue(status());
     MarkRead.mockReset().mockResolvedValue(status());
     OpenRelease.mockReset().mockResolvedValue(undefined);
+    OpenDownload.mockReset().mockResolvedValue(undefined);
     updates.status = status({ current: '' });
     workspace.settings.preferences.checkForUpdates = true;
     workspace.dismissNotice();
@@ -212,6 +215,34 @@ test('viewing the release hands off to the backend and closes the panel', async 
 
     expect(OpenRelease).toHaveBeenCalledOnce();
     await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+});
+
+// The release page is always offered; the file for this install only when the
+// backend found one, since it is the backend that knows what this build is.
+test('offers the download for this install when the release has one', async () => {
+    const DOWNLOAD = 'https://github.com/rogerwesterbo/k8sdockside/releases/download/v0.0.3/k8sdockside-0.0.3-linux-amd64.deb';
+    Status.mockResolvedValueOnce({ ...NEWS, download: DOWNLOAD });
+    render(NotificationMenu);
+    await expect.element(page.getByRole('button', { name: 'Notifications, 1 unread' })).toBeVisible();
+    await openPanel();
+
+    const download = page.getByRole('button', { name: /^Download/ });
+    await expect.element(download).toBeVisible();
+    await expect.element(download).toHaveAttribute('title', expect.stringContaining('Debian package, amd64'));
+    await download.click();
+
+    expect(OpenDownload).toHaveBeenCalledOnce();
+    await expect.element(page.getByRole('dialog')).not.toBeInTheDocument();
+});
+
+test('without a file for this install, only the release page is offered', async () => {
+    Status.mockResolvedValueOnce(NEWS);
+    render(NotificationMenu);
+    await expect.element(page.getByRole('button', { name: 'Notifications, 1 unread' })).toBeVisible();
+    await openPanel();
+
+    await expect.element(page.getByRole('button', { name: 'View release' })).toBeVisible();
+    expect([...document.querySelectorAll('button')].some((b) => b.textContent?.startsWith('Download'))).toBe(false);
 });
 
 test('with nothing new it says so, and offers to check', async () => {

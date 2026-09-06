@@ -45,6 +45,13 @@ type UpdateStatus struct {
 	// Error says why the last check failed, in words for the settings page.
 	// Empty when it succeeded.
 	Error string `json:"error"`
+	// Install is what this build is -- "Debian package, amd64" -- so the user
+	// can see why the download below is the one offered.
+	Install string `json:"install"`
+	// Download is the address of Latest's file for this install, empty when
+	// no check has succeeded or the release has no file for it. The release
+	// page, which always exists, is the fallback.
+	Download string `json:"download"`
 }
 
 // UpdateService tells the window when a newer release of the app exists.
@@ -66,6 +73,9 @@ type UpdateService struct {
 	// cannot change while the process runs, and reading it once keeps every
 	// status consistent with the About page.
 	current string
+	// install is how this build was installed, worked out once at
+	// construction for the same reason.
+	install updates.Install
 	// delay and every are the constants above, held here so a test can shorten
 	// them.
 	delay, every time.Duration
@@ -86,6 +96,7 @@ func NewUpdateService(store *appconfig.Store) *UpdateService {
 		store:   store,
 		checker: updates.New(current),
 		current: current,
+		install: updates.DetectInstall(),
 		delay:   updateCheckDelay,
 		every:   updateCheckEvery,
 	}
@@ -167,7 +178,7 @@ func (s *UpdateService) snapshot() UpdateStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	status := UpdateStatus{Current: s.current, Error: s.err}
+	status := UpdateStatus{Current: s.current, Error: s.err, Install: s.install.String()}
 	if !s.checkedAt.IsZero() {
 		status.CheckedAt = s.checkedAt.Format(time.RFC3339)
 	}
@@ -176,6 +187,7 @@ func (s *UpdateService) snapshot() UpdateStatus {
 		status.Latest = &release
 		status.Newer = updates.Newer(s.current, release.Version)
 		status.Unread = status.Newer && s.store.Get().Updates.ReadVersion != release.Version
+		status.Download = release.Download(s.install)
 	}
 	return status
 }
@@ -212,6 +224,29 @@ func (s *UpdateService) OpenRelease() error {
 	}
 	s.mu.Unlock()
 
+	app := application.Get()
+	if app == nil {
+		return errors.New("the application is closing")
+	}
+	return app.Browser.OpenURL(target)
+}
+
+// OpenDownload sends the latest release's file for this install to the
+// browser, which downloads it. Like OpenRelease, the address is built here
+// from the tag and the file's name, never taken from the window. With nothing
+// to download -- no check yet, or no file for this platform -- it fails, and
+// the window is expected not to have offered the button.
+func (s *UpdateService) OpenDownload() error {
+	s.mu.Lock()
+	target := ""
+	if s.latest != nil {
+		target = s.latest.Download(s.install)
+	}
+	s.mu.Unlock()
+
+	if target == "" {
+		return errors.New("there is no download for this platform; open the release page instead")
+	}
 	app := application.Get()
 	if app == nil {
 		return errors.New("the application is closing")

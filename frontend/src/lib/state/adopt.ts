@@ -103,6 +103,8 @@ export interface Settings {
     manualFiles: string[];
     manualFolders: string[];
     excludedFiles: string[];
+    /** Single contexts hidden in this app, by id; their files are still read. */
+    excludedContexts: string[];
     /** Extra folders themes are read from, on top of the default one. */
     themeFolders: string[];
     /** Extra folders solution plugins are read from, on top of the default one. */
@@ -192,6 +194,7 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
         manualFiles: [...(settings.manualFiles ?? [])],
         manualFolders: [...(settings.manualFolders ?? [])],
         excludedFiles: [...(settings.excludedFiles ?? [])],
+        excludedContexts: [...(settings.excludedContexts ?? [])],
         themeFolders: [...(settings.themeFolders ?? [])],
         pluginFolders: [...(settings.pluginFolders ?? [])],
         contexts: Object.fromEntries(

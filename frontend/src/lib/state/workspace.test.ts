@@ -21,6 +21,8 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: {
         Sync: vi.fn().mockResolvedValue([]),
         Files: vi.fn().mockResolvedValue([]),
+        HideContext: vi.fn().mockResolvedValue([]),
+        RestoreContext: vi.fn().mockResolvedValue([]),
     },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue(''),
@@ -2394,5 +2396,75 @@ describe('the describe tab', () => {
         workspace.resetLayout();
 
         expect(workspace.settings.layout.detailPane).toBe('right');
+    });
+});
+
+// Hiding one context: the app's own list, never the kubeconfig. The backend
+// answers with the files as they now stand, and the tabs that pointed at the
+// hidden context go with it, the way they do when its file is removed.
+describe('hiding a context', () => {
+    // Two files, since a context's id is its file and its name: hiding one
+    // leaves its file listed, with nothing in it.
+    const PROD_FILE = '/home/u/.kube/prod';
+    const STAGING_FILE = '/home/u/.kube/staging';
+    const kept = { id: PROD, name: 'admin@prod', cluster: 'prod', user: 'admin', namespace: '', server: '', file: PROD_FILE, current: false };
+    const hidden = { id: STAGING, name: 'admin@staging', cluster: 'staging', user: 'admin', namespace: '', server: '', file: STAGING_FILE, current: false };
+
+    beforeEach(() => {
+        workspace.files = [
+            { path: PROD_FILE, source: 'manual', error: '', contexts: [kept] },
+            { path: STAGING_FILE, source: 'manual', error: '', contexts: [hidden] },
+        ];
+        workspace.settings.excludedContexts = [];
+        vi.mocked(KubeconfigService.HideContext).mockReset().mockResolvedValue([
+            { path: PROD_FILE, source: 'manual', error: '', contexts: [kept] },
+            { path: STAGING_FILE, source: 'manual', error: '', contexts: [] },
+        ]);
+        vi.mocked(KubeconfigService.RestoreContext).mockReset().mockResolvedValue([
+            { path: PROD_FILE, source: 'manual', error: '', contexts: [kept] },
+            { path: STAGING_FILE, source: 'manual', error: '', contexts: [hidden] },
+        ]);
+        vi.mocked(SettingsService.Get).mockReset().mockResolvedValue({ excludedContexts: [STAGING] } as never);
+    });
+
+    test('asks the backend, and closes the tabs that were open on it', async () => {
+        open([PROD, 'pods'], [STAGING, 'pods'], [STAGING, 'nodes']);
+
+        await workspace.hideContext(STAGING);
+
+        expect(KubeconfigService.HideContext).toHaveBeenCalledWith(STAGING);
+        expect(workspace.contexts.map((c) => c.id)).toEqual([PROD]);
+        expect(workspace.tabs.map((t) => t.contextId)).toEqual([PROD]);
+        expect(workspace.hiddenContexts).toEqual([{ id: STAGING, file: STAGING_FILE, name: 'admin@staging' }]);
+    });
+
+    test('restoring brings it back into the list', async () => {
+        await workspace.hideContext(STAGING);
+        vi.mocked(SettingsService.Get).mockResolvedValue({ excludedContexts: [] } as never);
+
+        await workspace.restoreContext(STAGING);
+
+        expect(KubeconfigService.RestoreContext).toHaveBeenCalledWith(STAGING);
+        expect(workspace.contexts.map((c) => c.id)).toEqual([PROD, STAGING]);
+        expect(workspace.hiddenContexts).toEqual([]);
+    });
+});
+
+describe('listedKind', () => {
+    test('resolves a plugin view to the kind it lists, and passes any other kind through', () => {
+        workspace.pluginCatalogue = {
+            plugins: [{
+                id: 'argocd', name: 'Argo CD', tagline: '', icon: 'rocket', author: '', docs: '', description: '',
+                origin: 'builtin', pack: '', disabled: false, requires: [],
+                views: [{ id: 'applications', label: 'Applications', icon: 'rocket', type: 'list', kind: 'crd:applications.argoproj.io', namespace: '', selector: '' }],
+            }],
+            dir: '', folders: [], problems: [],
+        };
+
+        expect(workspace.listedKind('plugin:argocd/applications')).toBe('crd:applications.argoproj.io');
+        expect(workspace.listedKind('pods')).toBe('pods');
+        // A view nothing installed can explain is left as it is: the backend
+        // will say so, which is better than guessing.
+        expect(workspace.listedKind('plugin:flux/kustomizations')).toBe('plugin:flux/kustomizations');
     });
 });

@@ -409,6 +409,11 @@ type Settings struct {
 	// they do not want. A discovered file cannot simply be forgotten -- the
 	// next scan would find it again -- so refusing it has to be recorded.
 	ExcludedFiles []string `json:"excludedFiles"`
+	// ExcludedContexts are single contexts the user has hidden, by the id
+	// kube.ContextID gives them, without touching the file they live in. The
+	// app never writes a kubeconfig, so this is the only way to take one
+	// cluster out of the sidebar and leave the rest of its file there.
+	ExcludedContexts []string `json:"excludedContexts"`
 	// ThemeFolders are extra directories to read themes from, on top of the
 	// themes folder beside this file. They sit here rather than in Preferences
 	// for the same reason ManualFolders does: this is where something comes
@@ -455,15 +460,16 @@ type Settings struct {
 // been saved, and that also fills in any field missing from an older file.
 func Defaults() Settings {
 	return Settings{
-		ManualFiles:     []string{},
-		ManualFolders:   []string{},
-		ExcludedFiles:   []string{},
-		ThemeFolders:    []string{},
-		PluginFolders:   []string{},
-		DisabledPlugins: []string{},
-		Contexts:        map[string]ContextPrefs{},
-		TabOrder:        []TabRef{},
-		Dock:            Dock{Tabs: []DockTabRef{}},
+		ManualFiles:      []string{},
+		ManualFolders:    []string{},
+		ExcludedFiles:    []string{},
+		ExcludedContexts: []string{},
+		ThemeFolders:     []string{},
+		PluginFolders:    []string{},
+		DisabledPlugins:  []string{},
+		Contexts:         map[string]ContextPrefs{},
+		TabOrder:         []TabRef{},
+		Dock:             Dock{Tabs: []DockTabRef{}},
 		Panes: &Panes{
 			Left: PaneState{
 				Tabs: []PaneTabRef{{Type: ViewClusters, Kind: KindClusters}},
@@ -752,6 +758,33 @@ func (s *Store) UnexcludeFile(path string) (Settings, error) {
 	})
 }
 
+// ExcludedContexts returns the contexts the user has hidden one by one.
+func (s *Store) ExcludedContexts() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.data.ExcludedContexts)
+}
+
+// ExcludeContext hides one context from the sidebar, leaving its file and the
+// other contexts in it where they are.
+func (s *Store) ExcludeContext(id string) (Settings, error) {
+	if id == "" {
+		return s.Get(), errors.New("context id is required")
+	}
+	return s.update(func(d *Settings) {
+		if !slices.Contains(d.ExcludedContexts, id) {
+			d.ExcludedContexts = append(d.ExcludedContexts, id)
+		}
+	})
+}
+
+// UnexcludeContext shows a hidden context again.
+func (s *Store) UnexcludeContext(id string) (Settings, error) {
+	return s.update(func(d *Settings) {
+		d.ExcludedContexts = slices.DeleteFunc(d.ExcludedContexts, func(c string) bool { return c == id })
+	})
+}
+
 // ClearExclusionsIn forgets what was hidden inside one directory, so that
 // re-adding a folder starts from a clean slate rather than quietly continuing
 // to hide files the user can no longer see listed anywhere.
@@ -1010,7 +1043,38 @@ func (s *Store) SetPortForwards(forwards []PortForward) (Settings, error) {
 	})
 }
 
+// renamedGroups maps sidebar section labels that have changed name to what
+// they are called now. The folded state is remembered under the label, so a
+// file written before a rename would otherwise unfold that section for
+// everyone who had it shut.
+var renamedGroups = map[string]string{
+	"Solutions": "Plugins",
+}
+
+// migrateGroups rewrites renamed labels in one folded list. Nil stays nil,
+// since nil is "the user has never said" and must not become a choice.
+func migrateGroups(groups []string) []string {
+	if groups == nil {
+		return nil
+	}
+	out := make([]string, 0, len(groups))
+	for _, g := range groups {
+		if now, ok := renamedGroups[g]; ok {
+			g = now
+		}
+		if !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 func normalise(s Settings) Settings {
+	s.Layout.CollapsedGroups = migrateGroups(s.Layout.CollapsedGroups)
+	for id, prefs := range s.Contexts {
+		prefs.CollapsedGroups = migrateGroups(prefs.CollapsedGroups)
+		s.Contexts[id] = prefs
+	}
 	if s.ManualFiles == nil {
 		s.ManualFiles = []string{}
 	}
@@ -1019,6 +1083,9 @@ func normalise(s Settings) Settings {
 	}
 	if s.ExcludedFiles == nil {
 		s.ExcludedFiles = []string{}
+	}
+	if s.ExcludedContexts == nil {
+		s.ExcludedContexts = []string{}
 	}
 	if s.ThemeFolders == nil {
 		s.ThemeFolders = []string{}
@@ -1340,6 +1407,7 @@ func clone(s Settings) Settings {
 	out.ManualFiles = slices.Clone(s.ManualFiles)
 	out.ManualFolders = slices.Clone(s.ManualFolders)
 	out.ExcludedFiles = slices.Clone(s.ExcludedFiles)
+	out.ExcludedContexts = slices.Clone(s.ExcludedContexts)
 	out.ThemeFolders = slices.Clone(s.ThemeFolders)
 	out.PluginFolders = slices.Clone(s.PluginFolders)
 	out.DisabledPlugins = slices.Clone(s.DisabledPlugins)

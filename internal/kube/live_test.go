@@ -161,8 +161,15 @@ func TestLiveOverviewAndNamespaces(t *testing.T) {
 		t.Error("no server version")
 	}
 	t.Logf("version %s, distribution %q, %d namespaces", overview.Version, overview.Distribution, len(overview.Namespaces))
+	// Each counter names the kind it counts, so the dashboard can open that
+	// kind's list when the tile is clicked -- and it has to be a kind the
+	// sidebar lists, or the click opens a tab on nothing.
+	wantKinds := map[string]string{"Nodes": KindNodes, "Pods": KindPods, "Deployments": KindDeployments, "Namespaces": KindNamespaces}
 	for _, s := range overview.Stats {
-		t.Logf("  %s: %d/%d", s.Label, s.Ready, s.Total)
+		t.Logf("  %s (%s): %d/%d", s.Label, s.Kind, s.Ready, s.Total)
+		if s.Kind != wantKinds[s.Label] {
+			t.Errorf("stat %q names kind %q, want %q", s.Label, s.Kind, wantKinds[s.Label])
+		}
 	}
 
 	// The dashboard's resource accounting comes from Budget now. Against a real

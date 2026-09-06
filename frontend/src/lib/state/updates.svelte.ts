@@ -16,7 +16,7 @@ export type UpdateStatus = main.UpdateStatus;
 export type Release = NonNullable<UpdateStatus['latest']>;
 
 /** The status before the backend has been asked anything. */
-const UNKNOWN: UpdateStatus = { current: '', latest: null, newer: false, unread: false, checkedAt: '', error: '' };
+const UNKNOWN: UpdateStatus = { current: '', latest: null, newer: false, unread: false, checkedAt: '', error: '', install: '', download: '' };
 
 function message(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -49,6 +49,21 @@ class Updates {
     /** Whether that release is still news: newer, and not yet marked as read. */
     get unread(): boolean {
         return this.status.unread;
+    }
+
+    /**
+     * The address of the latest release's file for this install, or empty
+     * when the backend found none -- it knows what this build is, and the
+     * release page is always there instead.
+     */
+    get download(): string {
+        return this.status.download ?? '';
+    }
+
+    /** The file the download is, for the button to name. */
+    get downloadName(): string {
+        const at = this.download.lastIndexOf('/');
+        return at === -1 ? this.download : this.download.slice(at + 1);
     }
 
     /** Reads what the backend already knows, without asking GitHub. */
@@ -87,6 +102,11 @@ class Updates {
     /** Sends the latest release's page to the browser. */
     async openRelease(): Promise<void> {
         await UpdateService.OpenRelease();
+    }
+
+    /** Sends the latest release's file for this install to the browser. */
+    async openDownload(): Promise<void> {
+        await UpdateService.OpenDownload();
     }
 }
 

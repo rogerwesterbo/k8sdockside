@@ -81,6 +81,29 @@
         return Math.round((count / card.total) * 100);
     }
 
+    /**
+     * The ring's slices: each bucket's share of the circumference and where
+     * it starts. The circle is drawn with a circumference of 100, so a share
+     * is a dash length and a start is a dash offset, and there is no
+     * trigonometry to get wrong.
+     */
+    function slices(card: CardResult): { value: string; tone: string; length: number; start: number }[] {
+        if (card.total <= 0) return [];
+        let start = 0;
+        return card.buckets.map((bucket) => {
+            const length = (bucket.count / card.total) * 100;
+            const slice = { value: bucket.value, tone: bucket.tone || 'plain', length, start };
+            start += length;
+            return slice;
+        });
+    }
+
+    /** The view listing what a card counts, so the card can open it. */
+    function viewFor(card: CardResult): string | null {
+        const view = plugin?.views.find((v) => v.kind === card.kind);
+        return view && plugin ? pluginKindFor(plugin.id, view.id) : null;
+    }
+
     /** How a value with no name reads. An absent field is not the value "". */
     function bucketLabel(value: string): string {
         return value === '' ? 'no status yet' : value;
@@ -188,10 +211,20 @@
                 <h2>What it is managing</h2>
                 <div class="cards">
                     {#each summary.cards as card (card.label + card.kind)}
+                        {@const target = viewFor(card)}
                         <article class="card" class:empty={card.error !== ''}>
                             <header>
-                                <p class="card-label">{card.label}</p>
-                                {#if card.error === ''}
+                                <!-- The card counts what one of the views lists,
+                                     so its title opens that view. -->
+                                {#if target}
+                                    <button class="card-label link" onclick={() => workspace.openTab(contextId, target)} title="Open the list">
+                                        {card.label}
+                                        <Icon name="chevron-right" size={11} />
+                                    </button>
+                                {:else}
+                                    <p class="card-label">{card.label}</p>
+                                {/if}
+                                {#if card.error === '' && !card.grouped}
                                     <p class="total">{card.total}</p>
                                 {/if}
                             </header>
@@ -201,6 +234,26 @@
                             {:else if card.total === 0}
                                 <p class="card-note">None in this cluster</p>
                             {:else if card.grouped}
+                                <!-- A ring with one slice per bucket and the
+                                     total in the middle: how much of it is red
+                                     is the first thing worth knowing. -->
+                                <div class="grouped">
+                                <div class="ring" role="img" aria-label="{card.total} {card.label}">
+                                    <svg viewBox="0 0 42 42">
+                                        <circle class="track" cx="21" cy="21" r="15.915" />
+                                        {#each slices(card) as slice (slice.value)}
+                                            <circle
+                                                class="slice {slice.tone}"
+                                                cx="21"
+                                                cy="21"
+                                                r="15.915"
+                                                stroke-dasharray="{slice.length} {100 - slice.length}"
+                                                stroke-dashoffset={25 - slice.start}
+                                            ></circle>
+                                        {/each}
+                                    </svg>
+                                    <span class="middle">{card.total}</span>
+                                </div>
                                 <ul class="buckets">
                                     {#each card.buckets as bucket (bucket.value)}
                                         <li>
@@ -218,6 +271,7 @@
                                         </li>
                                     {/each}
                                 </ul>
+                                </div>
                             {/if}
                         </article>
                     {/each}
@@ -503,6 +557,85 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .card-label.link {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 0;
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .card-label.link:hover {
+        color: var(--accent);
+    }
+
+    .grouped {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+
+    .grouped .buckets {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    /* The ring. Stroke widths are in the circle's own units, so the same
+       markup reads at any size the card gives it. */
+    .ring {
+        position: relative;
+        flex: 0 0 auto;
+        width: 84px;
+        height: 84px;
+    }
+
+    .ring svg {
+        width: 100%;
+        height: 100%;
+        transform: rotate(0deg);
+    }
+
+    .ring circle {
+        fill: none;
+        stroke-width: 5;
+    }
+
+    .ring .track {
+        stroke: var(--bg-raised);
+    }
+
+    .ring .slice {
+        stroke: var(--text-faint);
+    }
+
+    .ring .slice.ok {
+        stroke: var(--ok);
+    }
+
+    .ring .slice.warn {
+        stroke: var(--warn);
+    }
+
+    .ring .slice.error {
+        stroke: var(--error);
+    }
+
+    .ring .slice.info {
+        stroke: var(--accent);
+    }
+
+    .ring .middle {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-size: 17px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
     }
 
     .total {

@@ -130,6 +130,9 @@ See [docs/development.md](docs/development.md).
 - Watched folders, scanned by content rather than by filename
 - Per-context alias and colour, carried through tabs, dock and panels
 - Hide a discovered file, or forget one you added, and bring it back later
+- Hide a single context from its row in the sidebar — the file and its other
+  contexts stay, the kubeconfig is not written, and it is listed under
+  *Hidden* until you want it back
 - A file that fails to parse is listed with the reason, not silently dropped
 
 **Resources**
@@ -159,7 +162,7 @@ See [docs/development.md](docs/development.md).
   requests rather than live connections
 
 **Extending it**
-- Built-in **Solutions** for Argo CD, Flux and Prometheus — each unfolds into
+- Built-in **Plugins** for Argo CD, Flux and Prometheus — each unfolds into
   its own views instead of scattering custom resources through the definitions
   tree, with an overview of whether the cluster actually has it
 - A plugin is a JSON file naming kinds the app already knows how to show, so
@@ -176,7 +179,10 @@ See [docs/development.md](docs/development.md).
 **Details that matter**
 - A bell in the title bar says when a new release is out, and can be marked as
   read — one request to GitHub shortly after launch and every six hours, off
-  under *Settings → Behaviour*, with a check-now button under *About*
+  under *Settings → Behaviour*, with a check-now button under *About*. It
+  offers the release page, and the download for the way this build was
+  installed (AppImage, `.deb`, `.rpm`, Arch package, `.dmg`, Windows
+  installer or portable) when the release has one
 - Secrets are redacted before they enter the informer cache; tables show key
   counts only
 - Tabs and dock contents are restored next launch, and a tab with unsaved

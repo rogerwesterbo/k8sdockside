@@ -176,3 +176,31 @@ test('the rectangles in the table are not buttons', async () => {
 
     expect(page.getByRole('button', { name: /app — Running/ }).elements()).toHaveLength(0);
 });
+
+// A plugin view is a tab kind of its own -- plugin:argocd/applications -- but
+// the rows in it are Applications. Opening one has to ask about the kind the
+// view lists, or every describe, edit and action on it fails with "unknown
+// resource kind: plugin:argocd/applications".
+test('a row in a plugin view opens as the kind the view lists', async () => {
+    workspace.pluginCatalogue = {
+        plugins: [{
+            id: 'argocd', name: 'Argo CD', tagline: '', icon: 'rocket', author: '', docs: '', description: '',
+            origin: 'builtin', pack: '', disabled: false, requires: [],
+            views: [{ id: 'applications', label: 'Applications', icon: 'rocket', type: 'list', kind: 'crd:applications.argoproj.io', namespace: '', selector: '' }],
+        }],
+        dir: '', folders: [], problems: [],
+    };
+    render(ResourceTable, { contextId: PROD, kind: 'plugin:argocd/applications' });
+    pushed.send({
+        kind: 'crd:applications.argoproj.io',
+        columns: ['Name', 'Sync', 'Health'],
+        namespaced: true,
+        error: '',
+        rows: [{ id: 'crd:applications.argoproj.io/argocd/web', name: 'web', namespace: 'argocd',
+            cells: [plain('web'), plain('Synced'), plain('Healthy')] }],
+    });
+
+    await page.getByText('Synced').click();
+
+    expect(workspace.detailTarget).toEqual({ contextId: PROD, kind: 'crd:applications.argoproj.io', namespace: 'argocd', name: 'web' });
+});

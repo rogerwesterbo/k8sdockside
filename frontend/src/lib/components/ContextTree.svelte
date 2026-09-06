@@ -10,7 +10,7 @@
         NAV_GROUPS,
         NETWORK_GROUP,
         PLUGIN_OVERVIEW,
-        SOLUTIONS_GROUP,
+        PLUGINS_GROUP,
         pluginKindFor,
     } from '../catalogue';
     import { classify } from '../errors';
@@ -137,7 +137,7 @@
         if (!expanded) return;
         const wanted =
             !workspace.isGroupCollapsed(context.id, DEFINITIONS_GROUP) ||
-            !workspace.isGroupCollapsed(context.id, SOLUTIONS_GROUP);
+            !workspace.isGroupCollapsed(context.id, PLUGINS_GROUP);
         if (!wanted) return;
         void workspace.loadCustomKinds(context.id);
     });
@@ -263,6 +263,19 @@
             </button>
         {/if}
 
+        <!-- Hide this one context. On the row itself rather than on the file
+             heading, which is not shown by default and would hide the whole
+             file anyway. Only the app's list changes; the kubeconfig does
+             not. -->
+        <button
+            class="hide"
+            onclick={() => workspace.hideContext(context.id)}
+            title="Hide this context in k8sdockside. The kubeconfig is not changed; it is listed under Hidden, where it can be shown again."
+            aria-label="Hide {workspace.displayName(context)}"
+        >
+            <Icon name="close" size={12} />
+        </button>
+
         <!-- Reachability sits at the far right, opposite the colour swatch, so
              "which cluster is this" and "can I reach it" never get confused for
              one another. -->
@@ -319,7 +332,7 @@
                          open, the items themselves say how many there are. -->
                     {#if folded}
                         <span class="tally">
-                            {group.label === SOLUTIONS_GROUP ? workspace.enabledPlugins.length : group.items.length}
+                            {group.label === PLUGINS_GROUP ? workspace.enabledPlugins.length : group.items.length}
                         </span>
                     {/if}
                 </button>
@@ -331,7 +344,7 @@
 
                      Nested inside the heading it would fold the section on its
                      way through, so it sits beside it and stops the click. -->
-                {#if !folded && (group.label === DEFINITIONS_GROUP || group.label === SOLUTIONS_GROUP)}
+                {#if !folded && (group.label === DEFINITIONS_GROUP || group.label === PLUGINS_GROUP)}
                     {@const reading = workspace.customKindsFor(context.id).status === 'loading'}
                     <button
                         class="reload"
@@ -402,12 +415,12 @@
                         {/each}
                     {/if}
 
-                    <!-- The solutions section: one row per plugin installed on
+                    <!-- The plugins section: one row per plugin installed on
                          this machine, each unfolding into its own views. The
                          rows are the same whatever cluster this is -- a plugin
                          is installed here, not there -- and whether the cluster
                          actually has it is said in the margin. -->
-                    {#if group.label === SOLUTIONS_GROUP}
+                    {#if group.label === PLUGINS_GROUP}
                         {#if workspace.enabledPlugins.length === 0}
                             <p class="note">No plugins installed</p>
                         {:else}
@@ -633,6 +646,29 @@
     .sections:hover {
         background: var(--bg-active);
         color: var(--text);
+    }
+
+    /* Shown on hover and focus only: forty rows each carrying a cross is a
+       sidebar that looks like it wants everything gone. */
+    .hide {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        border-radius: 3px;
+        color: var(--text-faint);
+        opacity: 0;
+    }
+
+    .head:hover .hide,
+    .hide:focus-visible {
+        opacity: 1;
+    }
+
+    .hide:hover {
+        background: var(--bg-active);
+        color: var(--error);
     }
 
     .status {

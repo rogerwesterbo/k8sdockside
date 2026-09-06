@@ -45,6 +45,10 @@ type Release struct {
 	URL string `json:"url"`
 	// PublishedAt is when it went out, RFC 3339 as GitHub reports it.
 	PublishedAt string `json:"publishedAt"`
+	// Assets are the names of the app's own files on the release -- see
+	// Install.AssetName for how they are named -- so a download can be offered
+	// for the platform this build is on. Never nil once a check has succeeded.
+	Assets []string `json:"assets"`
 }
 
 // Checker fetches the latest release. Use New rather than the zero value: a
@@ -108,6 +112,9 @@ func (c *Checker) Latest(ctx context.Context) (Release, error) {
 		TagName     string `json:"tag_name"`
 		Name        string `json:"name"`
 		PublishedAt string `json:"published_at"`
+		Assets      []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return Release{}, fmt.Errorf("reading GitHub's answer: %w", err)
@@ -121,11 +128,22 @@ func (c *Checker) Latest(ctx context.Context) (Release, error) {
 	// browser, and the tag has just been checked to be a version, so nothing
 	// the network says can send the browser anywhere but this repository's
 	// own release pages.
+	// Only the app's own files are kept, by name: the download address is
+	// built from the tag and the name the same way, so nothing else the
+	// response says about them is needed.
+	assets := []string{}
+	for _, a := range payload.Assets {
+		if ownAsset(a.Name) {
+			assets = append(assets, a.Name)
+		}
+	}
+
 	return Release{
 		Version:     payload.TagName,
 		Name:        payload.Name,
 		URL:         ReleasesPage + "/tag/" + url.PathEscape(payload.TagName),
 		PublishedAt: payload.PublishedAt,
+		Assets:      assets,
 	}, nil
 }
 

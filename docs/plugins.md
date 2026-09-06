@@ -1,4 +1,4 @@
-# Solution plugins
+# Plugins
 
 A solution plugin gives something installed *in your clusters* — Argo CD, Flux,
 Prometheus — a place of its own in the sidebar, instead of leaving its custom
@@ -19,7 +19,7 @@ written today keeps working as the app grows.
 in a cluster.** Those come apart constantly — you keep the Argo CD plugin and
 open a cluster that has never heard of it — so the app never conflates them:
 
-- The sidebar shows every installed plugin under **Solutions**, for every
+- The sidebar shows every installed plugin under **Plugins**, for every
   cluster, and marks the ones this cluster does not appear to have as *not
   installed*. It does not hide them: you installed the plugin, and a row
   vanishing without explanation is worse than a row that says why it is quiet.
@@ -152,7 +152,10 @@ cross.
 ### Cards
 
 A card is one tile on the overview: how many of a kind there are, optionally
-divided by one of their own fields.
+divided by one of their own fields. A divided count is drawn as a ring with the
+total in the middle and one slice per value, coloured by its tone, with the
+values listed beside it. A card's title opens the view that lists the same
+kind, when the plugin has one.
 
 | Field | | |
 | --- | --- | --- |

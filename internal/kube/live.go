@@ -155,10 +155,10 @@ func (w *Watcher) Overview(kc Context) (Overview, error) {
 		}
 
 		out.Stats = []Stat{
-			{Label: "Nodes", Ready: nodesReady, Total: len(nodes)},
-			{Label: "Pods", Ready: podsRunning, Total: len(pods)},
-			{Label: "Deployments", Ready: deployReady, Total: deployTotal},
-			{Label: "Namespaces", Ready: len(out.Namespaces), Total: len(out.Namespaces)},
+			{Label: "Nodes", Kind: KindNodes, Ready: nodesReady, Total: len(nodes)},
+			{Label: "Pods", Kind: KindPods, Ready: podsRunning, Total: len(pods)},
+			{Label: "Deployments", Kind: KindDeployments, Ready: deployReady, Total: deployTotal},
+			{Label: "Namespaces", Kind: KindNamespaces, Ready: len(out.Namespaces), Total: len(out.Namespaces)},
 		}
 		// Capacity and requests are deliberately not computed here: they are
 		// the Budget's, which counts them for a node and a namespace as well

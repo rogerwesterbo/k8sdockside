@@ -167,6 +167,15 @@
                         </header>
                         {#if chart.error}
                             <p class="note failed" title={chart.error}>{chart.error}</p>
+                        {:else if chart.series.length === 0 && !loading}
+                            <!-- Nothing at all, as opposed to a flat line: the
+                                 metric is not there, which almost always means
+                                 nothing is scraping it. The plugin's own
+                                 description says what it needs. -->
+                            <p class="note">
+                                No data came back for this window.
+                                {#if chart.description}{chart.description}{/if}
+                            </p>
                         {:else}
                             <LineChart
                                 series={chart.series}

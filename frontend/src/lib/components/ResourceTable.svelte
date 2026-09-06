@@ -130,8 +130,10 @@
         return table.rows.filter((row) => row.cells.some((cell) => cell.text.toLowerCase().includes(needle)));
     });
 
+    // Opened as what the row is, not as the tab's kind: a plugin view's rows
+    // are the kind the view lists.
     function select(row: Row): void {
-        workspace.openDetail({ contextId, kind, namespace: row.namespace, name: row.name });
+        workspace.openDetail({ contextId, kind: workspace.listedKind(kind), namespace: row.namespace, name: row.name });
     }
 
     // A CustomResourceDefinition is the one row that leads somewhere: its name

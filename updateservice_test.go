@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,7 +35,10 @@ func newReleasesEndpoint(t *testing.T, tag string) *releasesEndpoint {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"tag_name":%q,"name":%q,"published_at":"2026-09-05T16:02:10Z"}`, e.tag.Load(), e.tag.Load())
+		tag, _ := e.tag.Load().(string)
+		version := strings.TrimPrefix(tag, "v")
+		_, _ = fmt.Fprintf(w, `{"tag_name":%q,"name":%q,"published_at":"2026-09-05T16:02:10Z","assets":[{"name":"k8sdockside-%s-linux-amd64.deb"},{"name":"k8sdockside-%s-darwin-arm64.dmg"}]}`,
+			tag, tag, version, version)
 	}))
 	t.Cleanup(e.srv.Close)
 	return e
@@ -262,4 +266,39 @@ func TestOpenReleaseWithoutAnAppFailsRatherThanPanics(t *testing.T) {
 // ignores them.
 func applicationServiceOptions() application.ServiceOptions {
 	return application.ServiceOptions{}
+}
+
+// The bell offers the file for this install, when the release has one, and
+// says what this install is so the user can see why that file.
+func TestStatusOffersTheDownloadForThisInstall(t *testing.T) {
+	s, _ := updateServiceFor(t, "v0.0.2", newReleasesEndpoint(t, "v0.0.3"))
+	s.install = updates.Install{OS: "linux", Arch: "amd64", Format: updates.FormatDeb}
+
+	got := s.Check()
+
+	if want := updates.ReleasesPage + "/download/v0.0.3/k8sdockside-0.0.3-linux-amd64.deb"; got.Download != want {
+		t.Errorf("download = %q, want %q", got.Download, want)
+	}
+	if got.Install != "Debian package, amd64" {
+		t.Errorf("install = %q", got.Install)
+	}
+}
+
+func TestStatusOffersNoDownloadWhenTheReleaseHasNoneForThisInstall(t *testing.T) {
+	s, _ := updateServiceFor(t, "v0.0.2", newReleasesEndpoint(t, "v0.0.3"))
+	s.install = updates.Install{OS: "linux", Arch: "amd64", Format: updates.FormatRPM}
+
+	if got := s.Check(); got.Download != "" {
+		t.Errorf("download = %q, want none: the release page is the fallback", got.Download)
+	}
+	if got := s.Status(); got.Install == "" {
+		t.Error("install should be described even with nothing to download")
+	}
+}
+
+func TestOpenDownloadWithoutAnAppFailsRatherThanPanics(t *testing.T) {
+	s, _ := updateServiceFor(t, "v0.0.2", newReleasesEndpoint(t, "v0.0.3"))
+	if err := s.OpenDownload(); err == nil {
+		t.Error("OpenDownload with nothing to download and no app: want an error")
+	}
 }
