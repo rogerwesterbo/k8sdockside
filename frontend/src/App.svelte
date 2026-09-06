@@ -71,6 +71,12 @@
     });
 
     function onZoomKey(event: KeyboardEvent): void {
+        // The one unmodified key: help, where every desktop app keeps it.
+        if (event.key === 'F1') {
+            event.preventDefault();
+            workspace.openHelp();
+            return;
+        }
         if (!event.metaKey && !event.ctrlKey) return;
         // `code` as well as `key`, so the numeric keypad works and so that a
         // layout where + needs shift is still recognised.
@@ -167,6 +173,10 @@
                 {:else}
                     <p>Looking for kubeconfig files…</p>
                 {/if}
+                <p class="welcome-links">
+                    <button onclick={() => workspace.openHelp()}><Icon name="help" size={13} /> How to use K8s Dockside</button>
+                    <button onclick={() => workspace.openKubernetesPrimer()}><Icon name="book" size={13} /> New to Kubernetes?</button>
+                </p>
             </div>
         </div>
     {/snippet}
@@ -251,6 +261,31 @@
 
        `contain`-style sizing keeps the mark whole at any window size, and it is
        kept out of the way of the pointer so nothing here is selectable. */
+    .welcome-links {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 18px;
+    }
+
+    .welcome-links button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 11px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-raised);
+        box-shadow: inset 0 0 0 1px var(--border-soft);
+        font-size: 12.5px;
+        color: var(--text-dim);
+    }
+
+    .welcome-links button:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
     .welcome-stage::before {
         content: '';
         position: absolute;

@@ -122,6 +122,10 @@
         moon: ['M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z'],
         // A display: the theme the OS is asking for.
         monitor: ['M4 5h16v11H4z', 'M9 20h6', 'M12 16v4'],
+        // A display with something on it: themes, and a terminal of your own.
+        // The settings rail and the terminal picker have named this all
+        // along; until now it drew as an empty box.
+        display: ['M4 5h16v11H4z', 'M9 20h6', 'M12 16v4', 'M8 9h8', 'M8 12h5'],
         // Rows at two spacings: the table density.
         rows: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
         // A letter between size marks: the root font size.
@@ -130,6 +134,10 @@
         restore: ['M3 12a9 9 0 1 0 2.6-6.4', 'M3 4v5h5', 'M12 8v4l3 2'],
         // An open book: what the app is and where it keeps things.
         info: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M12 11v5', 'M12 8h.01'],
+        // A ring with a question mark: the help page.
+        help: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7', 'M12 17h.01'],
+        // An open book: the Kubernetes primer.
+        book: ['M12 6.5c-1.5-1.3-3.8-2-7-2v13c3.2 0 5.5.7 7 2 1.5-1.3 3.8-2 7-2v-13c-3.2 0-5.5.7-7 2z', 'M12 6.5v13'],
     };
 </script>
 

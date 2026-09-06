@@ -56,6 +56,9 @@ import {
     NAV_GROUPS,
     PLUGIN_OVERVIEW,
     SETTINGS,
+    HELP,
+    KUBERNETES,
+    APP_KINDS,
     PLUGINS_GROUP,
     groupForKind,
     labelFor,
@@ -187,7 +190,7 @@ function canRestore(known: Set<string>) {
         // The tree belongs to the window, not to a cluster, so there is no
         // context for it to be known by.
         if (ref.type === 'clusters') return true;
-        if (ref.type === 'resource') return ref.kind === SETTINGS || known.has(ref.contextId);
+        if (ref.type === 'resource') return isAppTab(ref) || known.has(ref.contextId);
         return isDocumentView(ref.type) && known.has(ref.contextId);
     };
 }
@@ -327,6 +330,16 @@ function apiGroupKey(contextId: string, group: string): string {
  */
 export function isSettingsTab(tab: { kind: string }): boolean {
     return tab.kind === SETTINGS;
+}
+
+/**
+ * Whether a tab belongs to the window rather than to a cluster: settings, or
+ * one of the documentation pages. These carry no context, so everything that
+ * keys off a tab's cluster -- restoring, colouring, counting how many clusters
+ * a pane shows -- has to ask this first.
+ */
+export function isAppTab(tab: { kind: string }): boolean {
+    return APP_KINDS.includes(tab.kind);
 }
 
 /** The id the settings tab always has: one per window, belonging to nothing. */
@@ -1009,22 +1022,41 @@ class Workspace {
      * grouping the user built by hand.
      */
     openSettings(): void {
-        if (this.paneOf(SETTINGS_TAB_ID) === null) {
+        this.openAppTab(SETTINGS);
+    }
+
+    /** Opens the help page for this app, or focuses it if already open. */
+    openHelp(): void {
+        this.openAppTab(HELP);
+    }
+
+    /** Opens the Kubernetes primer, or focuses it if already open. */
+    openKubernetesPrimer(): void {
+        this.openAppTab(KUBERNETES);
+    }
+
+    /**
+     * Opens one of the window's own tabs -- settings, help, the primer -- at
+     * the far end of the strip, once. See openSettings for why the end.
+     */
+    private openAppTab(kind: string): void {
+        const id = resourceTabId('', kind);
+        if (this.paneOf(id) === null) {
             this.insertTab(
                 'main',
                 {
-                    id: SETTINGS_TAB_ID,
+                    id,
                     view: 'resource',
                     contextId: '',
-                    kind: SETTINGS,
+                    kind,
                     namespace: '',
                     name: '',
-                    title: 'Settings',
+                    title: labelFor(kind),
                 },
                 { atEnd: true },
             );
         }
-        this.activateTab(SETTINGS_TAB_ID);
+        this.activateTab(id);
     }
 
     /**
@@ -1076,7 +1108,7 @@ class Workspace {
         // A collection tab says which cluster it is looking at, and the sidebar
         // follows it there. A document or a stream does not: it is one object,
         // and you opened it from wherever you already were.
-        if (tab.view === 'resource' && !isSettingsTab(tab)) {
+        if (tab.view === 'resource' && !isAppTab(tab)) {
             this.selectContext(tab.contextId);
             this.showSectionFor(tab);
             // Asked for here rather than in selectContext, which the sidebar
@@ -1601,7 +1633,7 @@ class Workspace {
         this.ensureClustersTab();
 
         const first = this.panes.main.tabs[0];
-        if (first && first.view === 'resource' && !isSettingsTab(first)) {
+        if (first && first.view === 'resource' && !isAppTab(first)) {
             this.selectContext(first.contextId);
         }
     }
@@ -1627,7 +1659,7 @@ class Workspace {
             // The settings tab survives every sync, as the cluster tree does:
             // neither depends on a kubeconfig, so losing every cluster must not
             // close them.
-            this.retain(pane, (tab) => isSettingsTab(tab) || known.has(tab.contextId));
+            this.retain(pane, (tab) => isAppTab(tab) || known.has(tab.contextId));
         }
     }
 

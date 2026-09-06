@@ -90,15 +90,16 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 const {
     workspace,
     isSettingsTab,
+    isAppTab,
     resourceTabId,
     tabIdFor,
     CLUSTERS_TAB_ID,
     DETAILS_TAB_ID,
     clustersTab,
 } = await import('./workspace.svelte');
-const { labelFor } = await import('../catalogue');
+const { labelFor, iconFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
-const { SETTINGS } = await import('../catalogue');
+const { SETTINGS, HELP, KUBERNETES } = await import('../catalogue');
 const { ResourceService, KubeconfigService, SettingsService, ThemeService, PluginService, MetricsService } = await import(
     '../../../bindings/github.com/rogerwesterbo/k8sdockside',
 );
@@ -2466,5 +2467,50 @@ describe('listedKind', () => {
         // A view nothing installed can explain is left as it is: the backend
         // will say so, which is better than guessing.
         expect(workspace.listedKind('plugin:flux/kustomizations')).toBe('plugin:flux/kustomizations');
+    });
+});
+
+// The two documentation pages are tabs of the same shape as Settings: they
+// belong to the window, not to a cluster, and there is one of each.
+describe('the help and primer tabs', () => {
+    beforeEach(() => {
+        workspace.files = [];
+    });
+
+    test('each opens once, at the end of the strip, with no context', () => {
+        open([PROD, 'pods']);
+        workspace.activateTab(workspace.tabs[0].id);
+
+        workspace.openHelp();
+        workspace.openHelp();
+        workspace.openKubernetesPrimer();
+
+        expect(workspace.tabs.map((t) => t.kind)).toEqual(['pods', HELP, KUBERNETES]);
+        expect(workspace.activeTab?.kind).toBe(KUBERNETES);
+        expect(workspace.tabs.find((t) => t.kind === HELP)?.contextId).toBe('');
+        expect(isAppTab({ kind: HELP })).toBe(true);
+        expect(isAppTab({ kind: KUBERNETES })).toBe(true);
+        expect(isAppTab({ kind: SETTINGS })).toBe(true);
+        expect(isAppTab({ kind: 'pods' })).toBe(false);
+    });
+
+    test('they survive a sync that drops every cluster, like settings does', async () => {
+        workspace.files = [{ path: '/home/u/.kube/prod', source: 'manual', error: '',
+            contexts: [{ id: PROD, name: 'admin@prod', cluster: 'prod', user: 'admin', namespace: '', server: '', file: '/home/u/.kube/prod', current: false }] }];
+        open([PROD, 'pods']);
+        workspace.openHelp();
+        workspace.openKubernetesPrimer();
+
+        vi.mocked(KubeconfigService.Sync).mockResolvedValueOnce([]);
+        await workspace.sync();
+
+        expect(workspace.tabs.map((t) => t.kind)).toEqual([HELP, KUBERNETES]);
+    });
+
+    test('they are titled and iconed like any other tab', () => {
+        expect(labelFor(HELP)).toBe('Help');
+        expect(labelFor(KUBERNETES)).toBe('Kubernetes primer');
+        expect(iconFor(HELP)).not.toBe('box');
+        expect(iconFor(KUBERNETES)).not.toBe('box');
     });
 });

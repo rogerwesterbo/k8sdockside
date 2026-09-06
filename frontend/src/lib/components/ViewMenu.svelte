@@ -141,6 +141,15 @@
 
             <hr />
 
+            <button role="menuitem" onclick={() => run(() => workspace.openHelp())}>
+                <span class="tick"></span>
+                <span class="label">Help</span>
+                <span class="key">F1</span>
+            </button>
+            <button role="menuitem" onclick={() => run(() => workspace.openKubernetesPrimer())}>
+                <span class="tick"></span>
+                <span class="label">Kubernetes primer</span>
+            </button>
             <button role="menuitem" onclick={() => run(() => workspace.openSettings())}>
                 <span class="tick"></span>
                 <span class="label">Settings</span>

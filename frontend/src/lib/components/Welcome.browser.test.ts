@@ -6,6 +6,7 @@ vi.mock('@wailsio/runtime', async (importOriginal) => {
     return { ...actual, Window: { ...actual.Window, SetZoom: vi.fn().mockResolvedValue(undefined) } };
 });
 const { workspace } = await import('../state/workspace.svelte');
+const { HELP } = await import('../catalogue');
 const App = (await import('../../App.svelte')).default;
 
 const CTX = { id: 'c0', name: 'admin@prod', cluster: 'c0', user: 'admin',
@@ -41,4 +42,13 @@ test('opening a tab takes the logo away with the welcome panel', async () => {
 
 test('the logo does not intercept the pointer', async () => {
     expect(getComputedStyle(watermark()!, '::before').pointerEvents).toBe('none');
+});
+
+// F1 is where every desktop app keeps help, and it is the one shortcut that
+// takes no modifier.
+test('F1 opens the help page', async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F1', bubbles: true }));
+    await settle();
+
+    expect(workspace.allTabs.some((t) => t.kind === HELP)).toBe(true);
 });

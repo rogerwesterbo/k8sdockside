@@ -28,13 +28,16 @@
 
     type SectionId = (typeof SECTIONS)[number]['id'];
 
-    // Module scope, so it outlives any one instance of the component. Set from
-    // the rail below; read when a new instance mounts.
-    let remembered = $state<SectionId>('appearance');
+    /** The section to open on: the one chosen last, if it is still a section. */
+    function startSection(): SectionId {
+        const id = settingsSection.current;
+        return SECTIONS.some((s) => s.id === id) ? (id as SectionId) : 'appearance';
+    }
 </script>
 
 <script lang="ts">
     import Icon from '../Icon.svelte';
+    import { rememberSection, settingsSection } from './section.svelte';
     import AboutSection from './AboutSection.svelte';
     import AppearanceSection from './AppearanceSection.svelte';
     import BehaviourSection from './BehaviourSection.svelte';
@@ -44,11 +47,11 @@
     import PluginsSection from './PluginsSection.svelte';
     import ThemesSection from './ThemesSection.svelte';
 
-    let active = $state<SectionId>(remembered);
+    let active = $state<SectionId>(startSection());
 
     function show(id: SectionId): void {
         active = id;
-        remembered = id;
+        rememberSection(id);
     }
 
     // Up and down move between sections, as in any list of tabs. Left and right

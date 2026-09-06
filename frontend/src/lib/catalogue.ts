@@ -18,6 +18,19 @@ export const DASHBOARD = 'dashboard';
 export const SETTINGS = '__settings__';
 
 /**
+ * The two documentation pages, tabs of the same shape as Settings: they
+ * belong to the window rather than to a cluster, and there is one of each.
+ * Help is about this app; the primer is about Kubernetes itself, for the
+ * reader who has a cluster in front of them and not much idea what a
+ * ReplicaSet is.
+ */
+export const HELP = '__help__';
+export const KUBERNETES = '__kubernetes__';
+
+/** Every tab kind that belongs to the window rather than to a cluster. */
+export const APP_KINDS: readonly string[] = [SETTINGS, HELP, KUBERNETES];
+
+/**
  * Helm releases: a kind the sidebar offers that no Kubernetes API serves. It is
  * read from Helm's own release Secrets rather than watched, so the few places
  * that have to know the difference name it from here.
@@ -344,6 +357,8 @@ export function groupForKind(kind: string): string | null {
  */
 export function labelFor(kind: string): string {
     if (kind === SETTINGS) return 'Settings';
+    if (kind === HELP) return 'Help';
+    if (kind === KUBERNETES) return 'Kubernetes primer';
 
     const known = BY_KIND.get(kind);
     if (known) return known.label;
@@ -365,6 +380,8 @@ export function labelFor(kind: string): string {
 /** The icon name for a kind. Custom resources all share one. */
 export function iconFor(kind: string): string {
     if (kind === SETTINGS) return 'settings';
+    if (kind === HELP) return 'help';
+    if (kind === KUBERNETES) return 'book';
 
     const known = BY_KIND.get(kind);
     if (known) return known.icon;

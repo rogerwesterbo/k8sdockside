@@ -20,6 +20,8 @@
         DASHBOARD,
         PORT_FORWARDS,
         SETTINGS,
+        HELP,
+        KUBERNETES,
         iconFor,
         isPluginOverview,
         singularFor,
@@ -34,7 +36,7 @@
         isHorizontal,
         type PaneId,
     } from '../state/panes';
-    import { isSettingsTab, workspace } from '../state/workspace.svelte';
+    import { isAppTab, isSettingsTab, workspace } from '../state/workspace.svelte';
     import Dashboard from './Dashboard.svelte';
     import DetailPanel from './DetailPanel.svelte';
     import Icon from './Icon.svelte';
@@ -47,6 +49,8 @@
     import TerminalView from './TerminalView.svelte';
     import YamlEditor from './YamlEditor.svelte';
     import SettingsView from './settings/SettingsView.svelte';
+    import HelpPage from './HelpPage.svelte';
+    import KubernetesPage from './KubernetesPage.svelte';
 
     interface Props {
         pane: PaneId;
@@ -103,8 +107,16 @@
      * start labelling everything.
      */
     let severalClusters = $derived(
-        new Set(contents.tabs.filter((t) => !isSettingsTab(t)).map((t) => t.contextId)).size > 1,
+        new Set(contents.tabs.filter((t) => !isAppTab(t)).map((t) => t.contextId)).size > 1,
     );
+
+    /** The tooltip for a tab that belongs to the window rather than a cluster. */
+    function appHint(tab: { kind: string }): string | null {
+        if (tab.kind === SETTINGS) return 'Application settings';
+        if (tab.kind === HELP) return 'How to use K8s Dockside';
+        if (tab.kind === KUBERNETES) return 'A primer on Kubernetes and its terms';
+        return null;
+    }
 
     let tabs = $derived(
         contents.tabs.map((tab): StripTab => {
@@ -126,10 +138,10 @@
                 return {
                     id: tab.id,
                     title: tab.title,
-                    subtitle: severalClusters && !isSettingsTab(tab) ? cluster : undefined,
+                    subtitle: severalClusters && !isAppTab(tab) ? cluster : undefined,
                     icon: iconFor(tab.kind),
                     color: workspace.colorOf(tab.contextId),
-                    hint: isSettingsTab(tab) ? 'Application settings' : `${tab.title} — ${cluster}`,
+                    hint: appHint(tab) ?? `${tab.title} — ${cluster}`,
                 };
             }
             // A view onto one object always names its cluster, unlike a
@@ -336,6 +348,10 @@
                     {:else if active.view === 'resource'}
                         {#if active.kind === SETTINGS}
                             <SettingsView />
+                        {:else if active.kind === HELP}
+                            <HelpPage />
+                        {:else if active.kind === KUBERNETES}
+                            <KubernetesPage />
                         {:else if active.kind === DASHBOARD}
                             <Dashboard contextId={active.contextId} />
                         {:else if active.kind === PORT_FORWARDS}

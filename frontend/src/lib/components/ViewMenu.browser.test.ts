@@ -119,7 +119,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 
 const { workspace, CLUSTERS_TAB_ID, clustersTab } = await import('../state/workspace.svelte');
 
-const { SETTINGS } = await import('../catalogue');
+const { SETTINGS, HELP, KUBERNETES } = await import('../catalogue');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 
@@ -243,4 +243,18 @@ test('the menu opens inside the window, though its button is at the right edge',
     const box = (menu as HTMLElement).getBoundingClientRect();
     expect(box.left).toBeGreaterThanOrEqual(0);
     expect(box.right).toBeLessThanOrEqual(document.documentElement.clientWidth);
+});
+
+// The two documentation pages sit in the menu above Settings, since a menu
+// whose purpose is to be found is where help belongs too.
+test('help and the Kubernetes primer can be opened from it', async () => {
+    render(TopBar);
+
+    await openMenu();
+    await item('Help').click();
+    expect(workspace.allTabs.some((t) => t.kind === HELP)).toBe(true);
+
+    await openMenu();
+    await item('Kubernetes primer').click();
+    expect(workspace.allTabs.some((t) => t.kind === KUBERNETES)).toBe(true);
 });

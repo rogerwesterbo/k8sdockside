@@ -94,6 +94,14 @@
         <span class="divider"></span>
         <button
             class="action"
+            onclick={() => workspace.openHelp()}
+            title="Help (F1)"
+            aria-label="Help"
+        >
+            <Icon name="help" size={15} />
+        </button>
+        <button
+            class="action"
             onclick={() => workspace.openSettings()}
             title="Application settings (⌘,)"
             aria-label="Application settings"
