@@ -1,28 +1,25 @@
 <!--
-  The application shell: sidebar, tab strip, the active view, and the docked
-  detail panel. All of the state it renders lives in the workspace store.
+  The application shell: the four panes the user's views are arranged into, and
+  nothing else. All of the state it renders lives in the workspace store.
+
+  The panes are fixed places rather than a tree of splits, and what goes in each
+  of them is the user's choice -- see lib/state/panes.ts. Main fills what the
+  others leave; the side panels are there when they hold something; the bottom
+  one is always there, because a place has to be visible before anything can be
+  put in it.
+
+  Both of the things that used to have a place of their own here are tabs now:
+  the cluster tree, which cannot be closed but can be moved and hidden with
+  Cmd/Ctrl+B, and the describe panel, which follows the selection into whichever
+  pane it was last dragged to.
 -->
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { DASHBOARD, PORT_FORWARDS, SETTINGS, isPluginOverview } from './lib/catalogue';
-    import Dashboard from './lib/components/Dashboard.svelte';
-    import DetailPanel from './lib/components/DetailPanel.svelte';
-    import Dock from './lib/components/Dock.svelte';
     import Icon from './lib/components/Icon.svelte';
-    import PluginOverview from './lib/components/PluginOverview.svelte';
-    import PortForwards from './lib/components/PortForwards.svelte';
-    import ResourceTable from './lib/components/ResourceTable.svelte';
-    import SettingsView from './lib/components/settings/SettingsView.svelte';
-    import Sidebar from './lib/components/Sidebar.svelte';
-    import TabBar from './lib/components/TabBar.svelte';
+    import Pane from './lib/components/Pane.svelte';
     import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
     import { applyTheme } from './lib/theme/apply';
-
-    const MIN_SIDEBAR = 200;
-    const MAX_SIDEBAR = 520;
-
-    let draggingSidebar = $state(false);
 
     onMount(() => {
         workspace.load();
@@ -98,6 +95,14 @@
             workspace.openSettings();
             return;
         }
+        // The same key VS Code hides its sidebar with, and the reversible
+        // version of the close button the cluster tree deliberately does not
+        // have.
+        if (event.key === 'b' || event.key === 'B') {
+            event.preventDefault();
+            workspace.toggleClusters();
+            return;
+        }
         if (event.code === 'NumpadAdd') {
             event.preventDefault();
             workspace.zoomIn();
@@ -114,32 +119,6 @@
         return () => clearTimeout(timer);
     });
 
-    function startSidebarResize(event: PointerEvent): void {
-        event.preventDefault();
-        draggingSidebar = true;
-        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    }
-
-    function onSidebarResize(event: PointerEvent): void {
-        if (!draggingSidebar) return;
-        workspace.setSidebarWidth(Math.max(MIN_SIDEBAR, Math.min(event.clientX, MAX_SIDEBAR)));
-    }
-
-    function endSidebarResize(event: PointerEvent): void {
-        draggingSidebar = false;
-        (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
-    }
-
-    function onSidebarKey(event: KeyboardEvent): void {
-        const step = event.shiftKey ? 48 : 16;
-        if (event.key === 'ArrowLeft') {
-            event.preventDefault();
-            workspace.setSidebarWidth(Math.max(MIN_SIDEBAR, workspace.sidebarWidth - step));
-        } else if (event.key === 'ArrowRight') {
-            event.preventDefault();
-            workspace.setSidebarWidth(Math.min(MAX_SIDEBAR, workspace.sidebarWidth + step));
-        }
-    }
 </script>
 
 <svelte:window onkeydown={onZoomKey} />
@@ -148,88 +127,49 @@
     <TopBar />
 
     <div class="body">
-        <Sidebar />
-
-        <!-- A focusable separator is the ARIA "window splitter" pattern; the
-             a11y rules below only key off the role, which they treat as static. -->
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-            class="sidebar-handle"
-            class:active={draggingSidebar}
-            role="separator"
-            aria-label="Resize sidebar"
-            aria-orientation="vertical"
-            aria-valuenow={workspace.sidebarWidth}
-            aria-valuemin={MIN_SIDEBAR}
-            aria-valuemax={MAX_SIDEBAR}
-            tabindex="0"
-            onpointerdown={startSidebarResize}
-            onpointermove={onSidebarResize}
-            onpointerup={endSidebarResize}
-            onpointercancel={endSidebarResize}
-            onkeydown={onSidebarKey}
-        ></div>
+        <!-- Outside <main> so it keeps its full height: the bottom panel spans
+             the view and whatever is beside it, and shortening the cluster list
+             by however tall a log stream happens to be is not a trade the tree
+             should have to make. -->
+        <Pane pane="left" />
 
         <main>
-            <TabBar />
-
-            <div class="stage" class:stack={workspace.dock === 'bottom'}>
-                <div class="content">
-                    {#if workspace.activeTab}
-                        {#key workspace.activeTab.id}
-                            {#if workspace.activeTab.kind === SETTINGS}
-                                <SettingsView />
-                            {:else if workspace.activeTab.kind === DASHBOARD}
-                                <Dashboard contextId={workspace.activeTab.contextId} />
-                            {:else if workspace.activeTab.kind === PORT_FORWARDS}
-                                <PortForwards contextId={workspace.activeTab.contextId} />
-                            {:else if isPluginOverview(workspace.activeTab.kind)}
-                                <PluginOverview
-                                    contextId={workspace.activeTab.contextId}
-                                    kind={workspace.activeTab.kind}
-                                />
-                            {:else}
-                                <ResourceTable
-                                    contextId={workspace.activeTab.contextId}
-                                    kind={workspace.activeTab.kind}
-                                />
-                            {/if}
-                        {/key}
-                    {:else}
-                        <div class="welcome-stage">
-                            <div class="welcome">
-                            <h1>K8s Dockside</h1>
-                            {#if workspace.contexts.length > 0}
-                                <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
-                                <p class="hint">
-                                    Tabs take the colour of their context, so you always know which cluster you are
-                                    looking at. Drag them to reorder.
-                                </p>
-                            {:else if workspace.loaded}
-                                <p>No kubeconfig contexts yet.</p>
-                                <p class="hint">
-                                    Nothing turned up in <code>~/.kube</code> or <code>$KUBECONFIG</code>. Use the
-                                    sidebar to add kubeconfig files, or point it at a folder and it will take every
-                                    one in there, whatever they are named.
-                                </p>
-                            {:else}
-                                <p>Looking for kubeconfig files…</p>
-                            {/if}
-                            </div>
-                        </div>
-                    {/if}
-                </div>
-
-                <DetailPanel />
+            <div class="upper">
+                <Pane pane="main" empty={welcome} />
+                <Pane pane="right" />
             </div>
 
-            <!-- Under the view rather than beside the sidebar: it is about the
-                 object you were just looking at, and it keeps the sidebar
-                 whole-height so the context list is never shortened by it. -->
-            <Dock />
+            <!-- Under the view rather than beside the sidebar: it keeps the
+                 sidebar whole-height, so the context list is never shortened
+                 by whatever is open at the foot of the window. -->
+            <Pane pane="bottom" />
         </main>
     </div>
+
+    {#snippet welcome()}
+        <div class="welcome-stage">
+            <div class="welcome">
+                <h1>K8s Dockside</h1>
+                {#if workspace.contexts.length > 0}
+                    <p>Pick a context in the sidebar, then choose a view to open it as a tab.</p>
+                    <p class="hint">
+                        Tabs take the colour of their context, so you always know which cluster you are
+                        looking at. Drag them to reorder, or into another panel to keep two views side by
+                        side.
+                    </p>
+                {:else if workspace.loaded}
+                    <p>No kubeconfig contexts yet.</p>
+                    <p class="hint">
+                        Nothing turned up in <code>~/.kube</code> or <code>$KUBECONFIG</code>. Use the
+                        sidebar to add kubeconfig files, or point it at a folder and it will take every
+                        one in there, whatever they are named.
+                    </p>
+                {:else}
+                    <p>Looking for kubeconfig files…</p>
+                {/if}
+            </div>
+        </div>
+    {/snippet}
 
     <footer class="statusbar">
         {#if workspace.notice}
@@ -271,23 +211,6 @@
         min-height: 0;
     }
 
-    /* Sits over the sidebar's right border so the whole seam is grabbable. */
-    .sidebar-handle {
-        width: 5px;
-        margin-left: -3px;
-        margin-right: -2px;
-        z-index: 3;
-        cursor: col-resize;
-        background: transparent;
-        transition: background 120ms ease;
-    }
-
-    .sidebar-handle:hover,
-    .sidebar-handle.active,
-    .sidebar-handle:focus-visible {
-        background: var(--accent);
-    }
-
     main {
         display: flex;
         flex-direction: column;
@@ -300,22 +223,12 @@
         min-height: 0;
     }
 
-    .stage {
+    /* Main and the right panel share the room above the bottom one. */
+    .upper {
         display: flex;
         flex: 1 1 auto;
         min-height: 0;
         min-width: 0;
-    }
-
-    .stage.stack {
-        flex-direction: column;
-    }
-
-    .content {
-        flex: 1 1 auto;
-        min-width: 0;
-        min-height: 0;
-        overflow: hidden;
     }
 
     /* The logo as a watermark behind the idle screen. It fills the empty

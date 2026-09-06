@@ -1,7 +1,12 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
-import Dock from './Dock.svelte';
+import Pane from './Pane.svelte';
+
+// The bottom pane, which is what the dock became. It is a pane like the others
+// and differs only in what it starts out holding and in being the one that
+// keeps its strip on screen when it is empty -- a place has to be visible
+// before anything can be put in it.
 
 // The real backend answers every settings write with the whole settings file,
 // and the store adopts that answer whole. A mock answering `{}` says instead
@@ -46,6 +51,17 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         ResourceYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         ApplyYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
+    },
+    // The describe panel is a tab now, so every pane can mount it and its
+    // action bar -- which is why a test about where tabs go needs this.
+    ActionService: {
+        ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] }),
+        Delete: vi.fn().mockResolvedValue(undefined),
+        Scale: vi.fn().mockResolvedValue(undefined),
+        Restart: vi.fn().mockResolvedValue(undefined),
+        Cordon: vi.fn().mockResolvedValue(undefined),
+        Drain: vi.fn().mockResolvedValue('drain-1'),
+        CancelDrain: vi.fn(),
     },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
@@ -93,8 +109,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
         SetContextPrefs: settingsFile.keepPrefsFor(),
-        SetTabOrder: settingsFile.keep('tabOrder'),
-        SetDock: settingsFile.keep('dock'),
+        SetPanes: settingsFile.keep('panes'),
         SetLayout: settingsFile.keep('layout'),
         SetPreferences: settingsFile.keep('preferences'),
     },
@@ -136,21 +151,21 @@ function rightClick(element: Element): void {
 
 beforeEach(() => {
     workspace.closeAllDockTabs();
-    workspace.settings.dock.open = false;
+    workspace.settings.panes.bottom.open = false;
     withClusters();
 });
 
 // The whole point of a dock: it is a place things go, and a place has to be
 // there before anything is in it.
 test('the strip is on screen with nothing open, and says what it is for', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
 
     await expect.element(page.getByRole('tablist', { name: 'Dock' })).toBeVisible();
     await expect.element(page.getByText(/in the details panel/)).toBeVisible();
 });
 
 test('an object opened for editing becomes a tab named after it', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
 
     workspace.openEditor(object(PROD, 'web'));
 
@@ -163,7 +178,7 @@ test('an object opened for editing becomes a tab named after it', async () => {
 });
 
 test('folding the dock keeps the tabs and gives the room back', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     await expect.element(page.getByRole('textbox')).toBeVisible();
 
@@ -176,7 +191,7 @@ test('folding the dock keeps the tabs and gives the room back', async () => {
 });
 
 test('closing the last tab leaves the strip and its hint behind', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     await expect.element(page.getByRole('tab', { name: /web/ })).toBeVisible();
 
@@ -187,7 +202,7 @@ test('closing the last tab leaves the strip and its hint behind', async () => {
 });
 
 test('the cluster-scoped menu items appear once two clusters are open here', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     workspace.openEditor(object(STAGING, 'api'));
     await expect.element(page.getByRole('tab', { name: /api/ })).toBeVisible();
@@ -199,7 +214,7 @@ test('the cluster-scoped menu items appear once two clusters are open here', asy
 });
 
 test('an unsaved document is marked on its tab', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     await expect.element(page.getByRole('textbox')).toBeVisible();
 
@@ -212,7 +227,7 @@ test('an unsaved document is marked on its tab', async () => {
 // and gives the room back. The menu opened on a tab by activating it first, so
 // asking the active tab for its menu folded the dock out from under the menu.
 test('right-clicking the tab you are on opens the menu and leaves the dock open', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
 
@@ -225,7 +240,7 @@ test('right-clicking the tab you are on opens the menu and leaves the dock open'
 
 // The keyboard way in has the same shape and had the same fault.
 test('the menu key on the tab you are on leaves the dock open too', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     await expect.element(page.getByRole('textbox', { name: 'web as YAML' })).toBeVisible();
 
@@ -240,7 +255,7 @@ test('the menu key on the tab you are on leaves the dock open too', async () => 
 // Activating first is still right when it is a different tab: closing a
 // document you cannot see is how the wrong one gets closed.
 test('right-clicking another tab brings it forward before the menu opens', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor(object(PROD, 'web'));
     workspace.openEditor(object(PROD, 'api'));
     await expect.element(page.getByRole('textbox', { name: 'api as YAML' })).toBeVisible();
@@ -254,7 +269,7 @@ test('right-clicking another tab brings it forward before the menu opens', async
 // The dock has two views now, and the tab says which it is. Without this the
 // log view is a component nothing renders.
 test('a logs tab shows the log view rather than the editor', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
 
     workspace.openLogs(object(PROD, 'web'));
 
@@ -263,7 +278,7 @@ test('a logs tab shows the log view rather than the editor', async () => {
 });
 
 test('an edit tab still shows the editor', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
 
     workspace.openEditor(object(PROD, 'web'));
 
@@ -272,7 +287,7 @@ test('an edit tab still shows the editor', async () => {
 
 // Both views onto one object, side by side in the strip.
 test('the two views on one object are two tabs', async () => {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
 
     workspace.openEditor(object(PROD, 'web'));
     workspace.openLogs(object(PROD, 'web'));

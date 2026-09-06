@@ -8,12 +8,22 @@
   from under them.
 
   The title is centred on the window rather than in the space left over, so it
-  does not drift as the sidebar is resized.
+  does not drift as the panels are resized. The View menu sits in the space
+  that leaves on the right, which is the one part of the window that is there
+  whatever else has been hidden -- see ViewMenu.svelte.
 -->
+<script lang="ts">
+    import ViewMenu from './ViewMenu.svelte';
+</script>
+
 <header class="topbar">
     <div class="title">
         <img src="/icon-ship.svg" alt="" width="18" height="18" />
         <span>K8S Dockside</span>
+    </div>
+
+    <div class="menus">
+        <ViewMenu />
     </div>
 </header>
 
@@ -51,5 +61,15 @@
     .title img {
         display: block;
         opacity: 0.95;
+    }
+
+    /* On the right, where nothing else is: the left of the bar belongs to the
+       macOS traffic lights, and the middle to the title. */
+    .menus {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: auto;
+        padding-right: 8px;
     }
 </style>

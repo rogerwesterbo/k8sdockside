@@ -1,22 +1,19 @@
 <!--
-  What the app does on its own: what it reopens at launch, where panels appear,
-  which parts of the sidebar tree start folded, and whether it asks before
-  dropping a kubeconfig source.
+  What the app does on its own: what it reopens at launch, which parts of the
+  sidebar tree start folded, and whether it asks before dropping a kubeconfig
+  source.
+
+  Where a panel appears is not here any more. Every view is a tab now, including
+  the describe panel, and a tab's place is where it was dragged to -- a
+  preference for it would be a second answer to a question the window already
+  asks directly.
 -->
 <script lang="ts">
     import { NAV_GROUPS } from '../../catalogue';
     import { workspace } from '../../state/workspace.svelte';
-    import type { DockSide } from '../../state/workspace.svelte';
-    import SegmentedControl from './SegmentedControl.svelte';
     import SettingsRow from './SettingsRow.svelte';
     import SettingsSection from './SettingsSection.svelte';
     import Toggle from './Toggle.svelte';
-
-    const DOCKS = [
-        { value: 'left', label: 'Left', icon: 'dock-left' },
-        { value: 'bottom', label: 'Bottom', icon: 'dock-bottom' },
-        { value: 'right', label: 'Right', icon: 'dock-right' },
-    ];
 
     let overrides = $derived(workspace.foldingOverrideCount);
 </script>
@@ -30,18 +27,6 @@
             checked={workspace.restoreTabsOnLaunch}
             label="Restore tabs at launch"
             onchange={(v) => workspace.setRestoreTabs(v)}
-        />
-    </SettingsRow>
-
-    <SettingsRow
-        label="Detail panel edge"
-        hint="Which edge the describe panel slides in from. Dragging the panel changes this too."
-    >
-        <SegmentedControl
-            options={DOCKS}
-            value={workspace.dock}
-            label="Detail panel edge"
-            onchange={(v) => workspace.setDock(v as DockSide)}
         />
     </SettingsRow>
 

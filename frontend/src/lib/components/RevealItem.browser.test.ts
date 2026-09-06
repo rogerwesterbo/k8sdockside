@@ -3,7 +3,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import Sidebar from './Sidebar.svelte';
 import { NAV_GROUPS } from '../catalogue';
-import { workspace } from '../state/workspace.svelte';
+import { resourceTabId, workspace } from '../state/workspace.svelte';
 
 vi.mock('@wailsio/runtime', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@wailsio/runtime')>();
@@ -74,7 +74,7 @@ test('activating a tab brings its own row into view', async () => {
     scroller().scrollTop = 0;
     await settle();
 
-    workspace.activateTab(`${CTX.id}#customresourcedefinitions`);
+    workspace.activateTab(resourceTabId(CTX.id, 'customresourcedefinitions'));
     await settle();
 
     expect(inView(rowFor('All definitions')!)).toBe(true);

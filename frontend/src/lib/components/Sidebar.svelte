@@ -1,7 +1,10 @@
 <!--
-  The left navigation: every kubeconfig found on disk, grouped by the file it
-  came from, with the settings panel for the selected context pinned to the
-  bottom.
+  The cluster tree: every kubeconfig found on disk, grouped by the file it came
+  from, with the settings panel for the selected context pinned to the bottom.
+
+  It is the content of a tab rather than a fixed strip down the left, so it can
+  be put wherever the user wants it -- see lib/state/panes.ts. Its width belongs
+  to the pane holding it, which is why nothing here sets one.
 -->
 <script lang="ts">
     import { workspace } from '../state/workspace.svelte';
@@ -36,7 +39,7 @@
     }
 </script>
 
-<aside class="sidebar" style:width="{workspace.sidebarWidth}px">
+<aside class="sidebar">
     <header class="top">
         <span class="heading">Clusters</span>
         <span class="count">{total}</span>
@@ -215,19 +218,18 @@
     .sidebar {
         display: flex;
         flex-direction: column;
-        /* Its width is a decision, not a suggestion. Without this it is a
-           shrinkable flex item, and anything wide to its right -- a describe
-           panel dragged out, a table of many columns -- takes the row over its
-           width and the context list is what gives, down to a strip of colour
-           with dragging it wider undone as soon as you let go. */
-        flex: 0 0 auto;
+        /* Fills the pane holding it, which is what decides how wide it is. The
+           width being a decision rather than a suggestion still matters, and is
+           now the pane's business: without it a wide table beside the tree
+           would take the row over and the context list would be what gave,
+           down to a strip of colour that sprang back on release. */
+        flex: 1 1 auto;
         min-width: 0;
-        height: 100%;
+        min-height: 0;
         /* With minimums on the rows inside, the column can be asked for more
            than it has; clipping is better than spilling over the status bar. */
         overflow: hidden;
         background: var(--bg-sidebar);
-        border-right: 1px solid var(--border);
     }
 
     .top {

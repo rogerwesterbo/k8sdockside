@@ -78,15 +78,22 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     SettingsService: {
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
-        SetTabOrder: vi.fn().mockResolvedValue({}),
-        SetDock: vi.fn().mockResolvedValue({}),
+        SetPanes: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
         SetPreferences: vi.fn().mockResolvedValue({}),
         SetContextPrefs: vi.fn().mockResolvedValue({}),
     },
 }));
 
-const { workspace, isSettingsTab } = await import('./workspace.svelte');
+const {
+    workspace,
+    isSettingsTab,
+    resourceTabId,
+    tabIdFor,
+    CLUSTERS_TAB_ID,
+    DETAILS_TAB_ID,
+    clustersTab,
+} = await import('./workspace.svelte');
 const { labelFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { SETTINGS } = await import('../catalogue');
@@ -96,6 +103,16 @@ const { ResourceService, KubeconfigService, SettingsService, ThemeService, Plugi
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 const STAGING = '/home/u/.kube/staging::admin@staging';
+
+/** One saved collection tab, as the settings file holds it. */
+function resource(contextId: string, kind: string) {
+    return { type: 'resource', contextId, kind, namespace: '', name: '' };
+}
+
+/** One saved editor tab, as the settings file holds it. */
+function document(contextId: string, name: string, namespace = 'default', kind = 'pods') {
+    return { type: 'edit', contextId, kind, namespace, name };
+}
 
 /** Opens tabs in order and returns their ids. */
 function open(...pairs: [string, string][]): string[] {
@@ -258,7 +275,7 @@ describe('openTab placement', () => {
 
         workspace.openTab(PROD, 'services');
         // Deactivate without closing, the state a restored session starts in.
-        workspace.activeTabId = null;
+        workspace.panes.main.activeId = null;
         workspace.openTab(PROD, 'events');
 
         expect(workspace.tabs.map((t) => t.kind)).toEqual(['services', 'events']);
@@ -513,7 +530,7 @@ describe('revealing the context a tab belongs to', () => {
         open([PROD, 'pods']);
         workspace.openTab(STAGING, 'nodes');
 
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         expect(workspace.reveal?.contextId).toBe(PROD);
     });
@@ -522,10 +539,10 @@ describe('revealing the context a tab belongs to', () => {
     // cluster?", so it has to reveal again rather than do nothing.
     test('re-activating the same tab reveals again', () => {
         open([PROD, 'pods']);
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
         const first = workspace.reveal?.nonce;
 
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         expect(workspace.reveal?.nonce).not.toBe(first);
         expect(workspace.reveal?.contextId).toBe(PROD);
@@ -545,7 +562,11 @@ describe('revealing the context a tab belongs to', () => {
         open([PROD, 'pods'], [STAGING, 'pods']);
         const seen = new Set<number>();
 
-        for (const tab of [`${PROD}#pods`, `${STAGING}#pods`, `${PROD}#pods`]) {
+        for (const tab of [
+            resourceTabId(PROD, 'pods'),
+            resourceTabId(STAGING, 'pods'),
+            resourceTabId(PROD, 'pods'),
+        ]) {
             workspace.activateTab(tab);
             seen.add(workspace.reveal!.nonce);
         }
@@ -770,7 +791,7 @@ describe('showing the section an activated tab lives in', () => {
         workspace.toggleGroup(PROD, 'Admission');
         expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(true);
 
-        workspace.activateTab(`${PROD}#mutatingwebhookconfigurations`);
+        workspace.activateTab(resourceTabId(PROD, 'mutatingwebhookconfigurations'));
 
         expect(workspace.isGroupCollapsed(PROD, 'Admission')).toBe(false);
     });
@@ -780,7 +801,7 @@ describe('showing the section an activated tab lives in', () => {
         workspace.openTab(PROD, 'pods');
         workspace.toggleGroup(PROD, 'Admission');
 
-        workspace.activateTab(`${PROD}#mutatingwebhookconfigurations`);
+        workspace.activateTab(resourceTabId(PROD, 'mutatingwebhookconfigurations'));
 
         expect(workspace.isGroupCollapsed(STAGING, 'Admission')).toBe(true);
     });
@@ -790,7 +811,7 @@ describe('showing the section an activated tab lives in', () => {
     test('a tab in an open section leaves the folding alone', () => {
         workspace.openTab(PROD, 'pods');
 
-        workspace.activateTab(`${PROD}#pods`);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
@@ -798,7 +819,7 @@ describe('showing the section an activated tab lives in', () => {
     test('a custom resource tab is harmless, having no section', () => {
         workspace.openTab(PROD, 'crd:certificates.cert-manager.io');
 
-        expect(() => workspace.activateTab(`${PROD}#crd:certificates.cert-manager.io`)).not.toThrow();
+        expect(() => workspace.activateTab(resourceTabId(PROD, 'crd:certificates.cert-manager.io'))).not.toThrow();
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
 
@@ -808,7 +829,7 @@ describe('showing the section an activated tab lives in', () => {
         workspace.openTab(PROD, 'dashboard');
         workspace.openTab(PROD, 'pods');
 
-        workspace.activateTab(`${PROD}#dashboard`);
+        workspace.activateTab(resourceTabId(PROD, 'dashboard'));
 
         expect(workspace.hasFoldingOverride(PROD)).toBe(false);
     });
@@ -1184,10 +1205,7 @@ describe('restoring tabs at launch', () => {
     });
 
     test('reopens last session, settings tab included', async () => {
-        workspace.settings.tabOrder = [
-            { contextId: PROD, kind: 'pods' },
-            { contextId: '', kind: SETTINGS },
-        ];
+        workspace.settings.panes.main.tabs = [resource(PROD, 'pods'), resource('', SETTINGS)];
         workspace.settings.preferences.restoreTabs = true;
 
         await workspace.sync({ restoreTabs: true });
@@ -1196,10 +1214,7 @@ describe('restoring tabs at launch', () => {
     });
 
     test('drops a remembered tab whose cluster has gone, but keeps settings', async () => {
-        workspace.settings.tabOrder = [
-            { contextId: STAGING, kind: 'pods' },
-            { contextId: '', kind: SETTINGS },
-        ];
+        workspace.settings.panes.main.tabs = [resource(STAGING, 'pods'), resource('', SETTINGS)];
         workspace.settings.preferences.restoreTabs = true;
 
         await workspace.sync({ restoreTabs: true });
@@ -1208,8 +1223,8 @@ describe('restoring tabs at launch', () => {
     });
 
     test('turned off, it starts empty but leaves the remembered order alone', async () => {
-        const order = [{ contextId: PROD, kind: 'pods' }];
-        workspace.settings.tabOrder = order;
+        const order = [resource(PROD, 'pods')];
+        workspace.settings.panes.main.tabs = order;
         workspace.settings.preferences.restoreTabs = false;
 
         await workspace.sync({ restoreTabs: true });
@@ -1217,11 +1232,11 @@ describe('restoring tabs at launch', () => {
         expect(workspace.tabs).toHaveLength(0);
         // The order is what turning it back on has to restore, so the launch
         // that skipped it must not have overwritten it.
-        expect(workspace.settings.tabOrder).toEqual(order);
+        expect(workspace.settings.panes.main.tabs).toEqual(order);
     });
 
     test('a settings tab restored first does not select a context', async () => {
-        workspace.settings.tabOrder = [{ contextId: '', kind: SETTINGS }];
+        workspace.settings.panes.main.tabs = [resource('', SETTINGS)];
         workspace.settings.preferences.restoreTabs = true;
         workspace.selectedContextId = null;
 
@@ -1242,7 +1257,7 @@ describe('the dock', () => {
 
     beforeEach(() => {
         workspace.closeAllDockTabs();
-        workspace.settings.dock.open = false;
+        workspace.settings.panes.bottom.open = false;
         expect(workspace.dockTabs).toHaveLength(0);
     });
 
@@ -1403,9 +1418,7 @@ describe('restoring the dock at launch', () => {
     });
 
     test('reopens the editors from last session', async () => {
-        workspace.settings.dock.tabs = [
-            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
-        ];
+        workspace.settings.panes.bottom.tabs = [document(PROD, 'web')];
 
         await workspace.sync({ restoreTabs: true });
 
@@ -1414,10 +1427,10 @@ describe('restoring the dock at launch', () => {
     });
 
     test('skips a tab whose cluster has gone, and a view this build does not have', async () => {
-        workspace.settings.dock.tabs = [
-            { type: 'edit', contextId: STAGING, kind: 'pods', namespace: 'default', name: 'gone' },
-            { type: 'terminal', contextId: PROD, kind: 'pods', namespace: 'default', name: 'future' },
-            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
+        workspace.settings.panes.bottom.tabs = [
+            document(STAGING, 'gone'),
+            { ...document(PROD, 'future'), type: 'terminal' },
+            document(PROD, 'web'),
         ];
 
         await workspace.sync({ restoreTabs: true });
@@ -1426,60 +1439,61 @@ describe('restoring the dock at launch', () => {
     });
 
     test('turned off, the dock starts empty but the remembered tabs are left alone', async () => {
-        const remembered = [
-            { type: 'edit', contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' },
-        ];
-        workspace.settings.dock.tabs = remembered;
+        const remembered = [document(PROD, 'web')];
+        workspace.settings.panes.bottom.tabs = remembered;
         workspace.settings.preferences.restoreTabs = false;
 
         await workspace.sync({ restoreTabs: true });
 
         expect(workspace.dockTabs).toHaveLength(0);
-        expect(workspace.settings.dock.tabs).toEqual(remembered);
+        expect(workspace.settings.panes.bottom.tabs).toEqual(remembered);
     });
 });
 
 describe('saving settings', () => {
-    // The bug this guards against: opening an editor adds a dock tab and
-    // unfolds the dock, and any other settings write already on its way answers
-    // with the file as it was before either happened. Adopting that answer
-    // whole shut the dock again a quarter of a second after it opened.
+    // The bug this guards against: opening an editor fills the bottom pane and
+    // unfolds it, and a settings write from another section already on its way
+    // answers with the file as it was before either happened. Adopting that
+    // answer whole shut the pane again a quarter of a second after it opened.
+    //
+    // Putting every pane in one section removed the version of this that had
+    // two of them racing each other. What is left is the cross-section case,
+    // which is the one adopt()'s pending guard exists for.
     test('an answer from a write in flight does not roll back a later change', async () => {
         vi.useFakeTimers();
         let landed: (saved: unknown) => void = () => {};
         try {
-            // The tab-order call answers with a file that predates the dock
-            // being opened, which is what one in flight really carries...
-            vi.mocked(SettingsService.SetTabOrder).mockResolvedValue({} as never);
-            // ...while the dock's own call is still out, so its answer cannot
+            // The layout call answers with a file that predates the pane being
+            // filled, which is what one in flight really carries...
+            vi.mocked(SettingsService.SetLayout).mockResolvedValue({} as never);
+            // ...while the panes' own call is still out, so its answer cannot
             // be what puts things right.
-            vi.mocked(SettingsService.SetDock).mockReturnValue(
+            vi.mocked(SettingsService.SetPanes).mockReturnValue(
                 new Promise((resolve) => {
                     landed = resolve;
                 }) as never,
             );
 
-            workspace.openTab(PROD, 'pods');
-            const tab = workspace.activeTabId!;
-            await vi.advanceTimersByTimeAsync(1000);
-
-            // One gesture, two sections: the strip above loses a tab and the
-            // dock below gains one.
-            workspace.closeTab(tab);
+            workspace.setSidebarWidth(300);
             workspace.openEditor({ contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' });
             await vi.advanceTimersByTimeAsync(1000);
 
             expect(workspace.dockTabs.map((t) => t.name)).toEqual(['web']);
             expect(workspace.dockOpen).toBe(true);
-            // And what was sent is the dock as it actually stood.
-            expect(SettingsService.SetDock).toHaveBeenCalledWith(
-                expect.objectContaining({ open: true, tabs: [expect.objectContaining({ name: 'web' })] }),
+            // And what was sent is the pane as it actually stood.
+            expect(SettingsService.SetPanes).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    bottom: expect.objectContaining({
+                        open: true,
+                        tabs: [expect.objectContaining({ name: 'web' })],
+                    }),
+                }),
             );
         } finally {
             landed({});
             vi.useRealTimers();
-            vi.mocked(SettingsService.SetTabOrder).mockReset().mockResolvedValue({} as never);
-            vi.mocked(SettingsService.SetDock).mockReset().mockResolvedValue({} as never);
+            vi.mocked(SettingsService.SetLayout).mockReset().mockResolvedValue({} as never);
+            vi.mocked(SettingsService.SetPanes).mockReset().mockResolvedValue({} as never);
         }
     });
 });
@@ -1951,5 +1965,433 @@ describe('solution plugins', () => {
         workspace.openPluginOverview(PROD, 'argocd');
 
         expect(workspace.activeTab?.kind).toBe('plugin:argocd/overview');
+    });
+});
+
+// The point of panes: which one a view lives in is the user's answer, not the
+// view type's. A pod list can sit at the foot and an editor can fill the middle.
+describe('moving a view between panes', () => {
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    beforeEach(() => {
+        workspace.closeAllTabsIn('main');
+        workspace.closeAllTabsIn('right');
+        workspace.closeAllTabsIn('bottom');
+    });
+
+    test('a collection opens in the middle and a document at the foot', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+
+        expect(workspace.panes.main.tabs.map((t) => t.kind)).toEqual(['pods']);
+        expect(workspace.panes.bottom.tabs.map((t) => t.name)).toEqual(['web']);
+    });
+
+    test('a tab dragged to another pane leaves the first and lands focused', () => {
+        workspace.openEditor(WEB);
+        const id = workspace.panes.bottom.tabs[0].id;
+
+        workspace.moveTabToPane(id, 'right');
+
+        expect(workspace.panes.bottom.tabs).toHaveLength(0);
+        expect(workspace.panes.right.tabs.map((t) => t.id)).toEqual([id]);
+        expect(workspace.panes.right.activeId).toBe(id);
+    });
+
+    // The reason a tab id says what it shows rather than which one it is: an
+    // editor moved across the window is the same editor, with the same buffer.
+    test('a moved tab keeps its id, so what is open in it survives the move', () => {
+        workspace.openEditor(WEB);
+        const before = workspace.panes.bottom.tabs[0].id;
+
+        workspace.moveTabToPane(before, 'main');
+
+        expect(workspace.panes.main.tabs.map((t) => t.id)).toEqual([before]);
+        // And it is still the tab the editor's own state is filed under.
+        expect(workspace.isEditing(WEB)).toBe(true);
+    });
+
+    test('reopening a view that has been moved focuses it where it was put', () => {
+        workspace.openEditor(WEB);
+        workspace.moveTabToPane(workspace.panes.bottom.tabs[0].id, 'right');
+        workspace.panes.right.activeId = null;
+
+        workspace.openEditor(WEB);
+
+        expect(workspace.panes.bottom.tabs).toHaveLength(0);
+        expect(workspace.panes.right.activeId).toBe(workspace.panes.right.tabs[0].id);
+    });
+
+    test('a tab dropped at a position lands there rather than at the end', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openTab(PROD, 'nodes');
+        workspace.openEditor(WEB);
+        const editor = workspace.panes.bottom.tabs[0].id;
+
+        workspace.moveTabToPane(editor, 'main', 0);
+
+        expect(workspace.panes.main.tabs.map((t) => t.id)[0]).toBe(editor);
+    });
+
+    test('emptying the bottom pane by dragging its last tab out folds it', () => {
+        workspace.openEditor(WEB);
+        expect(workspace.dockOpen).toBe(true);
+
+        workspace.moveTabToPane(workspace.panes.bottom.tabs[0].id, 'main');
+
+        expect(workspace.panes.bottom.open).toBe(false);
+    });
+
+    test('moving a tab to the pane it is already in only reorders it', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openTab(PROD, 'nodes');
+        const [pods, nodes] = workspace.panes.main.tabs.map((t) => t.id);
+
+        workspace.moveTabToPane(nodes, 'main', 0);
+
+        expect(workspace.panes.main.tabs.map((t) => t.id)).toEqual([nodes, pods]);
+    });
+
+    test('closing a tab in one pane leaves the others alone', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+        const editor = workspace.panes.bottom.tabs[0].id;
+
+        workspace.closeAllTabsIn('main');
+
+        expect(workspace.panes.bottom.tabs.map((t) => t.id)).toEqual([editor]);
+    });
+
+    test('every pane is written as one section, so a move cannot half-save', async () => {
+        vi.useFakeTimers();
+        try {
+            workspace.openEditor(WEB);
+            await vi.advanceTimersByTimeAsync(1000);
+            vi.mocked(SettingsService.SetPanes).mockClear();
+
+            workspace.moveTabToPane(workspace.panes.bottom.tabs[0].id, 'right');
+            // The write is debounced, because a drag moves a tab on every
+            // pointer move and one drag should cost one save.
+            await vi.advanceTimersByTimeAsync(1000);
+
+            // The call carries both halves of the move: the pane it left is
+            // empty in the same value that shows the pane it arrived in.
+            const sent = vi.mocked(SettingsService.SetPanes).mock.lastCall?.[0] as unknown as {
+                right: { tabs: unknown[] };
+                bottom: { tabs: unknown[] };
+            };
+            expect(sent.bottom.tabs).toHaveLength(0);
+            expect(sent.right.tabs).toHaveLength(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+// The cluster tree is a view like the others -- it can be moved -- with one
+// difference: it cannot be closed, because it is how everything else is opened.
+describe('the cluster tree', () => {
+    beforeEach(() => {
+        workspace.closeAllTabsIn('main');
+        workspace.closeAllTabsIn('right');
+        workspace.closeAllTabsIn('bottom');
+        if (workspace.paneOf(CLUSTERS_TAB_ID) === null) {
+            workspace.panes.left.tabs = [clustersTab()];
+        }
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'left');
+        workspace.setPaneOpen('left', true);
+    });
+
+    test('starts in the left panel', () => {
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+    });
+
+    test('closing it does nothing, because there would be no way back', () => {
+        workspace.closeTab(CLUSTERS_TAB_ID);
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+    });
+
+    test('"close all" in its pane spares it and takes the rest', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.moveTabToPane(resourceTabId(PROD, 'pods'), 'left');
+
+        workspace.closeAllTabsIn('left');
+
+        expect(workspace.panes.left.tabs.map((t) => t.id)).toEqual([CLUSTERS_TAB_ID]);
+    });
+
+    test('but it can be moved, like anything else', () => {
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'right');
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('right');
+        expect(workspace.panes.left.tabs).toHaveLength(0);
+    });
+
+    // Hiding is the reversible thing a close button looks like it would do.
+    test('hiding it folds the pane it is in, and asking again brings it back', () => {
+        workspace.toggleClusters();
+        expect(workspace.isPaneOpen('left')).toBe(false);
+
+        workspace.toggleClusters();
+        expect(workspace.isPaneOpen('left')).toBe(true);
+        expect(workspace.panes.left.activeId).toBe(CLUSTERS_TAB_ID);
+    });
+
+    test('hiding follows it to whichever pane it was moved to', () => {
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'bottom');
+
+        workspace.toggleClusters();
+
+        expect(workspace.isPaneOpen('bottom')).toBe(false);
+        expect(workspace.isPaneOpen('left')).toBe(false);
+    });
+
+    // A settings file that has lost it -- hand-edited, or written before it was
+    // a tab -- must not open a window with no way to navigate.
+    test('a restored session with no tree in it gets one back', async () => {
+        workspace.settings.panes.left.tabs = [];
+        workspace.settings.panes.main.tabs = [];
+        workspace.settings.panes.right.tabs = [];
+        workspace.settings.panes.bottom.tabs = [];
+        workspace.settings.preferences.restoreTabs = true;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+    });
+
+    // ...including with tab restoring turned off, which starts from empty panes
+    // and so never reaches the copy the store keeps.
+    test('it is there even when last session is deliberately not restored', async () => {
+        workspace.settings.preferences.restoreTabs = false;
+
+        await workspace.sync({ restoreTabs: true });
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).not.toBeNull();
+        workspace.settings.preferences.restoreTabs = true;
+    });
+
+    test('losing every cluster does not take it away', async () => {
+        workspace.files = [];
+
+        await workspace.sync();
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).not.toBeNull();
+    });
+});
+
+// The way out of an arrangement that has gone wrong. It gives up the
+// arrangement, never the work: a reset closes nothing.
+describe('resetting the layout', () => {
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    beforeEach(() => {
+        workspace.closeAllTabsIn('main');
+        workspace.closeAllTabsIn('right');
+        workspace.closeAllTabsIn('bottom');
+        if (workspace.paneOf(CLUSTERS_TAB_ID) === null) {
+            workspace.panes.left.tabs = [clustersTab()];
+        }
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'left');
+    });
+
+    test('sends every view back to the pane its kind opens in', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+        // Everything piled into one pane, which is the state this undoes.
+        workspace.moveTabToPane(resourceTabId(PROD, 'pods'), 'right');
+        workspace.moveTabToPane(tabIdFor('edit', WEB), 'right');
+
+        workspace.resetLayout();
+
+        expect(workspace.panes.main.tabs.map((t) => t.kind)).toEqual(['pods']);
+        expect(workspace.panes.bottom.tabs.map((t) => t.name)).toEqual(['web']);
+        expect(workspace.panes.right.tabs).toHaveLength(0);
+    });
+
+    test('closes nothing: the tabs are the work, only their places are given up', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openEditor(WEB);
+        const before = workspace.allTabs.length;
+
+        workspace.resetLayout();
+
+        expect(workspace.allTabs).toHaveLength(before);
+        // And the editor is still the same editor, so nothing in it was lost.
+        expect(workspace.isEditing(WEB)).toBe(true);
+    });
+
+    test('brings back a panel that had been hidden, and the tree with it', () => {
+        workspace.toggleClusters();
+        expect(workspace.isPaneOpen('left')).toBe(false);
+
+        workspace.resetLayout();
+
+        expect(workspace.paneOf(CLUSTERS_TAB_ID)).toBe('left');
+        expect(workspace.isPaneOpen('left')).toBe(true);
+    });
+
+    test('puts the sizes back', () => {
+        workspace.setPaneSize('left', 500);
+
+        workspace.resetLayout();
+
+        expect(workspace.panes.left.size).toBe(260);
+    });
+
+    test('leaves the bottom pane folded when the reset put nothing in it', () => {
+        workspace.openTab(PROD, 'pods');
+
+        workspace.resetLayout();
+
+        expect(workspace.panes.bottom.open).toBe(false);
+    });
+
+    // One tree, not two: it is already in a fresh set of panes, so the one the
+    // user had must not be added beside it.
+    test('does not end up with two cluster trees', () => {
+        workspace.moveTabToPane(CLUSTERS_TAB_ID, 'bottom');
+
+        workspace.resetLayout();
+
+        expect(workspace.allTabs.filter((t) => t.view === 'clusters')).toHaveLength(1);
+    });
+});
+
+
+// The describe panel used to dock to an edge of the window with a size, a
+// resize handle and three position buttons of its own -- a second layout system
+// for one panel. It is a tab now, so it goes where the user drags it and is
+// sized by the pane it lands in. What it does not become is a tab per object:
+// it follows the selection, because reading down a list is the thing people
+// actually do with it.
+describe('the describe tab', () => {
+    const HT1 = { contextId: PROD, kind: 'nodes', namespace: '', name: 'ht1' };
+    const HT2 = { contextId: PROD, kind: 'nodes', namespace: '', name: 'ht2' };
+    const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
+
+    beforeEach(() => {
+        workspace.closeDetail();
+        for (const pane of ['main', 'right', 'bottom'] as const) workspace.closeAllTabsIn(pane);
+        workspace.settings.layout.detailPane = 'right';
+    });
+
+    test('opens beside the list rather than under it', async () => {
+        await workspace.openDetail(HT1);
+
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('right');
+        expect(workspace.isPaneOpen('right')).toBe(true);
+    });
+
+    test('describing a second row refills the tab rather than opening another', async () => {
+        await workspace.openDetail(HT1);
+        await workspace.openDetail(HT2);
+
+        expect(workspace.allTabs.filter((t) => t.view === 'details')).toHaveLength(1);
+        expect(workspace.detailTarget?.name).toBe('ht2');
+    });
+
+    test('wears the name of what it is describing', async () => {
+        await workspace.openDetail(HT1);
+
+        expect(workspace.tabFor(DETAILS_TAB_ID)?.title).toBe('ht1');
+    });
+
+    // The gesture that replaces the three dock buttons.
+    test('stays where it was dragged, and the next selection opens it there', async () => {
+        await workspace.openDetail(HT1);
+        workspace.moveTabToPane(DETAILS_TAB_ID, 'bottom');
+        workspace.closeDetail();
+
+        await workspace.openDetail(HT2);
+
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
+    });
+
+    test('closing it and selecting again brings it back', async () => {
+        await workspace.openDetail(HT1);
+        workspace.closeTab(DETAILS_TAB_ID);
+        expect(workspace.detailTarget).toBeNull();
+
+        await workspace.openDetail(HT2);
+
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('right');
+    });
+
+    // The report describes a row in a list, so it goes when you leave that list.
+    test('closes when a different list is brought forward', async () => {
+        workspace.openTab(PROD, 'nodes');
+        workspace.openTab(PROD, 'pods');
+        // On the nodes list, describing a node in it.
+        workspace.activateTab(resourceTabId(PROD, 'nodes'));
+        await workspace.openDetail(HT1);
+
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
+
+        expect(workspace.detailTarget).toBeNull();
+        expect(workspace.paneOf(DETAILS_TAB_ID)).toBeNull();
+    });
+
+    // A round trip you can make now that the report is a tab beside the list:
+    // clicking back to the very list the object came from is not leaving it.
+    test('survives going back to the list the object came from', async () => {
+        workspace.openTab(PROD, 'nodes');
+        await workspace.openDetail(HT1);
+        workspace.moveTabToPane(DETAILS_TAB_ID, 'main');
+
+        workspace.activateTab(resourceTabId(PROD, 'nodes'));
+
+        expect(workspace.detailTarget?.name).toBe('ht1');
+    });
+
+    test('closes when the list it was read from is closed', async () => {
+        workspace.openTab(PROD, 'nodes');
+        await workspace.openDetail(HT1);
+
+        workspace.closeTab(resourceTabId(PROD, 'nodes'));
+
+        expect(workspace.detailTarget).toBeNull();
+    });
+
+    test('is left alone when some other list is closed', async () => {
+        workspace.openTab(PROD, 'nodes');
+        workspace.openTab(PROD, 'pods');
+        await workspace.openDetail(WEB);
+        workspace.activateTab(resourceTabId(PROD, 'pods'));
+
+        workspace.closeTab(resourceTabId(PROD, 'nodes'));
+
+        expect(workspace.detailTarget?.name).toBe('web');
+    });
+
+    // It comes and goes with the selection, so there is nothing to restore it
+    // against: a saved tab would come back describing nothing.
+    test('is never written to the settings file', async () => {
+        vi.mocked(SettingsService.SetPanes).mockClear();
+        workspace.openTab(PROD, 'nodes');
+        await workspace.openDetail(HT1);
+        // The panes are written on a 250ms debounce, so the assertion has to
+        // wait for the write it is about rather than race it.
+        await new Promise((r) => setTimeout(r, 400));
+
+        const calls = vi.mocked(SettingsService.SetPanes).mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        const written = calls.at(-1)?.[0];
+        const tabs = [written?.main, written?.right, written?.bottom].flatMap(
+            (pane) => pane?.tabs ?? [],
+        );
+        // The list it was read from is there; the report itself is not.
+        expect(tabs.map((t) => t.type)).toContain('resource');
+        expect(tabs.map((t) => t.type)).not.toContain('details');
+    });
+
+    test('goes back to the pane it opens in when the layout is reset', async () => {
+        await workspace.openDetail(HT1);
+        workspace.moveTabToPane(DETAILS_TAB_ID, 'bottom');
+
+        workspace.resetLayout();
+
+        expect(workspace.settings.layout.detailPane).toBe('right');
     });
 });

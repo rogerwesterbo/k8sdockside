@@ -68,7 +68,7 @@ vi.mock('../../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue('/home/u/.config/k8sdockside/settings.json'),
         About: vi.fn().mockResolvedValue({ version: 'test', wails: 'test', go: 'test', platform: 'test' }),
-        SetTabOrder: vi.fn().mockResolvedValue({}),
+        SetPanes: vi.fn().mockResolvedValue({}),
         SetLayout: vi.fn().mockResolvedValue({}),
         SetPreferences: vi.fn().mockResolvedValue({}),
         SetContextPrefs: vi.fn().mockResolvedValue({}),

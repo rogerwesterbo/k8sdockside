@@ -7,8 +7,12 @@
 
   What it deliberately does not know is what a tab *is*. The caller hands it
   colours and titles already resolved and gets back "the user asked for this
-  one", which is what lets the dock's tabs be objects while the strip above it
-  holds resource kinds.
+  one", which is what lets one pane's tabs be objects while another's are
+  resource kinds.
+
+  It does know which pane it belongs to, and only for the drag: a tab dragged
+  out of one strip and into another is a move rather than a reorder, and the
+  strip under the pointer has to be able to tell which it is looking at.
 -->
 <script lang="ts" module>
     /** One tab, as the strip needs it. */
@@ -24,12 +28,22 @@
         hint?: string;
         /** Draws an unsaved-changes marker in place of the close button. */
         modified?: boolean;
+        /**
+         * Whether the tab has a close button. Default true.
+         *
+         * A tab without one is a tab the user cannot strand themselves by
+         * closing -- the cluster tree, which is how everything else gets
+         * opened. It can still be moved to another pane, and its pane can
+         * still be hidden.
+         */
+        closable?: boolean;
     }
 </script>
 
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { alpha, textOn } from '../colors';
+    import { beginTabDrag, currentTabDrag, endTabDrag, type PaneId } from '../state/panes';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -37,10 +51,17 @@
         activeId: string | null;
         /** Names the strip for a screen reader: "Open views", "Dock". */
         label: string;
+        /** Which pane this strip belongs to, so a drag knows where it started. */
+        pane: PaneId;
         onactivate: (id: string) => void;
         onclose: (id: string) => void;
         /** Both indices are positions in `tabs`. */
         onmove: (from: number, to: number) => void;
+        /**
+         * A tab dragged in from another pane, dropped at this position. Left
+         * out by a strip that will not accept them.
+         */
+        onadopt?: (id: string, from: PaneId, index: number) => void;
         /** The right-click menu's items. `dismiss` closes the menu. */
         menu?: Snippet<[StripTab, () => void]>;
         /** Controls pinned to the end of the strip, past the tabs. */
@@ -59,9 +80,11 @@
         tabs,
         activeId,
         label,
+        pane,
         onactivate,
         onclose,
         onmove,
+        onadopt,
         menu,
         trailing,
         empty,
@@ -70,11 +93,33 @@
 
     /** Index of the tab currently being dragged, or null when not dragging. */
     let dragIndex = $state<number | null>(null);
+    /**
+     * Where a tab from another pane would land, or null when nothing is hovering
+     * over this strip from outside it.
+     *
+     * A foreign tab cannot be reordered into place the way a local one is --
+     * it is not in this list yet -- so it gets an insertion marker instead, and
+     * the move happens on drop.
+     */
+    let adoptAt = $state<number | null>(null);
 
     function startDrag(event: DragEvent, index: number): void {
         dragIndex = index;
+        beginTabDrag({ id: tabs[index].id, from: pane });
         event.dataTransfer?.setData('text/plain', tabs[index].id);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    }
+
+    function stopDrag(): void {
+        dragIndex = null;
+        adoptAt = null;
+        endTabDrag();
+    }
+
+    /** Whether the tab in the air came from somewhere this strip can take it from. */
+    function foreign(): boolean {
+        const drag = currentTabDrag();
+        return onadopt !== undefined && drag !== null && drag.from !== pane;
     }
 
     /**
@@ -83,11 +128,39 @@
      * debounced by the store, so a whole drag costs one save.
      */
     function dragOver(event: DragEvent, index: number): void {
+        if (foreign()) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            // Past the midpoint drops after the tab, which is what makes the
+            // last position in a strip reachable at all.
+            const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+            adoptAt = event.clientX > box.left + box.width / 2 ? index + 1 : index;
+            return;
+        }
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
         if (dragIndex === null || dragIndex === index) return;
         onmove(dragIndex, index);
         dragIndex = index;
+    }
+
+    /** Takes in a tab dragged from another pane. A local drag has already landed. */
+    function drop(event: DragEvent): void {
+        const drag = currentTabDrag();
+        if (!foreign() || !drag) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onadopt?.(drag.id, drag.from, adoptAt ?? tabs.length);
+        stopDrag();
+    }
+
+    /** Anywhere in the strip that is not a tab takes a foreign tab at the end. */
+    function dragOverStrip(event: DragEvent): void {
+        if (!foreign()) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        adoptAt = tabs.length;
     }
 
     /** Alt+Arrow moves the focused tab, so reordering is not drag-only. */
@@ -108,10 +181,10 @@
         }
     }
 
-    function onPointerDown(event: MouseEvent, id: string): void {
-        if (event.button === 1) {
+    function onPointerDown(event: MouseEvent, tab: StripTab): void {
+        if (event.button === 1 && tab.closable !== false) {
             event.preventDefault();
-            onclose(id);
+            onclose(tab.id);
         }
     }
 
@@ -346,7 +419,21 @@
             <p class="empty">{empty}</p>
         {/if}
 
-        <div class="tabbar" role="tablist" aria-label={label} bind:this={stripEl} onscroll={measure}>
+        <!-- The drag handlers are what make a strip a drop target for a tab from
+             another pane. A tablist is not focusable itself -- its tabs are --
+             so the rule that wants a tabindex here does not apply. -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <!-- svelte-ignore a11y_interactive_supports_focus -->
+        <div
+            class="tabbar"
+            role="tablist"
+            aria-label={label}
+            bind:this={stripEl}
+            onscroll={measure}
+            ondragover={dragOverStrip}
+            ondrop={drop}
+            ondragleave={() => (adoptAt = null)}
+        >
             {#each tabs as tab, index (tab.id)}
                 {@const active = activeId === tab.id}
                 <div
@@ -354,6 +441,8 @@
                     data-tab-id={tab.id}
                     class:active
                     class:dragging={dragIndex === index}
+                    class:adopt-before={adoptAt === index}
+                    class:adopt-after={adoptAt === tabs.length && index === tabs.length - 1}
                     role="tab"
                     tabindex={active ? 0 : -1}
                     aria-selected={active}
@@ -363,19 +452,20 @@
                     style:--tab-fg={active ? textOn(tab.color) : 'var(--text-dim)'}
                     style:--tab-rule={tab.color}
                     onclick={() => onactivate(tab.id)}
-                    onmousedown={(e) => onPointerDown(e, tab.id)}
+                    onmousedown={(e) => onPointerDown(e, tab)}
                     oncontextmenu={(e) => openMenu(e, tab)}
                     onkeydown={(e) => onKeyDown(e, index)}
                     ondragstart={(e) => startDrag(e, index)}
                     ondragover={(e) => dragOver(e, index)}
-                    ondragend={() => (dragIndex = null)}
-                    ondrop={(e) => e.preventDefault()}
+                    ondragend={stopDrag}
+                    ondrop={drop}
                 >
                     <Icon name={tab.icon} size={14} />
                     <span class="title">{tab.title}</span>
                     {#if tab.subtitle}
                         <span class="context">{tab.subtitle}</span>
                     {/if}
+                    {#if tab.closable !== false}
                     <button
                         class="close"
                         class:modified={tab.modified}
@@ -396,6 +486,7 @@
                         <span class="mark"><Icon name="dot" size={13} /></span>
                         <span class="cross"><Icon name="close" size={12} /></span>
                     </button>
+                    {/if}
                 </div>
             {/each}
         </div>
@@ -618,6 +709,28 @@
     .tab:not(.active):hover {
         background: color-mix(in srgb, var(--tab-rule) 32%, transparent);
         color: var(--text);
+    }
+
+    /* Where a tab dragged in from another pane would land. A rule rather than
+       a gap: the strip scrolls, and opening a hole in it shifts every tab
+       sideways under the pointer that is trying to aim at one. */
+    .tab.adopt-before::before,
+    .tab.adopt-after::after {
+        content: '';
+        position: absolute;
+        top: 3px;
+        bottom: 3px;
+        width: 2px;
+        background: var(--accent);
+        border-radius: 1px;
+    }
+
+    .tab.adopt-before::before {
+        left: -1px;
+    }
+
+    .tab.adopt-after::after {
+        right: -1px;
     }
 
     .tab.dragging {

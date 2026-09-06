@@ -68,8 +68,8 @@ beforeEach(async () => {
  */
 async function crowdTheWindow(): Promise<void> {
     await page.viewport(1440, 900);
-    workspace.settings.layout.detailDock = 'right';
-    workspace.settings.layout.detailSize = 929;
+    workspace.settings.layout.detailPane = 'right';
+    workspace.setPaneSize('right', 929);
     await workspace.openDetail({
         contextId: PROD,
         kind: 'pods',
@@ -122,15 +122,19 @@ test('the describe panel leaves the table something to be', async () => {
     // Enough to be a table rather than a column of ellipses. The stylesheet
     // reserves a little more than this; what is asserted is the requirement,
     // not the constant that satisfies it.
-    const content = document.querySelector('.content') as HTMLElement;
+    const content = document.querySelector('.pane.main > .body') as HTMLElement;
     expect(content.getBoundingClientRect().width).toBeGreaterThanOrEqual(300);
 });
 
 test('a panel wider than the window it is restored into is reined in', async () => {
-    workspace.settings.layout.detailSize = 4000;
     await crowdTheWindow();
+    // Straight into the state rather than through setPaneSize, which clamps:
+    // this is a size restored from a session on a much bigger screen, and the
+    // question is whether the stylesheet holds the line on its own.
+    workspace.panes.right.size = 4000;
+    await settle();
 
-    const panel = document.querySelector('.panel') as HTMLElement;
-    const stage = document.querySelector('.stage') as HTMLElement;
-    expect(panel.getBoundingClientRect().width).toBeLessThan(stage.getBoundingClientRect().width);
+    const panel = document.querySelector('.pane.right') as HTMLElement;
+    const upper = document.querySelector('.upper') as HTMLElement;
+    expect(panel.getBoundingClientRect().width).toBeLessThan(upper.getBoundingClientRect().width);
 });

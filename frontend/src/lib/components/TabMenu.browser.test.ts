@@ -1,8 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
-import Dock from './Dock.svelte';
-import TabBar from './TabBar.svelte';
+import Pane from './Pane.svelte';
 
 // Where the right-click menu lands.
 //
@@ -33,6 +32,13 @@ const settingsFile = vi.hoisted(() => {
             }),
     };
 });
+// A pane renders the view its active tab names, so a strip test now mounts a
+// real table with it. Stubbing the subscription is what lets that table exist
+// without a cluster behind it; these tests are about the strip, not the rows.
+vi.mock('../state/subscriptions', () => ({
+    subscribe: vi.fn(() => ({ setNamespace: vi.fn(), close: vi.fn() })),
+}));
+
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
@@ -51,9 +57,21 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue(''),
+        Namespaces: vi.fn().mockResolvedValue(['default']),
         ResourceYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         ApplyYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),
+    },
+    // The describe panel is a tab now, so every pane can mount it and its
+    // action bar -- which is why a test about where tabs go needs this.
+    ActionService: {
+        ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] }),
+        Delete: vi.fn().mockResolvedValue(undefined),
+        Scale: vi.fn().mockResolvedValue(undefined),
+        Restart: vi.fn().mockResolvedValue(undefined),
+        Cordon: vi.fn().mockResolvedValue(undefined),
+        Drain: vi.fn().mockResolvedValue('drain-1'),
+        CancelDrain: vi.fn(),
     },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
@@ -101,8 +119,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Get: vi.fn().mockResolvedValue({}),
         ConfigPath: vi.fn().mockResolvedValue(''),
         SetContextPrefs: settingsFile.keepPrefsFor(),
-        SetTabOrder: settingsFile.keep('tabOrder'),
-        SetDock: settingsFile.keep('dock'),
+        SetPanes: settingsFile.keep('panes'),
         SetLayout: settingsFile.keep('layout'),
         SetPreferences: settingsFile.keep('preferences'),
     },
@@ -175,23 +192,23 @@ beforeEach(async () => {
     document.body.innerHTML = '';
     workspace.closeAllTabs();
     workspace.closeAllDockTabs();
-    workspace.settings.dock.open = false;
+    workspace.settings.panes.bottom.open = false;
     workspace.settings.layout.zoom = 1;
     withClusters();
 });
 
 /** The dock, at the foot of the window, holding one editor tab. */
 async function dockAtTheFoot(zoom = 1): Promise<void> {
-    render(Dock);
+    render(Pane, { pane: 'bottom' });
     workspace.openEditor({ contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' });
     await expect.element(page.getByRole('tab', { name: /web/ })).toBeVisible();
-    mountLikeTheApp('section.dock', 'end', zoom);
+    mountLikeTheApp('section.pane.bottom', 'end', zoom);
     await settle();
 }
 
 /** The strip above the view, at the top of the window, holding one tab. */
 async function stripAtTheTop(): Promise<void> {
-    render(TabBar);
+    render(Pane, { pane: 'main' });
     workspace.openTab(PROD, 'pods');
     await expect.element(page.getByRole('tab', { name: /Pods/ })).toBeVisible();
     mountLikeTheApp('div.strip', 'start');
