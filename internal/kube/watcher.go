@@ -38,12 +38,26 @@ const coalesce = 150 * time.Millisecond
 // so this is a backstop against a missed event rather than the primary path.
 const resync = 10 * time.Minute
 
+// idleGrace is how long a cluster's client is kept after its last user lets
+// go of it.
+//
+// A dashboard polls every thirty seconds and holds no informer in between; a
+// tab switch closes one subscription just before opening the next; a ping
+// from the sidebar borrows the client for a single request. Dropping the
+// client at zero references made each of those build it again -- kubeconfig,
+// credential plugin, TLS, a cold discovery cache and the full discovery
+// download that refills it -- to make one LIST call. What lingers is a config
+// and that cache, not a connection: client-go pools connections per config on
+// its own, whether or not this struct is still around.
+const idleGrace = 2 * time.Minute
+
 // Watcher owns every live connection: one client and one set of informers per
 // kubeconfig context, shared by all the tabs looking at that context.
 //
 // Lifetime is reference-counted from both ends. Three tabs on the same kind
-// share one watch; the informer stops when the last of them closes, and the
-// cluster's client goes with the last informer.
+// share one watch; the informer stops when the last of them closes. The
+// cluster's client outlives its last user by idleGrace rather than going with
+// it -- see releaseCluster.
 type Watcher struct {
 	emit func(Snapshot)
 
@@ -74,6 +88,10 @@ type cluster struct {
 	ready  chan struct{}
 	client *clusterClient
 	err    error
+
+	// evict is armed when the last reference goes and disarmed by the next
+	// one; it fires only if the cluster stayed idle for the whole idleGrace.
+	evict *time.Timer
 }
 
 // liveInformer is one watch: shared by every subscription to the same resource
@@ -233,6 +251,21 @@ func (w *Watcher) Close() {
 	for _, id := range ids {
 		w.Unsubscribe(id)
 	}
+
+	// Nothing is coming back for the idle clients now, so they go too, and
+	// their timers with them. One still borrowed by a call in flight is left
+	// for that call to release, which arms a timer that finds nothing to do.
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for id, cl := range w.clusters {
+		if cl.refs > 0 {
+			continue
+		}
+		if cl.evict != nil {
+			cl.evict.Stop()
+		}
+		delete(w.clusters, id)
+	}
 }
 
 // clusterFor returns the live client for a context, building it if this is the
@@ -243,6 +276,11 @@ func (w *Watcher) clusterFor(kc Context) (*cluster, error) {
 	if !ok {
 		cl = &cluster{informers: map[schema.GroupVersionResource]*liveInformer{}, ready: make(chan struct{})}
 		w.clusters[kc.ID] = cl
+	} else if cl.evict != nil {
+		// Idle, and about to be forgotten: this caller is exactly what the
+		// grace was waiting for.
+		cl.evict.Stop()
+		cl.evict = nil
 	}
 	cl.refs++
 	w.mu.Unlock()
@@ -262,7 +300,13 @@ func (w *Watcher) clusterFor(kc Context) (*cluster, error) {
 	return cl, nil
 }
 
-// releaseCluster drops one reference, forgetting the cluster at zero.
+// releaseCluster drops one reference. At zero the cluster is not forgotten but
+// left to idle for idleGrace, so that the next caller -- a poll thirty seconds
+// away, the tab being opened after the one just closed -- finds the client and
+// its discovery cache warm instead of building both again.
+//
+// A client that could not be built is the exception and goes at once: the next
+// caller should try again, with whatever has been fixed in the meantime.
 func (w *Watcher) releaseCluster(contextID string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -271,9 +315,27 @@ func (w *Watcher) releaseCluster(contextID string) {
 		return
 	}
 	cl.refs--
-	if cl.refs <= 0 {
-		delete(w.clusters, contextID)
+	if cl.refs > 0 {
+		return
 	}
+	if cl.err != nil {
+		delete(w.clusters, contextID)
+		return
+	}
+	cl.evict = time.AfterFunc(idleGrace, func() { w.evictIdle(contextID, cl) })
+}
+
+// evictIdle forgets a cluster whose grace ran out unused. It checks the entry
+// by identity and by count, because a timer can fire just as a caller takes
+// the cluster back: clusterFor stops the timer, but one already on its way
+// here still arrives, and must find nothing to do.
+func (w *Watcher) evictIdle(contextID string, cl *cluster) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.clusters[contextID] != cl || cl.refs > 0 {
+		return
+	}
+	delete(w.clusters, contextID)
 }
 
 // informerFor returns the shared informer for a resource, starting it if this

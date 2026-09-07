@@ -295,6 +295,13 @@ var builtinColumns = map[string][]column{
 		nameColumn,
 		{Name: "Roles", From: nodeRoles},
 		{Name: "Version", Path: ".status.nodeInfo.kubeletVersion"},
+		// The rest of what `kubectl get nodes -o wide` prints, in its order:
+		// where the node is reached, then what it runs, straight off nodeInfo.
+		{Name: "Internal IP", From: nodeAddress("InternalIP")},
+		{Name: "External IP", From: nodeAddress("ExternalIP")},
+		{Name: "OS Image", Path: ".status.nodeInfo.osImage"},
+		{Name: "Kernel Version", Path: ".status.nodeInfo.kernelVersion"},
+		{Name: "Container Runtime", Path: ".status.nodeInfo.containerRuntimeVersion"},
 		// Capacity is the hardware; allocatable is what the scheduler may
 		// actually hand out, once the kubelet has kept back what it needs. The
 		// gap between them is invisible with only one on screen, and it is the

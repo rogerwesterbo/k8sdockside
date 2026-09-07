@@ -343,3 +343,32 @@ func TestRoleBindingsNameWhatTheyBindAndToWhom(t *testing.T) {
 		want(t, cells, "Subjects", "ServiceAccount/deployer, Group/devs")
 	}
 }
+
+// The columns `kubectl get nodes -o wide` adds: where the node is reached and
+// what it runs. Addresses are every one of the type rather than the first,
+// since a dual-stack node has two internal addresses and neither is the spare.
+func TestNodesCarryTheWideColumns(t *testing.T) {
+	cells := project(t, KindNodes, false, map[string]any{
+		"metadata": map[string]any{"name": "ht1"},
+		"status": map[string]any{
+			"addresses": []any{
+				map[string]any{"type": "InternalIP", "address": "10.0.0.6"},
+				map[string]any{"type": "InternalIP", "address": "fd00::6"},
+				map[string]any{"type": "Hostname", "address": "ht1"},
+			},
+			"nodeInfo": map[string]any{
+				"kubeletVersion":          "v1.36.3",
+				"osImage":                 "Talos (v1.13.9)",
+				"kernelVersion":           "6.18.44-talos (amd64)",
+				"containerRuntimeVersion": "containerd://2.2.7",
+			},
+		},
+	})
+
+	want(t, cells, "Version", "v1.36.3")
+	want(t, cells, "Internal IP", "10.0.0.6, fd00::6")
+	want(t, cells, "External IP", "<none>")
+	want(t, cells, "OS Image", "Talos (v1.13.9)")
+	want(t, cells, "Kernel Version", "6.18.44-talos (amd64)")
+	want(t, cells, "Container Runtime", "containerd://2.2.7")
+}

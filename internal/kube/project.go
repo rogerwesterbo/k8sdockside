@@ -309,6 +309,29 @@ func nodeRoles(u *unstructured.Unstructured) Cell {
 	return plain(strings.Join(roles, ", "))
 }
 
+// nodeAddress reads every address of one type off a node -- InternalIP or
+// ExternalIP, the two `kubectl get nodes -o wide` shows. kubectl prints the
+// first of each; every one is shown here, since a dual-stack node has an IPv4
+// and an IPv6 internal address and neither is the spare.
+func nodeAddress(kind string) func(*unstructured.Unstructured) Cell {
+	return func(u *unstructured.Unstructured) Cell {
+		var out []string
+		for _, raw := range nestedSlice(u, "status", "addresses") {
+			a := asMap(raw)
+			if mapString(a, "type") != kind {
+				continue
+			}
+			if v := mapString(a, "address"); v != "" {
+				out = append(out, v)
+			}
+		}
+		if len(out) == 0 {
+			return muted("<none>")
+		}
+		return plain(strings.Join(out, ", "))
+	}
+}
+
 func nodeCondition(u *unstructured.Unstructured) Cell {
 	if unschedulable, _, _ := unstructured.NestedBool(u.Object, "spec", "unschedulable"); unschedulable {
 		return toned("SchedulingDisabled", "warn")

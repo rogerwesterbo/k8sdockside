@@ -135,11 +135,11 @@ func (c *clusterClient) mappingForKind(kind string) (*meta.RESTMapping, error) {
 	if plural, group, ok := ParseCustomKind(kind); ok {
 		gvr := schema.GroupVersionResource{Group: group, Resource: plural}
 		gvk, err := c.mapper.KindFor(gvr)
+		if err != nil && c.refreshDiscovery() {
+			gvk, err = c.mapper.KindFor(gvr)
+		}
 		if err != nil {
-			c.mapper.Reset()
-			if gvk, err = c.mapper.KindFor(gvr); err != nil {
-				return nil, notServed(plural+"."+group, group, err)
-			}
+			return nil, notServed(plural+"."+group, group, err)
 		}
 		m, err := c.mappingFor(gvk.GroupKind())
 		if err != nil {

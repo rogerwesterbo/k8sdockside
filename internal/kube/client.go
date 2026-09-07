@@ -3,6 +3,7 @@ package kube
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -53,7 +54,19 @@ type clusterClient struct {
 	// dialer that does it is built from the config -- credentials, TLS and
 	// proxy included -- not from the typed or dynamic client above.
 	cfg *rest.Config
+
+	// resetAt is when the discovery cache was last thrown away over a kind
+	// the mapper did not know, or filled for the first time. See mappingFor.
+	resetMu sync.Mutex
+	resetAt time.Time
 }
+
+// resetEvery bounds how often a miss in the mapper may throw the discovery
+// cache away. The reset is there so that a kind installed since we last looked
+// is found rather than reported missing; but a kind that is simply not there
+// -- metrics-server on a cluster without it, asked for by every budget poll --
+// would otherwise cost a full rediscovery on every single miss.
+const resetEvery = time.Minute
 
 // newClusterClient builds the live clients for one kubeconfig context.
 //
@@ -101,7 +114,26 @@ func newClusterClient(kc Context) (*clusterClient, error) {
 		disco:   cached,
 		host:    cfg.Host,
 		cfg:     cfg,
+		// The cache is empty and fills on first use, so a miss right after
+		// is against a listing fetched moments ago; counting the build as a
+		// reset keeps that first miss from fetching the same listing twice.
+		resetAt: time.Now(),
 	}, nil
+}
+
+// refreshDiscovery throws the discovery cache away so the next lookup asks
+// the server, and reports whether it did. False means the cache was reset
+// too recently for the server to have anything new to say, and the caller
+// should report the miss it has.
+func (c *clusterClient) refreshDiscovery() bool {
+	c.resetMu.Lock()
+	defer c.resetMu.Unlock()
+	if time.Since(c.resetAt) < resetEvery {
+		return false
+	}
+	c.resetAt = time.Now()
+	c.mapper.Reset()
+	return true
 }
 
 // mappingFor resolves the REST mapping for a kind the UI asked for: which
@@ -116,11 +148,10 @@ func (c *clusterClient) mappingFor(gk schema.GroupKind) (*meta.RESTMapping, erro
 	}
 	// A kind the cluster does not serve is the ordinary case for optional APIs,
 	// but so is one installed since we last looked. Reset the discovery cache
-	// and ask once more before reporting it missing.
-	c.mapper.Reset()
-	m, err = c.mapper.RESTMapping(gk)
-	if err != nil {
+	// and ask once more before reporting it missing -- unless that was done a
+	// moment ago, in which case missing is the answer.
+	if !c.refreshDiscovery() {
 		return nil, err
 	}
-	return m, nil
+	return c.mapper.RESTMapping(gk)
 }
