@@ -144,7 +144,7 @@ The repository carries a hardcoded `0.0.1` in its packaging metadata.
 rewrites it from the tag in the release job's own checkout, and never commits
 the result. It touches `build/config.yml`, `build/windows/info.json`,
 `build/windows/nsis/wails_tools.nsh`, `build/darwin/Info.plist`,
-`build/linux/nfpm/nfpm.yaml` and `settingsservice.go`.
+`build/linux/nfpm/nfpm.yaml` and `internal/services/settingsservice.go`.
 
 That last one is the version the *running app* shows — in the About dialog
 under the app menu, and in **Settings → About**. It is stamped into the source

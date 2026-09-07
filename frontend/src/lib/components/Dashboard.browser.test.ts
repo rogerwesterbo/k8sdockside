@@ -37,7 +37,7 @@ const ARGO = {
 
 const Summary = vi.fn();
 
-vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
         Detail: vi.fn().mockResolvedValue({
@@ -112,7 +112,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 // The cluster dashboard's counters and events are the way into the rest of
 // the cluster: a tile opens the list it counts, and an event opens itself.
 const { workspace } = await import('../state/workspace.svelte');
-const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services');
 const Dashboard = (await import('./Dashboard.svelte')).default;
 
 const PROD = '/home/u/.kube/config::admin@prod';

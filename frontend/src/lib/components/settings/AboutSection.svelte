@@ -9,8 +9,8 @@
   somebody who has switched the automatic check off comes to ask by hand.
 -->
 <script lang="ts">
-    import { SettingsService } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside';
-    import type { About } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside/models.js';
+    import { SettingsService } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
+    import type { About } from '../../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services/models.js';
     import { updates } from '../../state/updates.svelte';
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';

@@ -5,7 +5,7 @@ const Subscribe = vi.fn();
 const Unsubscribe = vi.fn();
 
 vi.mock('@wailsio/runtime', () => ({ Events: { On: vi.fn() } }));
-vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
         Open: vi.fn().mockResolvedValue('logs-1'),

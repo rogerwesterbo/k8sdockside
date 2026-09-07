@@ -6,7 +6,7 @@ import HelmRelease from './HelmRelease.svelte';
 
 const Detail = vi.fn();
 
-vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     HelmService: { Detail: (...args: unknown[]) => Detail(...args) },
 }));
 

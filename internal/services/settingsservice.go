@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	"os"
@@ -67,13 +67,13 @@ type About struct {
 // leaves it empty and falls back to the module graph.
 var version = ""
 
-// displayVersion is the one answer both places that show a version give: the
+// DisplayVersion is the one answer both places that show a version give: the
 // About dialog under the app menu, and the About section in settings.
 //
 // It comes from the binary's own build info rather than a constant, so a
 // development build says so instead of claiming whatever number was last
 // committed.
-func displayVersion() string {
+func DisplayVersion() string {
 	v := version
 	if v == "" {
 		if info, ok := debug.ReadBuildInfo(); ok {
@@ -91,7 +91,7 @@ func displayVersion() string {
 // About reports what this build is.
 func (s *SettingsService) About() About {
 	about := About{
-		Version:  displayVersion(),
+		Version:  DisplayVersion(),
 		Go:       runtime.Version(),
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 	}

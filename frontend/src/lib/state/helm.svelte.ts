@@ -11,7 +11,7 @@
 // the three fields that name a release, and whoever asked owns telling the user
 // how it went.
 
-import { HelmService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import { HelmService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
 import type * as helmcli from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/helmcli/models.js';
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 

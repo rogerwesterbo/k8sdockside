@@ -34,7 +34,7 @@ const settingsFile = vi.hoisted(() => {
             }),
     };
 });
-vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
         Detail: vi.fn().mockResolvedValue({
@@ -114,7 +114,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
 
 const ResourceTable = (await import('./ResourceTable.svelte')).default;
 const { workspace } = await import('../state/workspace.svelte');
-const { ActionService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+const { ActionService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services');
 
 // Deleting several rows at once. The rows are ticked in the table, a bar
 // counts them, and one call carries the whole selection to the backend, which

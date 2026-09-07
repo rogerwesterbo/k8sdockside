@@ -3,7 +3,7 @@ import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import Sidebar from './Sidebar.svelte';
 
-vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
+vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
         Detail: vi.fn().mockResolvedValue({
@@ -97,7 +97,7 @@ function ctx(file: string, name: string) {
 // contexts stay. Unlike a hidden file it is not listed anywhere to be brought
 // back -- it comes back by being added again -- so the Hidden list must not
 // appear for it.
-const { KubeconfigService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+const { KubeconfigService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services');
 
 const CONFIG = '/home/u/.kube/config';
 const PROD = `${CONFIG}::prod`;

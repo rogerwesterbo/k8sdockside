@@ -24,23 +24,36 @@ beforeEach(async () => {
     await settle();
 });
 
-test('the idle screen carries the logo behind it', async () => {
+test('the idle screen carries the harbour behind it', async () => {
     expect(watermark()).not.toBeNull();
 
     const image = getComputedStyle(watermark()!, '::before').backgroundImage;
-    expect(image).toContain('k8s_dockside_harbour_scene_no_text.svg');
+    expect(image).toContain('k8s_dockside_neon_harbour.svg');
+});
+
+// The night picture faded over a pale window reads as grey, so a light theme
+// gets the same harbour drawn by day. The base is what the theme code stamps
+// on the root -- see theme/apply.ts -- and is all the stylesheet looks at.
+test('a light theme gets the harbour by day', async () => {
+    document.documentElement.dataset.themeBase = 'light';
+    try {
+        const image = getComputedStyle(watermark()!, '::before').backgroundImage;
+        expect(image).toContain('k8s_dockside_neon_harbour_light.svg');
+    } finally {
+        delete document.documentElement.dataset.themeBase;
+    }
 });
 
 // The reason it lives on the welcome panel and not on .content: a watermark
 // behind a table of pod names is read against every row.
-test('opening a tab takes the logo away with the welcome panel', async () => {
+test('opening a tab takes the harbour away with the welcome panel', async () => {
     workspace.openTab(CTX.id, 'pods');
     await settle();
 
     expect(watermark()).toBeNull();
 });
 
-test('the logo does not intercept the pointer', async () => {
+test('the harbour does not intercept the pointer', async () => {
     expect(getComputedStyle(watermark()!, '::before').pointerEvents).toBe('none');
 });
 

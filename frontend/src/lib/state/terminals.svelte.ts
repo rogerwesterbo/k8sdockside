@@ -14,7 +14,7 @@
 import { Events } from '@wailsio/runtime';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { TerminalService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import { TerminalService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 
 /** What a terminal is open on. */

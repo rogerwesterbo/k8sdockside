@@ -10,7 +10,7 @@
 // telling the user how it went.
 
 import { Events } from '@wailsio/runtime';
-import { ActionService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import { ActionService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 import { changes, type ObjectRef } from './changes.svelte';
 

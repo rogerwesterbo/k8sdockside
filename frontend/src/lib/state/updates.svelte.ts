@@ -6,8 +6,8 @@
 // it: open the release, or mark the notice as read so the bell goes quiet.
 
 import { Events } from '@wailsio/runtime';
-import { UpdateService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
-import type * as main from '../../../bindings/github.com/rogerwesterbo/k8sdockside/models.js';
+import { UpdateService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
+import type * as main from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services/models.js';
 
 /** What the backend knows about releases. */
 export type UpdateStatus = main.UpdateStatus;

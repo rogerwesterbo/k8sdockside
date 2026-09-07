@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	"context"
@@ -30,7 +30,7 @@ const (
 // UpdateStatus is what the window knows about releases: the one it is running,
 // the newest one there is, and whether the user has heard about the difference.
 type UpdateStatus struct {
-	// Current is the version this binary reports -- see displayVersion.
+	// Current is the version this binary reports -- see DisplayVersion.
 	Current string `json:"current"`
 	// Latest is the newest published release, nil until a check has succeeded.
 	// It survives a later failure: what was known this morning is still known.
@@ -91,7 +91,7 @@ type UpdateService struct {
 // NewUpdateService wires the service to the settings it reads the preference
 // from and records the read version in.
 func NewUpdateService(store *appconfig.Store) *UpdateService {
-	current := displayVersion()
+	current := DisplayVersion()
 	return &UpdateService{
 		store:   store,
 		checker: updates.New(current),

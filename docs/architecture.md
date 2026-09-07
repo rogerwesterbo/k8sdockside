@@ -57,16 +57,21 @@ while `clientcmd` reads what is needed to *connect*.
 ## Layout
 
 ```
-main.go                      window, and the services the frontend calls
-kubeconfigservice.go         discovery, add/remove, the context cache
-settingsservice.go           aliases, colours, tab order, layout
-resourceservice.go           dashboard, resource tables, describe, editing
-themeservice.go              the theme catalogue, and the folders it is read from
-pluginservice.go             the solution plugins, and each one's per-cluster overview
-metricsservice.go            finding a cluster's Prometheus, and drawing plugin charts
-terminalservice.go           shells: the sessions open, and the external terminals
-portforwardservice.go        the tunnels open, and the ones remembered from last time
-updateservice.go             whether a newer release exists, and whether the user has heard
+main.go                      the window, and the settings file it opens
+internal/services/           the services the frontend calls, wired together in services.go
+  kubeconfigservice.go       discovery, add/remove, the context cache
+  settingsservice.go         aliases, colours, tab order, layout, and the version shown
+  resourceservice.go         dashboard, resource tables, describe, editing
+  budgetservice.go           what a cluster, node or namespace has, has promised, and is using
+  actionservice.go           scale, restart, cordon, drain, delete, and the bulk forms of them
+  logservice.go              log streams, per container
+  helmservice.go             releases read from their Secrets, and the helm binary for the rest
+  themeservice.go            the theme catalogue, and the folders it is read from
+  pluginservice.go           the solution plugins, and each one's per-cluster overview
+  metricsservice.go          finding a cluster's Prometheus, and drawing plugin charts
+  terminalservice.go         shells: the sessions open, and the external terminals
+  portforwardservice.go      the tunnels open, and the ones remembered from last time
+  updateservice.go           whether a newer release exists, and whether the user has heard
 internal/kube/               kubeconfig parsing, and the stubbed cluster data
 internal/appconfig/          the settings file
 internal/addons/             finding and merging add-on files, shared by the two below

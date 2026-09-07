@@ -11,7 +11,7 @@
 // hiding most of them, which costs memory to show less.
 
 import { Events } from '@wailsio/runtime';
-import { LogService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+import { LogService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 
 /** What a log view is open on. */

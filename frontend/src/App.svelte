@@ -241,10 +241,10 @@
         min-width: 0;
     }
 
-    /* The logo as a watermark behind the idle screen. It fills the empty
-       content area rather than sitting at a fixed size, so the app looks like
-       itself when nothing is open -- and goes with the panel the moment a tab
-       is, rather than sitting behind a table of pod names. */
+    /* The harbour behind the idle screen. It fills the empty content area
+       rather than sitting at a fixed size, so the app looks like itself when
+       nothing is open -- and goes with the panel the moment a tab is, rather
+       than sitting behind a table of pod names. */
     .welcome-stage {
         position: relative;
         display: flex;
@@ -290,19 +290,25 @@
         content: '';
         position: absolute;
         inset: 0;
-        background-image: url('/k8s_dockside_harbour_scene_no_text.svg');
+        /* The neon harbour by night: drawn for the dark themes, and faded just
+           enough that the theme's own ground shows through it and the heading
+           stays legible against the sky. `cover` keeps the ship in frame at
+           any pane shape; what goes is sky or sea at the edges, never the
+           middle. See frontend/artwork/neon_harbour.py for how it is made. */
+        background-image: url('/k8s_dockside_neon_harbour.svg');
         background-repeat: no-repeat;
         background-position: center;
-        /* Scaled past the edges rather than fitted, because the artwork is a
-           framed illustration and not a transparent mark. Shown whole it brings
-           two things that do not belong behind this text: the rounded card edge
-           reads as a stray rectangle, and the illustration's own title repeats
-           the heading in front of it. Overscaling crops both away and leaves
-           the harbour scene. */
-        background-size: 124% 158%;
-        background-position: center 32%;
-        opacity: 0.09;
+        background-size: cover;
+        opacity: 0.72;
         pointer-events: none;
+    }
+
+    /* A light theme gets the same harbour by day. The night picture faded
+       over a pale window only ever reads as grey; the day one is drawn for
+       it, so it can be shown almost whole. */
+    :global([data-theme-base='light']) .welcome-stage::before {
+        background-image: url('/k8s_dockside_neon_harbour_light.svg');
+        opacity: 0.85;
     }
 
     .welcome {

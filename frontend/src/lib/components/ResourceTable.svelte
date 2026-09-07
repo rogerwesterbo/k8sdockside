@@ -11,7 +11,7 @@
     import { EditorView } from '@codemirror/view';
     import { untrack } from 'svelte';
     import { SvelteSet } from 'svelte/reactivity';
-    import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside';
+    import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
     import { type Row, type Table } from '../state/adopt';
     import { subscribe, type Subscription } from '../state/subscriptions';
     import { actions, type BulkReport, type PatchPreview } from '../state/actions.svelte';

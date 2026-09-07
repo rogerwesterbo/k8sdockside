@@ -53,7 +53,7 @@ perl -pi -e "s/^(version: \")[^\"]*\"/\${1}${VERSION}\"/" build/linux/nfpm/nfpm.
 # no way to add -X to them; a CLI override of BUILD_FLAGS is ignored, because
 # Task's task-level vars outrank it. Full version, so a pre-release reads as
 # one in the UI.
-perl -pi -e "s/^(var version = \")[^\"]*\"/\${1}${VERSION}\"/" settingsservice.go
+perl -pi -e "s/^(var version = \")[^\"]*\"/\${1}${VERSION}\"/" internal/services/settingsservice.go
 
 echo "--- stamped ---"
 grep -n '^  version:' build/config.yml
@@ -61,4 +61,4 @@ grep -n 'file_version\|ProductVersion' build/windows/info.json
 grep -n 'INFO_PRODUCTVERSION "' build/windows/nsis/wails_tools.nsh
 grep -n -A1 'CFBundleShortVersionString\|CFBundleVersion' build/darwin/Info.plist
 grep -n '^version:' build/linux/nfpm/nfpm.yaml
-grep -n '^var version' settingsservice.go
+grep -n '^var version' internal/services/settingsservice.go
