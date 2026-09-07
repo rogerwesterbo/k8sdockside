@@ -263,15 +263,15 @@
             </button>
         {/if}
 
-        <!-- Hide this one context. On the row itself rather than on the file
-             heading, which is not shown by default and would hide the whole
+        <!-- Remove this one context. On the row itself rather than on the file
+             heading, which is not shown by default and would remove the whole
              file anyway. Only the app's list changes; the kubeconfig does
-             not. -->
+             not, and the context appears again if it is added again. -->
         <button
-            class="hide"
-            onclick={() => workspace.hideContext(context.id)}
-            title="Hide this context in k8sdockside. The kubeconfig is not changed; it is listed under Hidden, where it can be shown again."
-            aria-label="Hide {workspace.displayName(context)}"
+            class="remove"
+            onclick={() => workspace.removeContext(context.id)}
+            title="Remove this context from k8sdockside. The kubeconfig is not changed; the context appears again if it is added again."
+            aria-label="Remove {workspace.displayName(context)}"
         >
             <Icon name="close" size={12} />
         </button>
@@ -650,7 +650,7 @@
 
     /* Shown on hover and focus only: forty rows each carrying a cross is a
        sidebar that looks like it wants everything gone. */
-    .hide {
+    .remove {
         display: grid;
         place-items: center;
         width: 18px;
@@ -661,12 +661,12 @@
         opacity: 0;
     }
 
-    .head:hover .hide,
-    .hide:focus-visible {
+    .head:hover .remove,
+    .remove:focus-visible {
         opacity: 1;
     }
 
-    .hide:hover {
+    .remove:hover {
         background: var(--bg-active);
         color: var(--error);
     }

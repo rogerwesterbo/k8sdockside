@@ -103,7 +103,11 @@ export interface Settings {
     manualFiles: string[];
     manualFolders: string[];
     excludedFiles: string[];
-    /** Single contexts hidden in this app, by id; their files are still read. */
+    /**
+     * Single contexts removed from this app, by id; their files are still
+     * read. Not shown anywhere: a removal lasts only while the context is in
+     * its file, so there is nothing for the user to restore.
+     */
     excludedContexts: string[];
     /** Extra folders themes are read from, on top of the default one. */
     themeFolders: string[];

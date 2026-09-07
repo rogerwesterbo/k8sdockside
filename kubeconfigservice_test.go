@@ -306,7 +306,7 @@ func TestWatchedFolderIsRescannedOnSync(t *testing.T) {
 	}
 }
 
-// twoContexts is a kubeconfig holding two contexts, for hiding one of them.
+// twoContexts is a kubeconfig holding two contexts, for removing one of them.
 const twoContexts = `apiVersion: v1
 kind: Config
 current-context: one
@@ -330,61 +330,133 @@ users:
 - name: admin
 `
 
-// Hiding one context leaves the rest of its file alone, and -- like a hidden
+// idOf finds a context by name in a scan, so tests use the id the app gives it
+// -- built from the resolved path -- rather than one built from the path they
+// wrote, which differs wherever the temp dir is a symlink, as it is on macOS.
+func idOf(t *testing.T, files []kube.File, name string) string {
+	t.Helper()
+	for _, f := range files {
+		for _, c := range f.Contexts {
+			if c.Name == name {
+				return c.ID
+			}
+		}
+	}
+	t.Fatalf("no context %q in %+v", name, files)
+	return ""
+}
+
+// Removing one context leaves the rest of its file alone, and -- like a hidden
 // file -- a rescan must not bring it back. Nothing is written to the kubeconfig.
-func TestHideContextTakesOneContextOutOfItsFile(t *testing.T) {
+func TestRemoveContextTakesOneContextOutOfItsFile(t *testing.T) {
 	s := service(t)
 	path := write(t, t.TempDir(), "both.config", twoContexts)
-	if _, err := s.AddFile(path); err != nil {
+	added, err := s.AddFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(path)
 
-	files, err := s.HideContext(kube.ContextID(path, "two"))
+	files, err := s.RemoveContext(idOf(t, added, "two"))
 	if err != nil {
-		t.Fatalf("HideContext: %v", err)
+		t.Fatalf("RemoveContext: %v", err)
 	}
 
 	if len(files) != 1 || len(files[0].Contexts) != 1 || files[0].Contexts[0].Name != "one" {
-		t.Errorf("after hiding: %+v, want the file with only context one", files)
+		t.Errorf("after removing: %+v, want the file with only context one", files)
 	}
 	if files := s.Sync(); len(files[0].Contexts) != 1 {
-		t.Errorf("a sync brought the hidden context back: %+v", files[0].Contexts)
-	}
-	if got := s.HiddenContexts(); len(got) != 1 || got[0] != kube.ContextID(path, "two") {
-		t.Errorf("HiddenContexts() = %v", got)
+		t.Errorf("a sync brought the removed context back: %+v", files[0].Contexts)
 	}
 	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Error("the kubeconfig file was changed; hiding must only be remembered in the app's own settings")
+		t.Error("the kubeconfig file was changed; a removal must only be remembered in the app's own settings")
 	}
 }
 
-func TestRestoreContextBringsItBack(t *testing.T) {
+// A removal lasts as long as the context is in its file. Once the file no
+// longer holds it, the removal is forgotten, so the same context added again
+// later appears instead of vanishing into a removal nobody can see.
+func TestRemovedContextAppearsAgainWhenAddedToItsFileAgain(t *testing.T) {
+	s := service(t)
+	dir := t.TempDir()
+	path := write(t, dir, "both.config", twoContexts)
+	added, err := s.AddFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RemoveContext(idOf(t, added, "two")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The context leaves the kubeconfig, as when a cluster is torn down.
+	write(t, dir, "both.config", sampleConfig)
+	if files := s.Sync(); len(files) != 1 || len(files[0].Contexts) != 1 {
+		t.Fatalf("after the context left its file: %+v", files)
+	}
+	if got := s.store.ExcludedContexts(); len(got) != 0 {
+		t.Errorf("removal kept after the context left its file: %v", got)
+	}
+
+	// And comes back, as when its credentials are fetched again.
+	write(t, dir, "both.config", twoContexts)
+	if files := s.Sync(); len(files) != 1 || len(files[0].Contexts) != 2 {
+		t.Errorf("the context added again did not appear: %+v", files)
+	}
+}
+
+// Re-adding the file is the other way to add a context again: everything in
+// it comes back, removed or not.
+func TestRemovedContextAppearsAgainWithItsFile(t *testing.T) {
 	s := service(t)
 	path := write(t, t.TempDir(), "both.config", twoContexts)
-	if _, err := s.AddFile(path); err != nil {
+	added, err := s.AddFile(path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	id := kube.ContextID(path, "two")
-	if _, err := s.HideContext(id); err != nil {
+	if _, err := s.RemoveContext(idOf(t, added, "two")); err != nil {
 		t.Fatal(err)
+	}
+	if files, err := s.RemoveFile(path); err != nil || len(files) != 0 {
+		t.Fatalf("RemoveFile: %v, %+v", err, files)
 	}
 
-	files, err := s.RestoreContext(id)
+	files, err := s.AddFile(path)
 	if err != nil {
-		t.Fatalf("RestoreContext: %v", err)
+		t.Fatalf("re-adding the file: %v", err)
 	}
 	if len(files) != 1 || len(files[0].Contexts) != 2 {
-		t.Errorf("after restoring: %+v, want both contexts", files)
-	}
-	if got := s.HiddenContexts(); len(got) != 0 {
-		t.Errorf("HiddenContexts() = %v, want none", got)
+		t.Errorf("after re-adding the file: %+v, want both contexts", files)
 	}
 }
 
-func TestHideContextRefusesNothing(t *testing.T) {
+// A file that cannot be read says nothing about which contexts it holds, so
+// its removals are kept until it can be read again.
+func TestRemovalSurvivesTheFileBeingUnreadable(t *testing.T) {
 	s := service(t)
-	if _, err := s.HideContext(""); err == nil {
-		t.Error("HideContext(\"\") = nil error, want a complaint")
+	dir := t.TempDir()
+	path := write(t, dir, "both.config", twoContexts)
+	added, err := s.AddFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RemoveContext(idOf(t, added, "two")); err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, dir, "both.config", "contexts: [not a kubeconfig")
+	if files := s.Sync(); len(files) != 1 || files[0].Error == "" {
+		t.Fatalf("want the broken file listed with an error: %+v", files)
+	}
+
+	write(t, dir, "both.config", twoContexts)
+	if files := s.Sync(); len(files) != 1 || len(files[0].Contexts) != 1 {
+		t.Errorf("the removal was forgotten while the file was unreadable: %+v", files)
+	}
+}
+
+func TestRemoveContextRefusesNothing(t *testing.T) {
+	s := service(t)
+	if _, err := s.RemoveContext(""); err == nil {
+		t.Error("RemoveContext(\"\") = nil error, want a complaint")
 	}
 }

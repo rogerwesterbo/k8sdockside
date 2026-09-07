@@ -21,8 +21,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: {
         Sync: vi.fn().mockResolvedValue([]),
         Files: vi.fn().mockResolvedValue([]),
-        HideContext: vi.fn().mockResolvedValue([]),
-        RestoreContext: vi.fn().mockResolvedValue([]),
+        RemoveContext: vi.fn().mockResolvedValue([]),
     },
     ResourceService: { Describe: vi.fn().mockResolvedValue(''), Ping: vi.fn().mockResolvedValue(undefined) },
     LogService: {
@@ -93,9 +92,11 @@ function ctx(file: string, name: string) {
 }
 
 
-// Hiding one context, from its own row. It hides the context in this app and
-// nothing else: the kubeconfig is not written, and the file's other contexts
-// stay. The hidden one is listed under Hidden, where it can be brought back.
+// Removing one context, from its own row. It removes the context from this
+// app and nothing else: the kubeconfig is not written, and the file's other
+// contexts stay. Unlike a hidden file it is not listed anywhere to be brought
+// back -- it comes back by being added again -- so the Hidden list must not
+// appear for it.
 const { KubeconfigService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
 
 const CONFIG = '/home/u/.kube/config';
@@ -112,32 +113,28 @@ beforeEach(() => {
     workspace.settings.excludedContexts = [];
     workspace.settings.preferences.showKubeconfigNames = false;
     workspace.settings.preferences.confirmSourceRemoval = false;
-    vi.mocked(KubeconfigService.HideContext).mockReset().mockResolvedValue([
+    vi.mocked(KubeconfigService.RemoveContext).mockReset().mockResolvedValue([
         { path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] },
-    ]);
-    vi.mocked(KubeconfigService.RestoreContext).mockReset().mockResolvedValue([
-        { path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod'), ctx(CONFIG, 'dev')] },
     ]);
 });
 
-test('each context row offers to hide that context, whether or not file names are shown', async () => {
+test('each context row offers to remove that context, whether or not file names are shown', async () => {
     render(Sidebar);
 
-    await page.getByRole('button', { name: 'Hide dev' }).click();
+    await page.getByRole('button', { name: 'Remove dev' }).click();
 
-    expect(KubeconfigService.HideContext).toHaveBeenCalledWith(DEV);
-    await expect.element(page.getByRole('button', { name: 'Hide prod' })).toBeInTheDocument();
+    expect(KubeconfigService.RemoveContext).toHaveBeenCalledWith(DEV);
+    await expect.element(page.getByRole('button', { name: 'Remove prod' })).toBeInTheDocument();
     expect(document.querySelectorAll('.context').length).toBe(1);
 });
 
-test('a hidden context is listed under Hidden and can be shown again', async () => {
+test('a removed context is not listed under Hidden, and there is nothing to restore', async () => {
     workspace.files = [{ path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] }];
     workspace.settings.excludedContexts = [DEV];
     render(Sidebar);
 
-    await expect.element(page.getByText('Hidden')).toBeVisible();
-    await page.getByRole('button', { name: 'Show dev again' }).click();
-
-    expect(KubeconfigService.RestoreContext).toHaveBeenCalledWith(DEV);
-    expect(document.querySelectorAll('.context').length).toBe(2);
+    await expect.element(page.getByRole('button', { name: 'Remove prod' })).toBeInTheDocument();
+    expect(page.getByText('Hidden').elements().length).toBe(0);
+    expect(page.getByRole('button', { name: 'Show dev again' }).elements().length).toBe(0);
+    expect(document.querySelectorAll('.context').length).toBe(1);
 });

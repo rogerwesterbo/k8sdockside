@@ -130,9 +130,9 @@ See [docs/development.md](docs/development.md).
 - Watched folders, scanned by content rather than by filename
 - Per-context alias and colour, carried through tabs, dock and panels
 - Hide a discovered file, or forget one you added, and bring it back later
-- Hide a single context from its row in the sidebar — the file and its other
-  contexts stay, the kubeconfig is not written, and it is listed under
-  *Hidden* until you want it back
+- Remove a single context from its row in the sidebar — the file and its
+  other contexts stay, the kubeconfig is not written, and the context comes
+  back the moment it is added again
 - A file that fails to parse is listed with the reason, not silently dropped
 
 **Resources**

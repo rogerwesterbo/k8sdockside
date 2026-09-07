@@ -409,10 +409,14 @@ type Settings struct {
 	// they do not want. A discovered file cannot simply be forgotten -- the
 	// next scan would find it again -- so refusing it has to be recorded.
 	ExcludedFiles []string `json:"excludedFiles"`
-	// ExcludedContexts are single contexts the user has hidden, by the id
-	// kube.ContextID gives them, without touching the file they live in. The
-	// app never writes a kubeconfig, so this is the only way to take one
-	// cluster out of the sidebar and leave the rest of its file there.
+	// ExcludedContexts are single contexts the user has removed from the app,
+	// by the id kube.ContextID gives them, without touching the file they
+	// live in. The app never writes a kubeconfig, so this is the only way to
+	// take one cluster out of the sidebar and leave the rest of its file
+	// there. A removal is not offered back to the user: it lasts exactly as
+	// long as the context is still in its file, and is forgotten the moment a
+	// sync no longer finds it, so adding the context again -- to the
+	// kubeconfig, or by re-adding the file -- makes it appear again.
 	ExcludedContexts []string `json:"excludedContexts"`
 	// ThemeFolders are extra directories to read themes from, on top of the
 	// themes folder beside this file. They sit here rather than in Preferences
@@ -758,15 +762,15 @@ func (s *Store) UnexcludeFile(path string) (Settings, error) {
 	})
 }
 
-// ExcludedContexts returns the contexts the user has hidden one by one.
+// ExcludedContexts returns the contexts the user has removed one by one.
 func (s *Store) ExcludedContexts() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.data.ExcludedContexts)
 }
 
-// ExcludeContext hides one context from the sidebar, leaving its file and the
-// other contexts in it where they are.
+// ExcludeContext removes one context from the sidebar, leaving its file and
+// the other contexts in it where they are.
 func (s *Store) ExcludeContext(id string) (Settings, error) {
 	if id == "" {
 		return s.Get(), errors.New("context id is required")
@@ -778,10 +782,18 @@ func (s *Store) ExcludeContext(id string) (Settings, error) {
 	})
 }
 
-// UnexcludeContext shows a hidden context again.
-func (s *Store) UnexcludeContext(id string) (Settings, error) {
+// ForgetContexts drops the removals of contexts that are no longer in any
+// kubeconfig. A removal is only meant to outlast the context it names for as
+// long as the file still holds it; once the context is gone, keeping the
+// removal would silently swallow the same name the next time it is added.
+func (s *Store) ForgetContexts(ids []string) (Settings, error) {
+	if len(ids) == 0 {
+		return s.Get(), nil
+	}
 	return s.update(func(d *Settings) {
-		d.ExcludedContexts = slices.DeleteFunc(d.ExcludedContexts, func(c string) bool { return c == id })
+		d.ExcludedContexts = slices.DeleteFunc(d.ExcludedContexts, func(c string) bool {
+			return slices.Contains(ids, c)
+		})
 	})
 }
 

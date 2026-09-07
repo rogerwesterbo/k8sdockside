@@ -21,8 +21,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     KubeconfigService: {
         Sync: vi.fn().mockResolvedValue([]),
         Files: vi.fn().mockResolvedValue([]),
-        HideContext: vi.fn().mockResolvedValue([]),
-        RestoreContext: vi.fn().mockResolvedValue([]),
+        RemoveContext: vi.fn().mockResolvedValue([]),
     },
     ResourceService: {
         Describe: vi.fn().mockResolvedValue(''),
@@ -2400,30 +2399,26 @@ describe('the describe tab', () => {
     });
 });
 
-// Hiding one context: the app's own list, never the kubeconfig. The backend
+// Removing one context: the app's own list, never the kubeconfig. The backend
 // answers with the files as they now stand, and the tabs that pointed at the
-// hidden context go with it, the way they do when its file is removed.
-describe('hiding a context', () => {
-    // Two files, since a context's id is its file and its name: hiding one
+// removed context go with it, the way they do when its file is removed.
+describe('removing a context', () => {
+    // Two files, since a context's id is its file and its name: removing one
     // leaves its file listed, with nothing in it.
     const PROD_FILE = '/home/u/.kube/prod';
     const STAGING_FILE = '/home/u/.kube/staging';
     const kept = { id: PROD, name: 'admin@prod', cluster: 'prod', user: 'admin', namespace: '', server: '', file: PROD_FILE, current: false };
-    const hidden = { id: STAGING, name: 'admin@staging', cluster: 'staging', user: 'admin', namespace: '', server: '', file: STAGING_FILE, current: false };
+    const removed = { id: STAGING, name: 'admin@staging', cluster: 'staging', user: 'admin', namespace: '', server: '', file: STAGING_FILE, current: false };
 
     beforeEach(() => {
         workspace.files = [
             { path: PROD_FILE, source: 'manual', error: '', contexts: [kept] },
-            { path: STAGING_FILE, source: 'manual', error: '', contexts: [hidden] },
+            { path: STAGING_FILE, source: 'manual', error: '', contexts: [removed] },
         ];
         workspace.settings.excludedContexts = [];
-        vi.mocked(KubeconfigService.HideContext).mockReset().mockResolvedValue([
+        vi.mocked(KubeconfigService.RemoveContext).mockReset().mockResolvedValue([
             { path: PROD_FILE, source: 'manual', error: '', contexts: [kept] },
             { path: STAGING_FILE, source: 'manual', error: '', contexts: [] },
-        ]);
-        vi.mocked(KubeconfigService.RestoreContext).mockReset().mockResolvedValue([
-            { path: PROD_FILE, source: 'manual', error: '', contexts: [kept] },
-            { path: STAGING_FILE, source: 'manual', error: '', contexts: [hidden] },
         ]);
         vi.mocked(SettingsService.Get).mockReset().mockResolvedValue({ excludedContexts: [STAGING] } as never);
     });
@@ -2431,23 +2426,18 @@ describe('hiding a context', () => {
     test('asks the backend, and closes the tabs that were open on it', async () => {
         open([PROD, 'pods'], [STAGING, 'pods'], [STAGING, 'nodes']);
 
-        await workspace.hideContext(STAGING);
+        await workspace.removeContext(STAGING);
 
-        expect(KubeconfigService.HideContext).toHaveBeenCalledWith(STAGING);
+        expect(KubeconfigService.RemoveContext).toHaveBeenCalledWith(STAGING);
         expect(workspace.contexts.map((c) => c.id)).toEqual([PROD]);
         expect(workspace.tabs.map((t) => t.contextId)).toEqual([PROD]);
-        expect(workspace.hiddenContexts).toEqual([{ id: STAGING, file: STAGING_FILE, name: 'admin@staging' }]);
     });
 
-    test('restoring brings it back into the list', async () => {
-        await workspace.hideContext(STAGING);
-        vi.mocked(SettingsService.Get).mockResolvedValue({ excludedContexts: [] } as never);
+    test('the removal is remembered by the backend, not listed for undo', async () => {
+        await workspace.removeContext(STAGING);
 
-        await workspace.restoreContext(STAGING);
-
-        expect(KubeconfigService.RestoreContext).toHaveBeenCalledWith(STAGING);
-        expect(workspace.contexts.map((c) => c.id)).toEqual([PROD, STAGING]);
-        expect(workspace.hiddenContexts).toEqual([]);
+        expect(workspace.settings.excludedContexts).toEqual([STAGING]);
+        expect(workspace.excluded).toEqual([]);
     });
 });
 

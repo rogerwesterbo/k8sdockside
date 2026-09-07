@@ -460,20 +460,6 @@ class Workspace {
     folders = $derived(this.settings.manualFolders);
     /** Files the user has hidden, so the sidebar can offer to show them again. */
     excluded = $derived(this.settings.excludedFiles);
-
-    /**
-     * The contexts hidden one by one, with the file and name each id was made
-     * from -- the id is `<file>::<name>`, as kube.ContextID builds it -- so
-     * the Hidden list can say which cluster each one is.
-     */
-    hiddenContexts = $derived(
-        this.settings.excludedContexts.map((id) => {
-            const at = id.lastIndexOf('::');
-            return at === -1
-                ? { id, file: '', name: id }
-                : { id, file: id.slice(0, at), name: id.slice(at + 2) };
-        }),
-    );
     /** Every open tab, in every pane. */
     allTabs = $derived(PANE_IDS.flatMap((pane) => this.panes[pane].tabs));
     /**
@@ -755,9 +741,10 @@ class Workspace {
 
     /**
      * Asks before dropping a kubeconfig source, when the user has turned that
-     * on. Both removals are already undoable -- a hidden file is listed under
-     * Hidden and a folder can be re-added -- so this is off by default and
-     * exists for people who would rather not have to undo.
+     * on. Dropping a file or a folder is undoable -- a hidden file is listed
+     * under Hidden and a folder can be re-added -- and a removed context comes
+     * back by being added again, so this is off by default and exists for
+     * people who would rather not have to undo.
      */
     private confirmRemoval(question: string): boolean {
         if (!this.confirmSourceRemoval) return true;
@@ -807,30 +794,20 @@ class Workspace {
     }
 
     /**
-     * Hides one context in this app, leaving its file and the rest of the
-     * contexts in it alone. Nothing is written to the kubeconfig; the hiding
-     * is listed under Hidden in the sidebar, where it can be undone.
+     * Removes one context from this app, leaving its file and the rest of the
+     * contexts in it alone. Nothing is written to the kubeconfig, and nothing
+     * is listed to undo it: the context is gone until it is added again,
+     * either to the kubeconfig or by re-adding its file.
      */
-    async hideContext(contextId: string): Promise<void> {
+    async removeContext(contextId: string): Promise<void> {
         const name = this.contexts.find((c) => c.id === contextId)?.name ?? contextId;
-        if (!this.confirmRemoval(`Hide ${name}?\n\nAny tabs open on it will close. The kubeconfig is not changed.`)) {
+        if (!this.confirmRemoval(`Remove ${name}?\n\nAny tabs open on it will close. The kubeconfig is not changed; the context appears again if it is added again.`)) {
             return;
         }
         try {
-            this.files = adoptFiles(await KubeconfigService.HideContext(contextId));
+            this.files = adoptFiles(await KubeconfigService.RemoveContext(contextId));
             this.settings = adoptSettings(await SettingsService.Get());
             this.dropTabsForMissingContexts();
-            this.ensureSelection();
-        } catch (err) {
-            this.fail(message(err));
-        }
-    }
-
-    /** Shows a hidden context again. */
-    async restoreContext(contextId: string): Promise<void> {
-        try {
-            this.files = adoptFiles(await KubeconfigService.RestoreContext(contextId));
-            this.settings = adoptSettings(await SettingsService.Get());
             this.ensureSelection();
         } catch (err) {
             this.fail(message(err));

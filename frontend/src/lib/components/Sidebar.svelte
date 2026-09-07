@@ -175,7 +175,7 @@
         {/if}
     </div>
 
-    {#if workspace.folders.length > 0 || workspace.excluded.length > 0 || workspace.hiddenContexts.length > 0}
+    {#if workspace.folders.length > 0 || workspace.excluded.length > 0}
         <div class="sources">
             {#if workspace.folders.length > 0}
                 <p class="group">Watched folders</p>
@@ -196,24 +196,11 @@
             {/if}
 
             <!-- A discovered file cannot be forgotten, only hidden -- so the
-                 hiding has to be visible, or it is state nobody can undo. The
-                 same goes for a single context hidden from its row. -->
-            {#if workspace.excluded.length > 0 || workspace.hiddenContexts.length > 0}
+                 hiding has to be visible, or it is state nobody can undo. A
+                 context removed from its row is not listed: it is gone from
+                 the app, and comes back only by being added again. -->
+            {#if workspace.excluded.length > 0}
                 <p class="group">Hidden</p>
-                {#each workspace.hiddenContexts as hidden (hidden.id)}
-                    <div class="source-row">
-                        <Icon name="layers" size={12} />
-                        <span class="path" title="{hidden.name} in {hidden.file}">{hidden.name}</span>
-                        <button
-                            class="drop restore"
-                            onclick={() => workspace.restoreContext(hidden.id)}
-                            title="Show {hidden.name} again"
-                            aria-label="Show {hidden.name} again"
-                        >
-                            <Icon name="undo" size={11} />
-                        </button>
-                    </div>
-                {/each}
                 {#each workspace.excluded as path (path)}
                     <div class="source-row">
                         <Icon name="file" size={12} />

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -32,14 +33,14 @@ func NewKubeconfigService(store *appconfig.Store) *KubeconfigService {
 }
 
 // Sync rescans every source -- ~/.kube/config, $KUBECONFIG, the user's own
-// paths, and the rest of ~/.kube -- and returns what it found.
+// paths, and the rest of ~/.kube -- takes out the contexts the user has
+// removed, and returns what is left.
 func (s *KubeconfigService) Sync() []kube.File {
-	files := kube.Discover(kube.Sources{
-		Files:            s.store.ManualFiles(),
-		Folders:          s.store.ManualFolders(),
-		Excluded:         s.store.ExcludedFiles(),
-		ExcludedContexts: s.store.ExcludedContexts(),
-	})
+	files := s.withoutRemoved(kube.Discover(kube.Sources{
+		Files:    s.store.ManualFiles(),
+		Folders:  s.store.ManualFolders(),
+		Excluded: s.store.ExcludedFiles(),
+	}))
 
 	index := make(map[string]kube.Context)
 	for _, f := range files {
@@ -52,6 +53,66 @@ func (s *KubeconfigService) Sync() []kube.File {
 	s.files, s.index = files, index
 	s.mu.Unlock()
 	return files
+}
+
+// withoutRemoved takes the removed contexts out of the files that still hold
+// them, and forgets every removal that no file matched.
+//
+// A removal lives in the app's own settings, since a kubeconfig is never
+// written, and it is not listed anywhere the user could undo it. That makes
+// its lifetime the whole promise: it is honoured while the context is in its
+// file, and forgotten as soon as a scan no longer finds it, so that a context
+// added again -- by the tool that wrote it the first time, or by re-adding the
+// file it lives in -- shows up rather than vanishing into an old removal that
+// nothing on screen explains.
+//
+// A file that could not be read says nothing about what it holds, so its
+// removals are kept until it can be read again.
+func (s *KubeconfigService) withoutRemoved(files []kube.File) []kube.File {
+	removed := s.store.ExcludedContexts()
+	if len(removed) == 0 {
+		return files
+	}
+
+	drop := make(map[string]bool, len(removed))
+	for _, id := range removed {
+		drop[id] = true
+	}
+
+	found := make(map[string]bool, len(removed))
+	unreadable := map[string]bool{}
+	for i := range files {
+		if files[i].Error != "" {
+			unreadable[files[i].Path] = true
+		}
+		files[i].Contexts = slices.DeleteFunc(files[i].Contexts, func(c kube.Context) bool {
+			if !drop[c.ID] {
+				return false
+			}
+			found[c.ID] = true
+			return true
+		})
+	}
+
+	var stale []string
+	for _, id := range removed {
+		if found[id] || unreadable[contextFile(id)] {
+			continue
+		}
+		stale = append(stale, id)
+	}
+	// A removal that could not be forgotten now is tried again on the next
+	// scan; the sidebar is right either way, since the context is not there.
+	_, _ = s.store.ForgetContexts(stale)
+	return files
+}
+
+// contextFile is the path half of a context id, as kube.ContextID builds it.
+func contextFile(id string) string {
+	if at := strings.LastIndex(id, "::"); at != -1 {
+		return id[:at]
+	}
+	return ""
 }
 
 // Files returns the last scan, running one first if the app has just started.
@@ -137,11 +198,15 @@ func (s *KubeconfigService) RestoreFile(path string) ([]kube.File, error) {
 	return s.Sync(), nil
 }
 
-// HideContext takes one context out of the sidebar and leaves the rest of its
-// file there. The kubeconfig itself is not touched -- this app never writes
-// one -- so the hiding is remembered in the app's own settings, and a rescan
-// leaves the context out again.
-func (s *KubeconfigService) HideContext(id string) ([]kube.File, error) {
+// RemoveContext takes one context out of the sidebar and leaves the rest of
+// its file there. The kubeconfig itself is not touched -- this app never
+// writes one -- so the removal is remembered in the app's own settings, and a
+// rescan leaves the context out again for as long as the file holds it.
+//
+// Unlike a hidden file, a removed context is not listed anywhere to be
+// brought back: it is gone from the app. It comes back by being added again,
+// to the kubeconfig or by re-adding its file -- see withoutRemoved.
+func (s *KubeconfigService) RemoveContext(id string) ([]kube.File, error) {
 	if id == "" {
 		return s.Files(), errors.New("no context given")
 	}
@@ -149,20 +214,6 @@ func (s *KubeconfigService) HideContext(id string) ([]kube.File, error) {
 		return s.Files(), err
 	}
 	return s.Sync(), nil
-}
-
-// RestoreContext shows a hidden context again.
-func (s *KubeconfigService) RestoreContext(id string) ([]kube.File, error) {
-	if _, err := s.store.UnexcludeContext(id); err != nil {
-		return s.Files(), err
-	}
-	return s.Sync(), nil
-}
-
-// HiddenContexts returns the ids of the contexts hidden one by one, so the
-// sidebar can list them and offer to show them again.
-func (s *KubeconfigService) HiddenContexts() []string {
-	return s.store.ExcludedContexts()
 }
 
 // Excluded returns the files the user has hidden, so the sidebar can say how
