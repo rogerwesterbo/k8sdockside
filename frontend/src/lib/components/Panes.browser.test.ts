@@ -322,3 +322,78 @@ test('the describe tab closes from its own close button', async () => {
     expect(workspace.detailTarget).toBeNull();
     expect(workspace.paneOf(DETAILS_TAB_ID)).toBeNull();
 });
+
+// Where a tab can land is shown while it is in the air, and every one of those
+// targets has to go away the moment it lands -- wherever it lands. A tab
+// dropped into another pane leaves the strip it came from, and a drag source
+// removed from the document fires no dragend; the panes that were not dropped
+// on used to wait for exactly that dragend to put their targets away.
+test('every drop target goes away once the tab has landed, whichever pane took it', async () => {
+    render(Pane, { pane: 'left' });
+    render(Pane, { pane: 'main' });
+    render(Pane, { pane: 'bottom' });
+    workspace.openTab(PROD, 'pods');
+    await expect.element(page.getByRole('tab', { name: /Pods/ })).toBeVisible();
+    const tab = await page.getByRole('tab', { name: /Pods/ }).element();
+    const dataTransfer = new DataTransfer();
+
+    tab.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    // The two panes it could go to offer themselves; the one it is in does not.
+    await expect.poll(() => document.querySelectorAll('.dropzone').length).toBe(2);
+    expect(document.querySelector('.pane.main .dropzone')).toBeNull();
+
+    const strip = stripFor('Dock');
+    strip.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+    strip.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+    // No dragend follows: the tab has left the document with the move.
+
+    expect(workspace.panes.bottom.tabs.map((t) => t.kind)).toEqual(['pods']);
+    await expect.poll(() => document.querySelectorAll('.dropzone').length).toBe(0);
+    expect(document.querySelector('.pane.receiving')).toBeNull();
+});
+
+// Folded and empty, the dock is a strip a few pixels tall, most of it a hint
+// about the details panel -- and the hint did not take a drop. That is the
+// "where is the bottom area" anybody dragging a tab there for the first time
+// asked. It opens some room to aim at while a tab is in the air, and every
+// part of the strip takes the drop.
+test('a folded dock opens a drop area while a tab is in the air, and its hint takes the drop', async () => {
+    render(Pane, { pane: 'main' });
+    render(Pane, { pane: 'bottom' });
+    workspace.openTab(PROD, 'pods');
+    await expect.element(page.getByRole('tab', { name: /Pods/ })).toBeVisible();
+    const body = document.querySelector('.pane.bottom .body') as HTMLElement;
+    expect(body.getBoundingClientRect().height).toBe(0);
+    const tab = await page.getByRole('tab', { name: /Pods/ }).element();
+    const dataTransfer = new DataTransfer();
+
+    tab.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+
+    await expect.element(page.getByText('Drop to move to the dock')).toBeVisible();
+    expect(body.getBoundingClientRect().height).toBeGreaterThan(0);
+
+    const hint = page.getByText('Select a resource, then', { exact: false }).element();
+    hint.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }));
+    hint.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }));
+
+    expect(workspace.panes.bottom.tabs.map((t) => t.kind)).toEqual(['pods']);
+    await expect.poll(() => document.querySelectorAll('.dropzone').length).toBe(0);
+});
+
+// The mirror of the case above: a drag that ends on nothing -- let go over
+// the table, or outside the window -- still puts every target away.
+test('a drag let go on nothing puts every drop target away too', async () => {
+    render(Pane, { pane: 'main' });
+    render(Pane, { pane: 'bottom' });
+    workspace.openTab(PROD, 'pods');
+    await expect.element(page.getByRole('tab', { name: /Pods/ })).toBeVisible();
+    const tab = await page.getByRole('tab', { name: /Pods/ }).element();
+    const dataTransfer = new DataTransfer();
+
+    tab.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer }));
+    await expect.poll(() => document.querySelectorAll('.dropzone').length).toBe(1);
+    tab.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer }));
+
+    await expect.poll(() => document.querySelectorAll('.dropzone').length).toBe(0);
+    expect(workspace.panes.main.tabs.map((t) => t.kind)).toEqual(['pods']);
+});

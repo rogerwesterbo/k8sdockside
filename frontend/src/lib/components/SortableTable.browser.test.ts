@@ -88,3 +88,12 @@ test('clicking a row reports it to the caller', async () => {
     expect(picked).not.toBeNull();
     expect(picked!.id).toBe('b');
 });
+
+// The sort is bindable so a caller can hand back the one the user left: a
+// resource tab is rebuilt every time it is brought forward.
+test('a sort handed in by the caller is applied from the start', async () => {
+    render(SortableTable, { columns: AGES, rows: [byAge[1], byAge[2], byAge[0]], sortColumn: 1, sortDescending: true });
+
+    await expect.poll(() => columnText(1)).toEqual(['3d', '2h', '5m']);
+    expect(document.querySelector('th[aria-sort="descending"]')?.textContent).toContain('Last Seen');
+});

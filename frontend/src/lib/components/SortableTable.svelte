@@ -37,6 +37,20 @@
          * only this component knows, since it is the one sorting.
          */
         onpick?: (rows: Row[], on: boolean) => void;
+        /**
+         * The column the rows are sorted by, and which way. Bindable, so a
+         * caller can keep a sort across the table's lifetime: a resource tab
+         * is destroyed when another is brought forward and built again on the
+         * way back, and a sort that reset each time made "the newest pods"
+         * something to ask for again at every switch.
+         *
+         * Null means "the order the caller gave", which the backend has
+         * already put in each kind's natural order -- events most recent
+         * first, everything else by namespace and name. Sorting before the
+         * user asks would undo that.
+         */
+        sortColumn?: number | null;
+        sortDescending?: boolean;
     }
 
     let {
@@ -48,6 +62,8 @@
         cell,
         picked = null,
         onpick,
+        sortColumn = $bindable(null),
+        sortDescending = $bindable(false),
     }: Props = $props();
 
     /** The row last ticked on its own, which is where a shift-click sweeps from. */
@@ -104,12 +120,6 @@
             },
         };
     }
-
-    // Null means "the order the caller gave", which the backend has already put
-    // in each kind's natural order -- events most recent first, everything else
-    // by namespace and name. Sorting before the user asks would undo that.
-    let sortColumn = $state<number | null>(null);
-    let sortDescending = $state(false);
 
     /**
      * What a cell sorts by: its sort key where it has one, its text otherwise.

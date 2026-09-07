@@ -111,6 +111,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
 
 const ResourceTable = (await import('./ResourceTable.svelte')).default;
 const { workspace } = await import('../state/workspace.svelte');
+const { views } = await import('../state/views');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 
@@ -141,6 +142,7 @@ function podsTable(pills: { label: string; tone: string; detail: string }[] | nu
 
 beforeEach(() => {
     workspace.closeDetail();
+    views.forgetAll();
 });
 
 test('a cell carrying containers is drawn as rectangles, not as its text', async () => {
@@ -256,4 +258,58 @@ test('choosing namespaces moves the filter on the open subscription', async () =
     await page.getByRole('menuitemcheckbox', { name: 'default' }).click();
     await expect.poll(() => moved.mock.lastCall?.[0]).toEqual(['default', 'kube-system']);
     await expect.element(page.getByRole('button', { name: /^Namespaces/ })).toHaveTextContent('default, kube-system');
+});
+
+/** Two deployments, the older one first, as the backend orders them. */
+function agesTable() {
+    const aged = (name: string, age: string, seconds: string) => ({
+        id: `deployments/default/${name}`,
+        name,
+        namespace: 'default',
+        cells: [plain(name), { text: age, tone: '', sort: seconds, pills: null }],
+    });
+    return {
+        kind: 'deployments',
+        columns: ['Name', 'Age'],
+        namespaced: true,
+        error: '',
+        rows: [aged('old', '3d', '259200'), aged('new', '5m', '300')],
+    };
+}
+
+/** The Name column, top to bottom. Deployments can be deleted, so a checkbox column comes first. */
+const names = () =>
+    [...document.querySelectorAll('tbody tr')].map((tr) => tr.querySelector('td:not(.pick)')?.textContent?.trim() ?? '');
+
+// The pane keys the view on its tab, so bringing another tab forward destroys
+// this component and coming back builds a new one. Pods sorted by age and
+// narrowed to a word is exactly the view somebody leaves for a moment and
+// expects to find again -- and it used to come back as the default order,
+// unfiltered, every time.
+test('the sort and the search survive the tab being rebuilt', async () => {
+    const first = await render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+
+    await page.getByRole('button', { name: 'Age' }).click();
+    await expect.poll(() => names()).toEqual(['new', 'old']);
+    await page.getByPlaceholder('Filter deployments').fill('ne');
+    await expect.poll(() => names()).toEqual(['new']);
+
+    await first.unmount();
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+
+    await expect.poll(() => names()).toEqual(['new']);
+    expect(document.querySelector('th[aria-sort="ascending"]')?.textContent).toContain('Age');
+    expect((page.getByPlaceholder('Filter deployments').element() as HTMLInputElement).value).toBe('ne');
+});
+
+// ...and only that tab's: the same kind in another cluster is another tab.
+test('what one tab remembers does not leak into another', async () => {
+    render(ResourceTable, { contextId: '/home/u/.kube/staging::admin@staging', kind: 'deployments' });
+    pushed.send(agesTable());
+
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+    expect((page.getByPlaceholder('Filter deployments').element() as HTMLInputElement).value).toBe('');
 });

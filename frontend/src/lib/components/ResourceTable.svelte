@@ -19,6 +19,8 @@
     import { extensions, setBadLine } from '../editor/setup';
     import { buildMergePatch, type PatchMove, type PatchTarget } from '../patch';
     import { customKindFor, labelFor, singularFor } from '../catalogue';
+    import { resourceTabId } from '../state/panes';
+    import { views } from '../state/views';
     import SegmentedControl from './settings/SegmentedControl.svelte';
     import ContainerPills from './ContainerPills.svelte';
     import SortableTable from './SortableTable.svelte';
@@ -59,12 +61,27 @@
      */
     const PREVIEW_DELAY = 250;
 
+    // How this tab was left, if it has been on screen before -- see views.
+    // Read once, untracked: the pane keys this component on the tab, so the
+    // props do not change for as long as it lives.
+    const tabId = untrack(() => resourceTabId(contextId, kind));
+    const remembered = views.recall(tabId);
+
     let table = $state<Table | null>(null);
     /** Every namespace the cluster has, for the picker. */
     let available = $state<string[]>([]);
     /** The namespaces the table is narrowed to; none means all of them. */
-    let selected = $state<string[]>([]);
-    let query = $state('');
+    let selected = $state<string[]>(remembered?.namespaces ?? []);
+    let query = $state(remembered?.query ?? '');
+    let sortColumn = $state<number | null>(remembered?.sortColumn ?? null);
+    let sortDescending = $state(remembered?.sortDescending ?? false);
+
+    // Written on every change rather than on the way out, because there is
+    // no way out to speak of: the component is torn down by the {#key} the
+    // moment another tab is brought forward.
+    $effect(() => {
+        views.remember(tabId, { sortColumn, sortDescending, namespaces: selected, query });
+    });
     let loading = $state(true);
     let error = $state<string | null>(null);
     /** Bumped by the retry button; the subscribing effect reads it as a dependency. */
@@ -597,6 +614,8 @@
                 onselect={select}
                 picked={pickable ? picked : null}
                 onpick={pick}
+                bind:sortColumn
+                bind:sortDescending
                 empty={query.trim() ? `Nothing matches “${query}”.` : `No ${labelFor(kind).toLowerCase()} here.`}
                 cell={bodyCell}
             />

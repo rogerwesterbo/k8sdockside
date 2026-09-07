@@ -89,6 +89,8 @@ frontend/src/
   lib/state/terminals.svelte.ts   the shells open in the dock, and their xterm instances
   lib/state/forwards.svelte.ts    the port forwards, live and remembered
   lib/state/updates.svelte.ts     the newest release known, and whether it is still unread
+  lib/state/tabdrag.svelte.ts     the tab in the air, while one is being dragged between panes
+  lib/state/views.ts              how each open list is sorted and filtered, for as long as its tab is
   lib/theme/apply.ts         writing a theme's colours onto the document
   lib/plugins/               the plugin catalogue as the sidebar and overview see it
   lib/charts/                the SVG line chart, and the panel that hosts them

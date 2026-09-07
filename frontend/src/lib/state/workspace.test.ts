@@ -98,6 +98,7 @@ const {
 } = await import('./workspace.svelte');
 const { labelFor, iconFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
+const { views } = await import('./views');
 const { SETTINGS, HELP, KUBERNETES } = await import('../catalogue');
 const { ResourceService, KubeconfigService, SettingsService, ThemeService, PluginService, MetricsService } = await import(
     '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services',
@@ -2502,5 +2503,38 @@ describe('the help and primer tabs', () => {
         expect(labelFor(KUBERNETES)).toBe('Kubernetes primer');
         expect(iconFor(HELP)).not.toBe('box');
         expect(iconFor(KUBERNETES)).not.toBe('box');
+    });
+});
+
+// A list's sort and filter are kept while its tab is open, so switching away
+// and back finds them again -- and dropped with the tab, so a search typed
+// this morning does not hide rows in a tab opened this afternoon.
+describe('what a list was showing', () => {
+    beforeEach(() => {
+        views.forgetAll();
+        workspace.closeAllTabs();
+    });
+
+    test('is dropped when its tab is closed', () => {
+        workspace.openTab(PROD, 'pods');
+        const id = resourceTabId(PROD, 'pods');
+        views.remember(id, { sortColumn: 3, sortDescending: true, namespaces: ['web'], query: 'api' });
+
+        workspace.closeTab(id);
+
+        expect(views.recall(id)).toBeNull();
+    });
+
+    test('survives another tab being brought forward, and a move between panes', () => {
+        workspace.openTab(PROD, 'pods');
+        workspace.openTab(PROD, 'nodes');
+        const id = resourceTabId(PROD, 'pods');
+        views.remember(id, { sortColumn: 3, sortDescending: true, namespaces: [], query: '' });
+
+        workspace.activateTab(resourceTabId(PROD, 'nodes'));
+        workspace.moveTabToPane(id, 'bottom');
+        workspace.closeTab(resourceTabId(PROD, 'nodes'));
+
+        expect(views.recall(id)?.sortColumn).toBe(3);
     });
 });

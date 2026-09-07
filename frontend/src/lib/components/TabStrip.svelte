@@ -43,7 +43,8 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import { alpha, textOn } from '../colors';
-    import { beginTabDrag, currentTabDrag, endTabDrag, type PaneId } from '../state/panes';
+    import type { PaneId } from '../state/panes';
+    import { beginTabDrag, currentTabDrag, endTabDrag } from '../state/tabdrag.svelte';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -91,8 +92,22 @@
         rule = 'below',
     }: Props = $props();
 
-    /** Index of the tab currently being dragged, or null when not dragging. */
-    let dragIndex = $state<number | null>(null);
+    /**
+     * Index of the tab being dragged, or null when the tab in the air is not
+     * one of these.
+     *
+     * Derived from the drag rather than noted at dragstart, because a tab
+     * dropped into another pane leaves this list without this strip hearing
+     * a dragend for it -- the source is gone from the document by then, and
+     * a removed source fires none. A remembered index would outlive the tab
+     * and reorder whatever came to sit at that position on the next drag.
+     */
+    let dragIndex = $derived.by(() => {
+        const drag = currentTabDrag();
+        if (!drag || drag.from !== pane) return null;
+        const at = tabs.findIndex((t) => t.id === drag.id);
+        return at === -1 ? null : at;
+    });
     /**
      * Where a tab from another pane would land, or null when nothing is hovering
      * over this strip from outside it.
@@ -104,17 +119,22 @@
     let adoptAt = $state<number | null>(null);
 
     function startDrag(event: DragEvent, index: number): void {
-        dragIndex = index;
         beginTabDrag({ id: tabs[index].id, from: pane });
         event.dataTransfer?.setData('text/plain', tabs[index].id);
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
     }
 
     function stopDrag(): void {
-        dragIndex = null;
         adoptAt = null;
         endTabDrag();
     }
+
+    // The marker goes with the drag, wherever it ended. A tab hovered over
+    // this strip and then dropped on another leaves here without a drop, and
+    // the dragleave for it is not guaranteed.
+    $effect(() => {
+        if (currentTabDrag() === null) adoptAt = null;
+    });
 
     /** Whether the tab in the air came from somewhere this strip can take it from. */
     function foreign(): boolean {
@@ -141,8 +161,8 @@
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
         if (dragIndex === null || dragIndex === index) return;
+        // dragIndex follows the tab to its new position on its own.
         onmove(dragIndex, index);
-        dragIndex = index;
     }
 
     /** Takes in a tab dragged from another pane. A local drag has already landed. */
@@ -155,12 +175,32 @@
         stopDrag();
     }
 
-    /** Anywhere in the strip that is not a tab takes a foreign tab at the end. */
+    /**
+     * Anywhere in the strip that is not a tab takes a foreign tab at the end:
+     * the room past the last tab, the hint an empty strip shows, the controls
+     * pinned after them. The strip is a thin target at the best of times, and
+     * the parts of it that would refuse a drop are not distinguishable from
+     * the parts that would take one.
+     */
     function dragOverStrip(event: DragEvent): void {
         if (!foreign()) return;
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
         adoptAt = tabs.length;
+    }
+
+    let rootEl = $state<HTMLElement | null>(null);
+
+    /**
+     * Clears the marker on the way out of the strip -- and only then. A
+     * dragleave also fires on the way from the strip into one of its own
+     * tabs, and clearing it there makes the marker flicker with every tab
+     * the pointer crosses.
+     */
+    function dragLeaveStrip(event: DragEvent): void {
+        const into = event.relatedTarget;
+        if (into instanceof Node && rootEl?.contains(into)) return;
+        adoptAt = null;
     }
 
     /** Alt+Arrow moves the focused tab, so reordering is not drag-only. */
@@ -410,7 +450,17 @@
     onkeydown={(e) => e.key === 'Escape' && closeMenu()}
 />
 
-<div class="strip {rule}">
+<!-- The drag handlers are what make a strip a drop target for a tab from
+     another pane. On the strip as a whole rather than on the tab list inside
+     it, so the hint and the controls take a drop as readily as the tabs. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+    class="strip {rule}"
+    bind:this={rootEl}
+    ondragover={dragOverStrip}
+    ondrop={drop}
+    ondragleave={dragLeaveStrip}
+>
     <div class="scroller">
         <!-- Before the tab list rather than inside it: a tablist holding a
              paragraph is one a screen reader announces as a tab nobody can
@@ -419,21 +469,11 @@
             <p class="empty">{empty}</p>
         {/if}
 
-        <!-- The drag handlers are what make a strip a drop target for a tab from
-             another pane. A tablist is not focusable itself -- its tabs are --
-             so the rule that wants a tabindex here does not apply. -->
+        <!-- A tablist is not focusable itself -- its tabs are -- so the rule
+             that wants a tabindex here does not apply. -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <!-- svelte-ignore a11y_interactive_supports_focus -->
-        <div
-            class="tabbar"
-            role="tablist"
-            aria-label={label}
-            bind:this={stripEl}
-            onscroll={measure}
-            ondragover={dragOverStrip}
-            ondrop={drop}
-            ondragleave={() => (adoptAt = null)}
-        >
+        <div class="tabbar" role="tablist" aria-label={label} bind:this={stripEl} onscroll={measure}>
             {#each tabs as tab, index (tab.id)}
                 {@const active = activeId === tab.id}
                 <div

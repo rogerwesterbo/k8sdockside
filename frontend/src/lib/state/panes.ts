@@ -299,31 +299,3 @@ export function clustersTab(): Tab {
         pinned: true,
     };
 }
-
-/**
- * The tab being dragged, for the moment it is in the air.
- *
- * Held here rather than in the drag's own dataTransfer because a dragover
- * handler is only allowed to see the *types* a drag carries, never its values --
- * and which pane a tab came from is exactly what the pane under the pointer
- * needs to know to decide whether this is a reorder or a move. The drag never
- * leaves the window, so a module-level note of it is the whole of the problem.
- */
-export interface TabDrag {
-    id: string;
-    from: PaneId;
-}
-
-let inFlight: TabDrag | null = null;
-
-export function beginTabDrag(drag: TabDrag): void {
-    inFlight = drag;
-}
-
-export function currentTabDrag(): TabDrag | null {
-    return inFlight;
-}
-
-export function endTabDrag(): void {
-    inFlight = null;
-}
