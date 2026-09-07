@@ -171,12 +171,12 @@ func (s *HelmService) ChartVersions(chart string) ([]helmcli.ChartVersion, error
 // resource: they are Secrets whose payload has to be decoded, and that payload
 // is what must not sit in an informer cache. The table is built and the payload
 // dropped in the same breath.
-func (s *HelmService) Releases(contextID, namespace string) (kube.Table, error) {
+func (s *HelmService) Releases(contextID string, namespaces []string) (kube.Table, error) {
 	ctx, err := s.resolve(contextID)
 	if err != nil {
 		return kube.Table{}, err
 	}
-	return s.watcher.HelmReleases(ctx, namespace)
+	return s.watcher.HelmReleases(ctx, namespaces)
 }
 
 // Detail reads one release in full: the values it was installed with, the notes

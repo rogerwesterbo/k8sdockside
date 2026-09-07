@@ -8,7 +8,7 @@ const pushed = vi.hoisted(() => ({ send: (_table: unknown) => {} }));
 vi.mock('../state/subscriptions', () => ({
     subscribe: vi.fn((_c: string, _k: string, _n: string, onTable: (t: unknown) => void) => {
         pushed.send = onTable;
-        return { setNamespace: vi.fn(), close: vi.fn() };
+        return { setNamespaces: vi.fn(), close: vi.fn() };
     }),
 }));
 
@@ -203,4 +203,57 @@ test('a row in a plugin view opens as the kind the view lists', async () => {
     await page.getByText('Synced').click();
 
     expect(workspace.detailTarget).toEqual({ contextId: PROD, kind: 'crd:applications.argoproj.io', namespace: 'argocd', name: 'web' });
+});
+
+// A CRD is free to declare a printer column called "Name", beside the Name the
+// app itself puts first -- vitistack.io's NetworkNamespace does, pointing it at
+// a cluster identifier. Two headers with the same text must still render: a
+// table that throws on them is a tab stuck at "Loading…".
+test('a table whose headers repeat still renders its rows', async () => {
+    render(ResourceTable, { contextId: PROD, kind: 'crd:networknamespaces.vitistack.io' });
+
+    pushed.send({
+        kind: 'crd:networknamespaces.vitistack.io',
+        columns: ['Name', 'Namespace', 'Name', 'Phase'],
+        namespaced: true,
+        error: '',
+        rows: [{
+            id: 'crd:networknamespaces.vitistack.io/default/team-a',
+            name: 'team-a',
+            namespace: 'default',
+            cells: [plain('team-a'), plain('default'), plain('cluster-1'), plain('Ready')],
+        }],
+    });
+
+    await expect.element(page.getByRole('cell', { name: 'team-a', exact: true })).toBeVisible();
+    await expect.element(page.getByRole('cell', { name: 'cluster-1', exact: true })).toBeVisible();
+    // The first header is the checkbox column's, which carries no text.
+    expect([...document.querySelectorAll('thead th')].map((th) => th.textContent?.trim())).toEqual([
+        '', 'Name', 'Namespace', 'Name', 'Phase',
+    ]);
+});
+
+// Ticking namespaces in the picker moves the filter on the open subscription,
+// as a list: two namespaces are one table.
+test('choosing namespaces moves the filter on the open subscription', async () => {
+    const { subscribe } = await import('../state/subscriptions');
+    const moved = vi.fn();
+    vi.mocked(subscribe).mockImplementationOnce((_c, _k, _n, onTable) => {
+        pushed.send = onTable as (t: unknown) => void;
+        return { setNamespaces: moved, close: vi.fn() };
+    });
+    const { ResourceService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside');
+    vi.mocked(ResourceService.Namespaces).mockResolvedValueOnce(['default', 'kube-system']);
+
+    render(ResourceTable, { contextId: PROD, kind: 'pods' });
+    pushed.send(podsTable(null));
+    await expect.element(page.getByRole('button', { name: /^Namespaces/ })).toBeVisible();
+
+    await page.getByRole('button', { name: /^Namespaces/ }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'kube-system' }).click();
+    await expect.poll(() => moved.mock.lastCall?.[0]).toEqual(['kube-system']);
+
+    await page.getByRole('menuitemcheckbox', { name: 'default' }).click();
+    await expect.poll(() => moved.mock.lastCall?.[0]).toEqual(['default', 'kube-system']);
+    await expect.element(page.getByRole('button', { name: /^Namespaces/ })).toHaveTextContent('default, kube-system');
 });

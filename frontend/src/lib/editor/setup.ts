@@ -141,6 +141,20 @@ const theme = EditorView.theme({
     },
 });
 
+/**
+ * What a document shown rather than edited is made of: the same editor, with
+ * changes refused. Search, folding and highlighting stay, which are what a
+ * document that is mostly nesting you are not reading needs.
+ *
+ * readOnly rather than editable(false), deliberately. An uneditable content
+ * element cannot take focus, and an editor that cannot be focused cannot be
+ * searched with ⌘F. readOnly keeps the caret and the keys and drops the
+ * change; the search panel leaves out its replace row of its own accord.
+ */
+export function viewerExtensions(options: { numbers: boolean; label: string }) {
+    return [...extensions({ ...options, onSave: () => {} }), EditorState.readOnly.of(true)];
+}
+
 /** What an editor of ours is made of, given what to do when Save is pressed. */
 export function extensions(options: { numbers: boolean; label: string; onSave: () => void }) {
     return [

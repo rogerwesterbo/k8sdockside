@@ -7,7 +7,7 @@ import Pane from './Pane.svelte';
 // Stubbing the subscription is what lets them exist without a cluster behind
 // them; these tests are about where a view sits, not about its rows.
 vi.mock('../state/subscriptions', () => ({
-    subscribe: vi.fn(() => ({ setNamespace: vi.fn(), close: vi.fn() })),
+    subscribe: vi.fn(() => ({ setNamespaces: vi.fn(), close: vi.fn() })),
 }));
 
 // Dragging a view from one pane into another, which is the whole point of

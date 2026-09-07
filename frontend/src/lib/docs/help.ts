@@ -29,7 +29,7 @@ export const HELP: Page = {
                 },
                 {
                     type: 'note',
-                    text: 'The app only reads your kubeconfig files. Aliases, colours, hidden files and hidden contexts are kept in its own settings file, and a kubeconfig is never written.',
+                    text: 'The app only reads your kubeconfig files. Aliases, colours, hidden files and removed contexts are kept in its own settings file, and a kubeconfig is never written.',
                 },
                 {
                     type: 'actions',
@@ -90,7 +90,7 @@ export const HELP: Page = {
                         ['`F1`', 'Open this help'],
                         ['`⌘B` / `Ctrl+B`', 'Show or hide the cluster tree'],
                         ['`⌘+` / `⌘-` / `⌘0`', 'Zoom in, out, and back to 100%'],
-                        ['`⌘S` / `Ctrl+S`', 'Save the YAML being edited'],
+                        ['`⌘S` / `Ctrl+S`', 'Save the YAML being edited, or apply the YAML patch being written'],
                         ['`Esc`', 'Close a menu or the details panel'],
                     ],
                 },
@@ -105,9 +105,11 @@ export const HELP: Page = {
                 {
                     type: 'list',
                     items: [
-                        '**Tables** are backed by a watch, not polled, so there is no refresh button: a change in the cluster appears as it happens. The namespace picker filters the cache and repaints instantly.',
+                        '**Tables** are backed by a watch, not polled, so there is no refresh button: a change in the cluster appears as it happens. The **Namespace** picker ticks any number of namespaces — nothing ticked is the whole cluster — and filters the cache, so it repaints instantly. It grows a filter box once there are more than eight, and a namespace deleted while ticked stays listed until it is unticked.',
                         '**Filter** in a table’s header matches any cell.',
-                        '**Select** rows with the checkboxes — or ⌘-click them, and shift-click for a range — and a bar offers to delete them together. The header checkbox takes every row the filter shows. It asks first and names the count; anything the cluster refuses stays ticked, with the reason.',
+                        '**Select** rows with the checkboxes — or ⌘-click them, and shift-click for a range — and a bar offers to patch or delete them together. The header checkbox takes every row the filter shows. Delete asks first and names the count; anything the cluster refuses, for either, stays ticked with the reason.',
+                        '**Patch** a selection: set or remove a label, an annotation, or any field by dotted path — `spec.replicas`, say — on every ticked object at once. It is one JSON merge patch per object, shown before it is sent. A field value that parses as JSON is sent as such and anything else as text; a list in the patch replaces the whole list. The **YAML** mode takes a whole merge patch written the way the object reads — a value sets a field, `null` removes it — for several fields at once, names the line of anything it cannot read, and `⌘S` applies it.',
+                        '**Nodes** list what `kubectl get nodes -o wide` prints — roles, version, internal and external IP, OS image, kernel and container runtime — and then capacity beside allocatable, which is what the scheduler may actually hand out.',
                         '**Describe** is the same report `kubectl describe` prints, with recent events at the end.',
                         '**Edit** opens the object’s YAML in the dock with syntax checking. Save with `⌘S`. A save against an object somebody else changed in the meantime is refused, with the API server’s own reason, rather than forced.',
                         '**Actions** depend on the kind: scale and restart for workloads; cordon, uncordon and drain for nodes; delete for anything. Each asks first.',
@@ -158,7 +160,7 @@ export const HELP: Page = {
                     type: 'list',
                     items: [
                         '**Helm → Releases** lists every release in the cluster by reading the release Secrets, so it needs no `helm` on this machine to look.',
-                        'A release’s report shows its chart, values, notes, the objects it created, and its revision history.',
+                        'A release’s report shows its chart, values, notes, the objects it created, and its revision history. The values sit in the same viewer the editor uses, read-only: **Find**, or `⌘F` once the text has focus, searches them with the matches marked, and the gutter folds a block away.',
                         '**Upgrade**, **Rollback** and **Uninstall** run the `helm` binary. Which one, and whether it was found, is under Settings → Helm.',
                     ],
                 },
@@ -359,7 +361,7 @@ export const HELP: Page = {
                     items: [
                         '**Settings** live in one JSON file: `$XDG_CONFIG_HOME/k8sdockside/settings.json` on Linux and macOS, `%AppData%\\k8sdockside\\settings.json` on Windows. The path is shown in the status bar and under Settings → About, with a button to open it. Deleting it is how you start over. Your themes and plugins sit in folders beside it.',
                         '**Updates.** The bell in the title bar says when a newer release is out, and offers the release page and the download for the way this build was installed. It is one request to GitHub shortly after launch and every six hours, carrying nothing but the app’s name and version. Switch it off under Settings → Behaviour; the check-now button under About works either way.',
-                        '**Nothing else leaves the machine.** Clusters are dialled only when you open something on them, and Prometheus is reached through the API server you are already talking to.',
+                        '**Nothing else leaves the machine.** Clusters are dialled only when you open something on them, and Prometheus is reached through the API server you are already talking to. A cluster’s client is kept for two minutes after the last tab or poll on it, so switching tabs does not rebuild it, and a kind the cluster does not have is looked for again at most once a minute.',
                         '**Credentials.** Client certificates, tokens and `exec` credential plugins all work, because the app uses the same client library `kubectl` does.',
                     ],
                 },

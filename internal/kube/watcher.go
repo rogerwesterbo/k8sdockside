@@ -111,7 +111,10 @@ type subscription struct {
 	id        string
 	contextID string
 	kind      string
-	namespace string
+	// namespaces is the set of namespaces the tab shows, nil for every one of
+	// them. A set rather than one name: a table showing a team's namespace
+	// beside kube-system is one table, not two.
+	namespaces map[string]bool
 	// selector narrows the rows to objects carrying certain labels, which is
 	// how a solution plugin ships a view of "the parts of this cluster that
 	// belong to Argo CD" rather than of a whole kind.
@@ -135,10 +138,11 @@ type subscription struct {
 // emit once the informer's cache has synced, so the caller never blocks on the
 // network.
 //
-// selector is an optional label selector narrowing the rows; empty means every
-// object of the kind. See subscription.selector for why it is not pushed down
-// to the informer.
-func (w *Watcher) Subscribe(kc Context, kind, namespace, selector string) (string, error) {
+// namespaces narrows the rows to those namespaces; none means every one.
+// selector is an optional label selector narrowing them further; empty means
+// every object of the kind. See subscription.selector for why it is not pushed
+// down to the informer.
+func (w *Watcher) Subscribe(kc Context, kind string, namespaces []string, selector string) (string, error) {
 	// Left nil when there is no selector, rather than labels.Everything(): the
 	// overwhelming majority of tabs have none, and nil is what lets project()
 	// skip the match entirely instead of asking a selector that always says yes.
@@ -175,15 +179,15 @@ func (w *Watcher) Subscribe(kc Context, kind, namespace, selector string) (strin
 	live := w.informerFor(cl, mapping)
 
 	sub := &subscription{
-		id:        fmt.Sprintf("sub-%d", w.nextID.Add(1)),
-		contextID: kc.ID,
-		kind:      kind,
-		namespace: namespace,
-		selector:  chosen,
-		columns:   cols,
-		live:      live,
-		dirty:     make(chan struct{}, 1),
-		done:      make(chan struct{}),
+		id:         fmt.Sprintf("sub-%d", w.nextID.Add(1)),
+		contextID:  kc.ID,
+		kind:       kind,
+		namespaces: namespaceFilter(namespaces),
+		selector:   chosen,
+		columns:    cols,
+		live:       live,
+		dirty:      make(chan struct{}, 1),
+		done:       make(chan struct{}),
 	}
 
 	w.mu.Lock()
@@ -224,14 +228,14 @@ func (w *Watcher) Unsubscribe(id string) {
 	}
 }
 
-// SetNamespace re-points an existing subscription at another namespace. The
+// SetNamespaces re-points an existing subscription at other namespaces. The
 // informer is cluster-scoped, so this is a filter change and a repaint -- no
 // watch is torn down or reopened.
-func (w *Watcher) SetNamespace(id, namespace string) {
+func (w *Watcher) SetNamespaces(id string, namespaces []string) {
 	w.mu.Lock()
 	sub, ok := w.subs[id]
 	if ok {
-		sub.namespace = namespace
+		sub.namespaces = namespaceFilter(namespaces)
 	}
 	w.mu.Unlock()
 	if ok {
@@ -450,15 +454,34 @@ func (w *Watcher) pump(sub *subscription) {
 		}
 
 		w.mu.Lock()
-		namespace := sub.namespace
+		keep := sub.namespaces
 		w.mu.Unlock()
 
-		w.emit(Snapshot{SubscriptionID: sub.id, Table: w.project(sub, namespace)})
+		w.emit(Snapshot{SubscriptionID: sub.id, Table: w.project(sub, keep)})
 	}
 }
 
-// project turns the informer's cache into the table the UI renders.
-func (w *Watcher) project(sub *subscription, namespace string) Table {
+// namespaceFilter turns the namespaces a tab asked for into the set its rows
+// are checked against. Nil means every namespace, which is what an empty
+// choice means: a picker with nothing ticked shows the whole cluster, not an
+// empty table.
+func namespaceFilter(names []string) map[string]bool {
+	var keep map[string]bool
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name == "" {
+			continue
+		}
+		if keep == nil {
+			keep = map[string]bool{}
+		}
+		keep[name] = true
+	}
+	return keep
+}
+
+// project turns the informer's cache into the table the UI renders, keeping
+// the rows in the given namespaces -- all of them when keep is nil.
+func (w *Watcher) project(sub *subscription, keep map[string]bool) Table {
 	objs, err := sub.live.lister.List(labels.Everything())
 	if err != nil {
 		return Table{Kind: sub.kind, Columns: []string{}, Rows: []Row{}, Error: err.Error()}
@@ -470,7 +493,7 @@ func (w *Watcher) project(sub *subscription, namespace string) Table {
 		if !ok {
 			continue
 		}
-		if namespace != AllNamespaces && u.GetNamespace() != namespace {
+		if keep != nil && !keep[u.GetNamespace()] {
 			continue
 		}
 		if sub.selector != nil && !sub.selector.Matches(labels.Set(u.GetLabels())) {

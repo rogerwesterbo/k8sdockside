@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const ObjectState = vi.fn();
 const Delete = vi.fn();
 const DeleteMany = vi.fn();
+const PatchMany = vi.fn();
+const PreviewPatch = vi.fn();
 const Scale = vi.fn();
 const Restart = vi.fn();
 const Cordon = vi.fn();
@@ -39,7 +41,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Open: vi.fn().mockResolvedValue('logs-1'),
         Close: vi.fn(),
     },
-    ActionService: { ObjectState, Delete, DeleteMany, Scale, Restart, Cordon, Drain, CancelDrain },
+    ActionService: { ObjectState, Delete, DeleteMany, PatchMany, PreviewPatch, Scale, Restart, Cordon, Drain, CancelDrain },
 }));
 
 const { actions } = await import('./actions.svelte');
@@ -72,7 +74,9 @@ beforeEach(() => {
     actions.forget(DEPLOYMENT);
     ObjectState.mockReset().mockResolvedValue(IDLE);
     Delete.mockReset().mockResolvedValue(undefined);
-    DeleteMany.mockReset().mockResolvedValue({ deleted: 0, failures: [] });
+    DeleteMany.mockReset().mockResolvedValue({ done: 0, failures: [] });
+    PatchMany.mockReset().mockResolvedValue({ done: 0, failures: [] });
+    PreviewPatch.mockReset().mockResolvedValue({ json: '', empty: true, error: '', line: 0 });
     Scale.mockReset().mockResolvedValue(undefined);
     Restart.mockReset().mockResolvedValue(undefined);
     Cordon.mockReset().mockResolvedValue(undefined);
@@ -243,7 +247,7 @@ describe('deleting a selection', () => {
 
     test('sends every row in one call and hands the report back', async () => {
         DeleteMany.mockResolvedValue({
-            deleted: 1,
+            done: 1,
             failures: [{ namespace: 'default', name: 'web-2', error: 'forbidden' }],
         });
 
@@ -252,23 +256,68 @@ describe('deleting a selection', () => {
         expect(DeleteMany).toHaveBeenCalledTimes(1);
         expect(DeleteMany).toHaveBeenCalledWith('cfg::prod', 'pods', rows);
         expect(report).toEqual({
-            deleted: 1,
+            done: 1,
             failures: [{ namespace: 'default', name: 'web-2', error: 'forbidden' }],
         });
     });
 
     // Go sends null for an empty slice; nothing downstream should have to know.
     test('a report with no failures reads as an empty list', async () => {
-        DeleteMany.mockResolvedValue({ deleted: 2, failures: null });
+        DeleteMany.mockResolvedValue({ done: 2, failures: null });
 
         const report = await actions.removeMany('cfg::prod', 'pods', rows);
 
-        expect(report).toEqual({ deleted: 2, failures: [] });
+        expect(report).toEqual({ done: 2, failures: [] });
     });
 
     test('a refused call is raised in the backend\'s words', async () => {
         DeleteMany.mockRejectedValue('unknown context "cfg::gone"');
 
         await expect(actions.removeMany('cfg::gone', 'pods', rows)).rejects.toThrow('unknown context');
+    });
+});
+
+// Patching a selection: the patch travels as the JSON text the form showed,
+// and every object that took it is said to have changed -- the refused ones
+// are not, since nothing about them moved.
+describe('patching a selection', () => {
+    const rows = [
+        { namespace: 'default', name: 'web-1' },
+        { namespace: 'default', name: 'web-2' },
+    ];
+    const patch = JSON.stringify({ metadata: { labels: { team: 'web' } } });
+    const one = { contextId: 'cfg::prod', kind: 'pods', namespace: 'default', name: 'web-1' };
+    const two = { contextId: 'cfg::prod', kind: 'pods', namespace: 'default', name: 'web-2' };
+
+    test('sends the patch text as it is, once, for every row', async () => {
+        PatchMany.mockResolvedValue({ done: 2, failures: null });
+
+        const report = await actions.patchMany('cfg::prod', 'pods', rows, patch);
+
+        expect(PatchMany).toHaveBeenCalledTimes(1);
+        expect(PatchMany).toHaveBeenCalledWith('cfg::prod', 'pods', rows, patch);
+        expect(report).toEqual({ done: 2, failures: [] });
+    });
+
+    test("a preview is the backend's reading of the text, handed back as it came", async () => {
+        PreviewPatch.mockResolvedValue({ json: '{"a":1}', empty: false, error: '', line: 0 });
+
+        const preview = await actions.previewPatch('a: 1');
+
+        expect(PreviewPatch).toHaveBeenCalledWith('a: 1');
+        expect(preview).toEqual({ json: '{"a":1}', empty: false, error: '', line: 0 });
+    });
+
+    test('says the objects that took it changed, and not the refused ones', async () => {
+        PatchMany.mockResolvedValue({
+            done: 1,
+            failures: [{ namespace: 'default', name: 'web-2', error: 'forbidden' }],
+        });
+        const before = [changes.revision(one), changes.revision(two)];
+
+        await actions.patchMany('cfg::prod', 'pods', rows, patch);
+
+        expect(changes.revision(one)).toBe(before[0] + 1);
+        expect(changes.revision(two)).toBe(before[1]);
     });
 });

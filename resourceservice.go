@@ -74,12 +74,12 @@ func (s *ResourceService) ServiceShutdown() error {
 }
 
 // Subscribe opens a live view of one resource kind and returns the subscription
-// ID that its snapshots will carry. Pass an empty namespace for all namespaces.
+// ID that its snapshots will carry. Pass no namespaces for all of them.
 //
 // It returns as soon as the watch is started. The first rows arrive as an event
 // once the cluster has answered, so a slow or unreachable cluster leaves the
 // tab in its loading state rather than blocking the UI.
-func (s *ResourceService) Subscribe(contextID, kind, namespace string) (string, error) {
+func (s *ResourceService) Subscribe(contextID, kind string, namespaces []string) (string, error) {
 	ctx, err := s.resolve(contextID)
 	if err != nil {
 		return "", err
@@ -89,11 +89,11 @@ func (s *ResourceService) Subscribe(contextID, kind, namespace string) (string, 
 	// concerned; it is turned back into a real kind and the filters it pins
 	// here, at the last moment, so nothing between the sidebar and this line
 	// has to know that plugins exist.
-	kind, namespace, selector, err := s.view(kind, namespace)
+	kind, namespaces, selector, err := s.view(kind, namespaces)
 	if err != nil {
 		return "", err
 	}
-	return s.watcher.Subscribe(ctx, kind, namespace, selector)
+	return s.watcher.Subscribe(ctx, kind, namespaces, selector)
 }
 
 // view resolves a tab's kind, which may name a plugin's view, into the kind to
@@ -104,25 +104,25 @@ func (s *ResourceService) Subscribe(contextID, kind, namespace string) (string, 
 // than intersecting with it: the pin is the whole point of the view, and a
 // tab's namespace filter that silently did nothing would be worse than one that
 // is not offered.
-func (s *ResourceService) view(kind, namespace string) (string, string, string, error) {
+func (s *ResourceService) view(kind string, namespaces []string) (string, []string, string, error) {
 	if !strings.HasPrefix(kind, plugins.Prefix) {
-		return kind, namespace, kube.NoSelector, nil
+		return kind, namespaces, kube.NoSelector, nil
 	}
 	if s.plugins == nil {
-		return "", "", "", fmt.Errorf("plugins are not available")
+		return "", nil, "", fmt.Errorf("plugins are not available")
 	}
 
 	resolved, err := s.plugins.Resolve(kind)
 	if err != nil {
-		return "", "", "", err
+		return "", nil, "", err
 	}
 	if resolved.Overview {
-		return "", "", "", fmt.Errorf("%s is a plugin overview, which is not a resource listing", kind)
+		return "", nil, "", fmt.Errorf("%s is a plugin overview, which is not a resource listing", kind)
 	}
 	if resolved.Namespace != "" {
-		namespace = resolved.Namespace
+		namespaces = []string{resolved.Namespace}
 	}
-	return resolved.Kind, namespace, resolved.Selector, nil
+	return resolved.Kind, namespaces, resolved.Selector, nil
 }
 
 // Unsubscribe closes a tab's view. The underlying watch stays open if another
@@ -131,11 +131,11 @@ func (s *ResourceService) Unsubscribe(subscriptionID string) {
 	s.watcher.Unsubscribe(subscriptionID)
 }
 
-// SetNamespace re-points an open subscription at another namespace. The watch
-// is cluster-wide, so this is a filter change: the new rows arrive as an event
-// without anything being re-fetched.
-func (s *ResourceService) SetNamespace(subscriptionID, namespace string) {
-	s.watcher.SetNamespace(subscriptionID, namespace)
+// SetNamespaces re-points an open subscription at other namespaces, none
+// meaning all. The watch is cluster-wide, so this is a filter change: the new
+// rows arrive as an event without anything being re-fetched.
+func (s *ResourceService) SetNamespaces(subscriptionID string, namespaces []string) {
+	s.watcher.SetNamespaces(subscriptionID, namespaces)
 }
 
 // Overview is the dashboard payload for one context.

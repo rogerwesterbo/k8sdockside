@@ -47,7 +47,7 @@ func TestLiveSubscribeDeliversASnapshot(t *testing.T) {
 	w := NewWatcher(func(s Snapshot) { snapshots <- s })
 	defer w.Close()
 
-	id, err := w.Subscribe(ctx, KindPods, AllNamespaces, NoSelector)
+	id, err := w.Subscribe(ctx, KindPods, nil, NoSelector)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestLiveGatewayAPIAndCustomResources(t *testing.T) {
 
 	// The CRD list is the entry point for the drill-in, so it has to work even
 	// on a cluster with no Gateway API installed.
-	id, err := w.Subscribe(ctx, KindCRDs, AllNamespaces, NoSelector)
+	id, err := w.Subscribe(ctx, KindCRDs, nil, NoSelector)
 	if err != nil {
 		t.Fatalf("Subscribe(%s): %v", KindCRDs, err)
 	}
@@ -117,7 +117,7 @@ func TestLiveGatewayAPIAndCustomResources(t *testing.T) {
 	}
 	first := definitions.Rows[0].Name
 
-	customID, err := w.Subscribe(ctx, CustomPrefix+first, AllNamespaces, NoSelector)
+	customID, err := w.Subscribe(ctx, CustomPrefix+first, nil, NoSelector)
 	if err != nil {
 		t.Fatalf("Subscribe(crd:%s): %v", first, err)
 	}
@@ -210,7 +210,7 @@ func TestLiveGatewayKindsResolve(t *testing.T) {
 
 	served := 0
 	for _, kind := range []string{KindGatewayClasses, KindGateways, KindHTTPRoutes, KindGRPCRoutes, KindReferenceGrants} {
-		id, err := w.Subscribe(ctx, kind, AllNamespaces, NoSelector)
+		id, err := w.Subscribe(ctx, kind, nil, NoSelector)
 		if err != nil {
 			// The Gateway API is optional, and a cluster without it must say so
 			// rather than fail: that message is what the tab shows.
@@ -241,7 +241,7 @@ func TestLiveCustomColumnsComeFromTheDefinition(t *testing.T) {
 	w := NewWatcher(func(s Snapshot) { snapshots <- s })
 	defer w.Close()
 
-	id, err := w.Subscribe(ctx, kind, AllNamespaces, NoSelector)
+	id, err := w.Subscribe(ctx, kind, nil, NoSelector)
 	if err != nil {
 		t.Skipf("cert-manager not installed: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestLiveNamespaceFilterAppliesWithoutReopening(t *testing.T) {
 	w := NewWatcher(func(s Snapshot) { snapshots <- s })
 	defer w.Close()
 
-	id, err := w.Subscribe(ctx, KindPods, AllNamespaces, NoSelector)
+	id, err := w.Subscribe(ctx, KindPods, nil, NoSelector)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestLiveNamespaceFilterAppliesWithoutReopening(t *testing.T) {
 	}
 	target := all.Rows[0].Namespace
 
-	w.SetNamespace(id, target)
+	w.SetNamespaces(id, []string{target})
 
 	filtered := awaitTable(t, snapshots, id)
 	for len(filtered.Rows) == len(all.Rows) && namespaceCount(all, target) != len(all.Rows) {
@@ -376,7 +376,7 @@ func TestLiveEventsAreMostRecentFirst(t *testing.T) {
 	w := NewWatcher(func(s Snapshot) { snapshots <- s })
 	defer w.Close()
 
-	id, err := w.Subscribe(ctx, KindEvents, AllNamespaces, NoSelector)
+	id, err := w.Subscribe(ctx, KindEvents, nil, NoSelector)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}

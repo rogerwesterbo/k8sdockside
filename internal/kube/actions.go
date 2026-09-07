@@ -163,10 +163,10 @@ type Failure struct {
 	Error     string `json:"error"`
 }
 
-// BulkReport is how a bulk action went: how many objects it dealt with, and
-// which ones it could not.
+// BulkReport is how a bulk action went: how many objects took it, and which
+// ones did not.
 type BulkReport struct {
-	Deleted  int       `json:"deleted"`
+	Done     int       `json:"done"`
 	Failures []Failure `json:"failures"`
 }
 
@@ -196,9 +196,58 @@ func (w *Watcher) DeleteMany(kc Context, kind string, refs []ObjectRef) (BulkRep
 	return report, err
 }
 
-// deleteEach is the loop itself, over any dynamic client, which is what lets
-// the tests run it against a fake one.
+// PatchMany applies one merge patch to several objects of one kind: the same
+// label on every pod ticked, the same field on every deployment. The patch
+// arrives as text, YAML or JSON, and is read by MergePatchFromYAML before a
+// single object is touched: half a selection patched and the other half told
+// the patch was malformed is the outcome to avoid.
+//
+// A merge patch (RFC 7386) rather than a strategic one, because it is the one
+// form every kind accepts -- a custom resource has no strategic merge rules --
+// and because its two moves are exactly the two asked for: a value sets a
+// field and null removes it. What it cannot do is edit one entry of a list; a
+// list in the patch replaces the list in the object, and the form that builds
+// these patches says so.
+func (w *Watcher) PatchMany(kc Context, kind string, refs []ObjectRef, patch string) (BulkReport, error) {
+	report := BulkReport{Failures: []Failure{}}
+	body, err := mergePatchBytes(patch)
+	if err != nil {
+		return report, err
+	}
+	err = w.withClient(kc, func(c *clusterClient) error {
+		mapping, err := c.mappingForKind(kind)
+		if err != nil {
+			return err
+		}
+		report = patchEach(c.dynamic, mapping, refs, body)
+		return nil
+	})
+	return report, err
+}
+
 func deleteEach(client dynamic.Interface, mapping *meta.RESTMapping, refs []ObjectRef) BulkReport {
+	return eachOf(refs, func(ctx context.Context, ref ObjectRef) error {
+		err := resourceFor(client, mapping, ref.Namespace).Delete(ctx, ref.Name, metav1.DeleteOptions{})
+		// Finished between being ticked and the button: what was asked for
+		// already holds.
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	})
+}
+
+func patchEach(client dynamic.Interface, mapping *meta.RESTMapping, refs []ObjectRef, patch []byte) BulkReport {
+	return eachOf(refs, func(ctx context.Context, ref ObjectRef) error {
+		_, err := resourceFor(client, mapping, ref.Namespace).Patch(ctx, ref.Name, types.MergePatchType, patch, metav1.PatchOptions{})
+		return err
+	})
+}
+
+// eachOf runs one action over every ref, a few at a time, and gathers what it
+// could not do. It is the loop under both bulk actions and knows nothing of
+// the client, which is what lets the tests run the actions against a fake one.
+func eachOf(refs []ObjectRef, act func(context.Context, ObjectRef) error) BulkReport {
 	report := BulkReport{Failures: []Failure{}}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -217,15 +266,15 @@ func deleteEach(client dynamic.Interface, mapping *meta.RESTMapping, refs []Obje
 			ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 			defer cancel()
 
-			err := resourceFor(client, mapping, ref.Namespace).Delete(ctx, ref.Name, metav1.DeleteOptions{})
+			err := act(ctx, ref)
 
 			mu.Lock()
 			defer mu.Unlock()
-			if err != nil && !apierrors.IsNotFound(err) {
+			if err != nil {
 				report.Failures = append(report.Failures, Failure{Namespace: ref.Namespace, Name: ref.Name, Error: err.Error()})
 				return
 			}
-			report.Deleted++
+			report.Done++
 		}(ref)
 	}
 	wg.Wait()

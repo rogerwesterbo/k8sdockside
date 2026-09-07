@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/types"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,11 +32,24 @@ func podsMapping() *meta.RESTMapping {
 }
 
 func bulkPod(namespace, name string) runtime.Object {
+	return labelledPod(namespace, name, map[string]any{"app": name})
+}
+
+func labelledPod(namespace, name string, labels map[string]any) runtime.Object {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata":   map[string]any{"namespace": namespace, "name": name},
+		"metadata":   map[string]any{"namespace": namespace, "name": name, "labels": labels},
 	}}
+}
+
+func labelsOf(t *testing.T, client *dynamicfake.FakeDynamicClient, namespace, name string) map[string]string {
+	t.Helper()
+	got, err := client.Resource(podsGVR).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("reading %s/%s back: %v", namespace, name, err)
+	}
+	return got.GetLabels()
 }
 
 func fakePods(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
@@ -61,8 +76,8 @@ func TestDeleteEachRemovesEveryObjectAndCountsTheGoneOnes(t *testing.T) {
 		{Namespace: "default", Name: "ghost"},
 	})
 
-	if report.Deleted != 4 || len(report.Failures) != 0 {
-		t.Fatalf("report = %+v, want 4 deleted and no failures", report)
+	if report.Done != 4 || len(report.Failures) != 0 {
+		t.Fatalf("report = %+v, want 4 done and no failures", report)
 	}
 	for _, ref := range [][2]string{{"default", "web-1"}, {"default", "web-2"}, {"kube-system", "dns"}} {
 		if !gone(t, client, ref[0], ref[1]) {
@@ -86,8 +101,8 @@ func TestDeleteEachReportsRefusalsAndGoesOnWithTheRest(t *testing.T) {
 		{Namespace: "default", Name: "web-2"},
 	})
 
-	if report.Deleted != 2 {
-		t.Errorf("deleted = %d, want 2: one refusal must not stop the rest", report.Deleted)
+	if report.Done != 2 {
+		t.Errorf("done = %d, want 2: one refusal must not stop the rest", report.Done)
 	}
 	if len(report.Failures) != 1 || report.Failures[0].Name != "locked" {
 		t.Fatalf("failures = %+v, want exactly the locked pod", report.Failures)
@@ -125,7 +140,129 @@ func TestDeleteEachOrdersFailuresLikeTheTable(t *testing.T) {
 	if strings.Join(got, " ") != want {
 		t.Errorf("failures in order %v, want %s", got, want)
 	}
-	if report.Deleted != 0 {
-		t.Errorf("deleted = %d with everything refused, want 0", report.Deleted)
+	if report.Done != 0 {
+		t.Errorf("done = %d with everything refused, want 0", report.Done)
+	}
+}
+
+// One merge patch, applied to every ticked object: a value sets, null removes,
+// and what the patch does not mention is left alone.
+func TestPatchEachSetsAndRemovesOnEveryObject(t *testing.T) {
+	client := fakePods(
+		labelledPod("default", "web-1", map[string]any{"app": "web", "team": "old"}),
+		labelledPod("default", "web-2", map[string]any{"app": "web", "tier": "front"}),
+	)
+	patch := []byte(`{"metadata":{"labels":{"team":"platform","tier":null}}}`)
+
+	report := patchEach(client, podsMapping(), []ObjectRef{
+		{Namespace: "default", Name: "web-1"},
+		{Namespace: "default", Name: "web-2"},
+	}, patch)
+
+	if report.Done != 2 || len(report.Failures) != 0 {
+		t.Fatalf("report = %+v, want both done", report)
+	}
+	for _, name := range []string{"web-1", "web-2"} {
+		labels := labelsOf(t, client, "default", name)
+		if labels["team"] != "platform" {
+			t.Errorf("%s team = %q, want platform", name, labels["team"])
+		}
+		if _, still := labels["tier"]; still {
+			t.Errorf("%s still carries tier, want it removed by the null", name)
+		}
+		if labels["app"] != "web" {
+			t.Errorf("%s app = %q, want the label the patch did not mention left alone", name, labels["app"])
+		}
+	}
+}
+
+// Unlike a delete, patching what has gone is a failure: the label was wanted
+// on it, and there is nothing to put it on.
+func TestPatchEachReportsWhatIsNotThere(t *testing.T) {
+	client := fakePods(bulkPod("default", "web-1"))
+
+	report := patchEach(client, podsMapping(), []ObjectRef{
+		{Namespace: "default", Name: "web-1"},
+		{Namespace: "default", Name: "ghost"},
+	}, []byte(`{"metadata":{"labels":{"team":"web"}}}`))
+
+	if report.Done != 1 || len(report.Failures) != 1 || report.Failures[0].Name != "ghost" {
+		t.Fatalf("report = %+v, want one done and the ghost refused", report)
+	}
+	if !strings.Contains(report.Failures[0].Error, "not found") {
+		t.Errorf("failure reads %q, want the API server's not-found", report.Failures[0].Error)
+	}
+}
+
+func TestPatchEachSendsAMergePatch(t *testing.T) {
+	client := fakePods(bulkPod("default", "web-1"))
+	var sent types.PatchType
+	client.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		sent = action.(clienttesting.PatchAction).GetPatchType()
+		return false, nil, nil
+	})
+
+	patchEach(client, podsMapping(), []ObjectRef{{Namespace: "default", Name: "web-1"}}, []byte(`{"spec":{"x":1}}`))
+
+	if sent != types.MergePatchType {
+		t.Errorf("patch type = %q, want a JSON merge patch, the one form every kind accepts", sent)
+	}
+}
+
+// The YAML editor's patch and the form's JSON are read by the same parser,
+// and come out as the same compact JSON.
+func TestMergePatchFromYAMLReadsYAMLAndJSONAlike(t *testing.T) {
+	yamlText := "metadata:\n  labels:\n    team: platform\n    old: null\nspec:\n  replicas: 2\n"
+	want := `{"metadata":{"labels":{"old":null,"team":"platform"}},"spec":{"replicas":2}}`
+
+	if got := MergePatchFromYAML(yamlText); got.JSON != want || got.Error != "" || got.Empty {
+		t.Errorf("from YAML: %+v, want %s", got, want)
+	}
+	if got := MergePatchFromYAML(want); got.JSON != want {
+		t.Errorf("from JSON: %+v, want it passed through", got)
+	}
+}
+
+func TestMergePatchFromYAMLKeepsQuotedNumbersAsText(t *testing.T) {
+	got := MergePatchFromYAML("metadata:\n  labels:\n    build: \"2\"\n")
+	if want := `{"metadata":{"labels":{"build":"2"}}}`; got.JSON != want {
+		t.Errorf("got %s, want %s: the quotes said text", got.JSON, want)
+	}
+}
+
+// Comments and blank lines are what the editor starts with, and are not a
+// mistake -- only not a patch yet.
+func TestMergePatchFromYAMLCallsCommentsEmpty(t *testing.T) {
+	for _, text := range []string{"", "   \n", "# a merge patch\n# spec:\n#   replicas: 2\n"} {
+		if got := MergePatchFromYAML(text); !got.Empty || got.Error != "" {
+			t.Errorf("MergePatchFromYAML(%q) = %+v, want empty and no error", text, got)
+		}
+	}
+}
+
+func TestMergePatchFromYAMLRefusesWhatIsNotAMapping(t *testing.T) {
+	for _, text := range []string{"- a\n- b\n", "just words\n", "a: 1\nb: 2\na: 3\n", "a: [\n"} {
+		got := MergePatchFromYAML(text)
+		if got.Error == "" || got.JSON != "" {
+			t.Errorf("MergePatchFromYAML(%q) = %+v, want a refusal", text, got)
+		}
+	}
+	// A repeated key names its line, as the editor's check does.
+	if got := MergePatchFromYAML("a: 1\nb: 2\na: 3\n"); got.Line != 3 {
+		t.Errorf("line = %d, want 3: %+v", got.Line, got)
+	}
+}
+
+// The bytes the objects receive, or the reason nothing is sent to any of them.
+func TestMergePatchBytesStopsBeforeAnythingIsTouched(t *testing.T) {
+	if _, err := mergePatchBytes("# nothing\n"); err == nil {
+		t.Error("an empty patch was accepted")
+	}
+	if _, err := mergePatchBytes("- a\n"); err == nil {
+		t.Error("a list was accepted as a patch")
+	}
+	body, err := mergePatchBytes("spec:\n  replicas: 2\n")
+	if err != nil || string(body) != `{"spec":{"replicas":2}}` {
+		t.Errorf("got %s, %v; want the compact JSON", body, err)
 	}
 }

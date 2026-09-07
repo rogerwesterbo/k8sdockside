@@ -138,10 +138,13 @@ See [docs/development.md](docs/development.md).
 **Resources**
 - Live informer-backed tables — no polling, no refresh button
 - One watch per kind per context, shared by every tab using it
-- Namespace filtering applied to the cache, so it repaints instantly
+- Namespace filtering, any number of namespaces at once, applied to the cache
+  so it repaints instantly
 - CRDs, the Gateway API and built-in kinds on one dynamic-client code path
 - Columns read from the CRD's `additionalPrinterColumns`, so tables match
   `kubectl get`
+- Nodes carry the `kubectl get nodes -o wide` columns — internal and external
+  IP, OS image, kernel and container runtime — beside capacity and allocatable
 - A dashboard of cluster capacity, requests and workload health
 
 **Working with objects**
@@ -152,6 +155,9 @@ See [docs/development.md](docs/development.md).
 - Object actions: scale, restart, cordon, drain, delete
 - Bulk delete: tick rows, or everything a filter matches, and delete them
   together — refusals come back by name, in the API server's words
+- Bulk patch: set or remove a label, an annotation or a field by path on every
+  selected object, or write a whole merge patch as YAML for several fields at
+  once — either way shown as the JSON each object receives before it is sent
 - Log streaming, per container
 
 **Terminals and networking**
@@ -191,6 +197,9 @@ See [docs/development.md](docs/development.md).
   changes wears a dot instead of its close button
 - Client certificates, tokens and `exec` credential plugins all work — it is
   `clientcmd` underneath
+- A cluster's client outlives its last tab or poll by two minutes, so a tab
+  switch or the dashboard's next refresh finds it warm instead of rebuilding
+  it, and a kind the cluster lacks costs a rediscovery at most once a minute
 
 ## Where your things live
 

@@ -12,7 +12,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Close: vi.fn(),
     },
     HelmService: { Releases },
-    ResourceService: { Subscribe, Unsubscribe, SetNamespace: vi.fn() },
+    ResourceService: { Subscribe, Unsubscribe, SetNamespaces: vi.fn() },
 }));
 
 const { subscribe } = await import('./subscriptions');
@@ -27,15 +27,15 @@ beforeEach(() => {
 
 describe('kinds that are read rather than watched', () => {
     test('Helm releases are fetched, never subscribed to', async () => {
-        subscribe('ctx', 'helmreleases', '', vi.fn(), vi.fn());
-        await vi.waitFor(() => expect(Releases).toHaveBeenCalledWith('ctx', ''));
+        subscribe('ctx', 'helmreleases', [], vi.fn(), vi.fn());
+        await vi.waitFor(() => expect(Releases).toHaveBeenCalledWith('ctx', []));
 
         expect(Subscribe).not.toHaveBeenCalled();
     });
 
     test('the rows come back through the same callback as any other kind', async () => {
         const onTable = vi.fn();
-        subscribe('ctx', 'helmreleases', '', onTable, vi.fn());
+        subscribe('ctx', 'helmreleases', [], onTable, vi.fn());
 
         await vi.waitFor(() => expect(onTable).toHaveBeenCalledOnce());
     });
@@ -44,18 +44,18 @@ describe('kinds that are read rather than watched', () => {
         Releases.mockRejectedValueOnce(new Error('forbidden'));
         const onError = vi.fn();
 
-        subscribe('ctx', 'helmreleases', '', vi.fn(), onError);
+        subscribe('ctx', 'helmreleases', [], vi.fn(), onError);
 
         await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('forbidden'));
     });
 
-    test('changing the namespace re-reads', async () => {
-        const sub = subscribe('ctx', 'helmreleases', '', vi.fn(), vi.fn());
+    test('changing the namespaces re-reads', async () => {
+        const sub = subscribe('ctx', 'helmreleases', [], vi.fn(), vi.fn());
         await vi.waitFor(() => expect(Releases).toHaveBeenCalledTimes(1));
 
-        sub.setNamespace('prod');
+        sub.setNamespaces(['prod', 'staging']);
 
-        await vi.waitFor(() => expect(Releases).toHaveBeenCalledWith('ctx', 'prod'));
+        await vi.waitFor(() => expect(Releases).toHaveBeenCalledWith('ctx', ['prod', 'staging']));
     });
 
     // A tab closed while the read is in flight must not paint into a view the
@@ -65,7 +65,7 @@ describe('kinds that are read rather than watched', () => {
         Releases.mockReturnValueOnce(new Promise((r) => { settle = r; }));
         const onTable = vi.fn();
 
-        const sub = subscribe('ctx', 'helmreleases', '', onTable, vi.fn());
+        const sub = subscribe('ctx', 'helmreleases', [], onTable, vi.fn());
         sub.close();
         settle(EMPTY);
         await new Promise((r) => setTimeout(r, 10));
@@ -74,9 +74,9 @@ describe('kinds that are read rather than watched', () => {
     });
 
     test('every other kind still opens a watch', async () => {
-        subscribe('ctx', 'pods', '', vi.fn(), vi.fn());
+        subscribe('ctx', 'pods', [], vi.fn(), vi.fn());
 
-        await vi.waitFor(() => expect(Subscribe).toHaveBeenCalledWith('ctx', 'pods', ''));
+        await vi.waitFor(() => expect(Subscribe).toHaveBeenCalledWith('ctx', 'pods', []));
         expect(Releases).not.toHaveBeenCalled();
     });
 });

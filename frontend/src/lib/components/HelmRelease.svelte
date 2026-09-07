@@ -12,11 +12,24 @@
   all four at once would be a scroll rather than a view.
 -->
 <script lang="ts">
+    import { openSearchPanel } from '@codemirror/search';
+    import { EditorView, lineNumbers } from '@codemirror/view';
     import { untrack } from 'svelte';
+    import { numbering, viewerExtensions } from '../editor/setup';
     import { helm, type ReleaseRef } from '../state/helm.svelte';
     import ErrorState from './ErrorState.svelte';
+    import Icon from './Icon.svelte';
 
-    let { release }: { release: ReleaseRef } = $props();
+    interface Props {
+        release: ReleaseRef;
+        /**
+         * Whether the values carry line numbers: the editor's preference,
+         * handed down by the panel so this view need not know the store.
+         */
+        numbers?: boolean;
+    }
+
+    let { release, numbers = true }: Props = $props();
 
     let record = $derived(helm.stateOf(release));
     let detail = $derived(record.detail);
@@ -53,6 +66,61 @@
     let values = $derived(userValuesOnly ? (detail?.userValues ?? '') : (detail?.values ?? ''));
     let resources = $derived(detail?.resources ?? []);
     let revisions = $derived(detail?.revisions ?? []);
+
+    /**
+     * The values are shown in the same editor the YAML tab uses, with changes
+     * refused. A values file is mostly nesting you are not reading, and what
+     * you do with one is find a key in it and fold the rest away; a <pre> can
+     * do neither. See viewerExtensions.
+     */
+    let host = $state<HTMLElement | null>(null);
+    let view: EditorView | null = null;
+    // The name alone, so that the panel handing down an equal ref as a new
+    // object -- which it does on every repaint -- does not rebuild the viewer.
+    let name = $derived(release.name);
+
+    // Builds the viewer on the element it lives in, and again for another
+    // release: its folds and its search belong to the document they were made
+    // on. The text is read untracked here; the effect below keeps it current.
+    $effect(() => {
+        const parent = host;
+        const label = `Values of ${name}`;
+        if (!parent) return;
+
+        const built = new EditorView({
+            parent,
+            doc: untrack(() => values),
+            extensions: viewerExtensions({ numbers: untrack(() => numbers), label }),
+        });
+        view = built;
+
+        return () => {
+            built.destroy();
+            if (view === built) view = null;
+        };
+    });
+
+    // The toggle swaps the document in place rather than rebuilding the
+    // viewer, so an open search and the folds survive it.
+    $effect(() => {
+        const text = values;
+        const current = view;
+        if (!current || current.state.doc.toString() === text) return;
+        current.dispatch({ changes: { from: 0, to: current.state.doc.length, insert: text } });
+    });
+
+    // Line numbers follow the preference as it changes, without a rebuild.
+    $effect(() => {
+        const on = numbers;
+        view?.dispatch({ effects: numbering.reconfigure(on ? lineNumbers() : []) });
+    });
+
+    /** Opens the find panel: what ⌘F does once the viewer has focus. */
+    function find(): void {
+        if (!view) return;
+        view.focus();
+        openSearchPanel(view);
+    }
 
     /**
      * The same four tones the resource tables use, so a status reads the same
@@ -114,13 +182,23 @@
                 <span class="count">{userValuesOnly ? 'user-supplied' : 'merged'}</span>
             </summary>
 
-            <label class="toggle">
-                <input type="checkbox" bind:checked={userValuesOnly} />
-                User-supplied values only
-            </label>
+            <div class="tools">
+                <label class="toggle">
+                    <input type="checkbox" bind:checked={userValuesOnly} />
+                    User-supplied values only
+                </label>
+                {#if values}
+                    <button class="find" onclick={find} title="Find in the values. ⌘F does the same once the text has focus.">
+                        <Icon name="search" size={12} />
+                        Find
+                    </button>
+                {/if}
+            </div>
 
             {#if values}
-                <pre class="selectable">{values}</pre>
+                <!-- CodeMirror mounts itself in here, read-only: ⌘F searches
+                     and the gutter folds, as in the editor. -->
+                <div class="doc selectable" bind:this={host}></div>
             {:else if userValuesOnly}
                 <!-- Worth saying rather than showing an empty box: a release
                      installed with no overrides is running the chart exactly as
@@ -276,14 +354,51 @@
         color: var(--text-faint);
     }
 
+    .tools {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 10px 0 6px;
+    }
+
     .toggle {
         display: flex;
         align-items: center;
         gap: 6px;
-        margin: 10px 0 6px;
         font-size: 11px;
         color: var(--text-dim);
         cursor: pointer;
+    }
+
+    .find {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+
+    .find:hover {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    /* The values in the editor's own frame, capped so a long file scrolls
+       inside the fold rather than growing the panel. */
+    .doc {
+        margin: 8px 0 0;
+        border: 1px solid var(--border-soft);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+    }
+
+    .doc :global(.cm-editor) {
+        max-height: 420px;
+        font-size: 11px;
     }
 
     /* Values and notes are documents rather than fields: they keep their own

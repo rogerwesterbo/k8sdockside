@@ -128,6 +128,7 @@
                         namespace: target.namespace,
                         name: target.name,
                     }}
+                    numbers={workspace.showLineNumbers}
                 />
             {:else if workspace.detailLoading}
                 <p class="status">Describing {target.name}…</p>

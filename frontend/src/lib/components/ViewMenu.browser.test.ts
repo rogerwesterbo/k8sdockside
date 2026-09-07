@@ -7,7 +7,7 @@ import TopBar from './TopBar.svelte';
 // Stubbing the subscription is what lets them exist without a cluster behind
 // them; these tests are about where a view sits, not about its rows.
 vi.mock('../state/subscriptions', () => ({
-    subscribe: vi.fn(() => ({ setNamespace: vi.fn(), close: vi.fn() })),
+    subscribe: vi.fn(() => ({ setNamespaces: vi.fn(), close: vi.fn() })),
 }));
 
 // The View menu, which is the visible way back from a hidden panel. A

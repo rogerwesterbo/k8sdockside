@@ -158,7 +158,10 @@
                     />
                 </th>
             {/if}
-            {#each columns as column, index (column)}
+            <!-- By position, not by name: a CRD may declare a printer column
+                 called "Name" beside the Name the app puts first, and a keyed
+                 block throws on the repeat where an unkeyed one renders it. -->
+            {#each columns as column, index}
                 <th class:sorted={sortColumn === index} aria-sort={sortColumn === index ? (sortDescending ? 'descending' : 'ascending') : 'none'}>
                     <button onclick={() => sortBy(index)}>
                         {column}

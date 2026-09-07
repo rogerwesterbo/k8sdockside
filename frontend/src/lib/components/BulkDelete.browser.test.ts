@@ -8,7 +8,7 @@ const pushed = vi.hoisted(() => ({ send: (_table: unknown) => {} }));
 vi.mock('../state/subscriptions', () => ({
     subscribe: vi.fn((_c: string, _k: string, _n: string, onTable: (t: unknown) => void) => {
         pushed.send = onTable;
-        return { setNamespace: vi.fn(), close: vi.fn() };
+        return { setNamespaces: vi.fn(), close: vi.fn() };
     }),
 }));
 
@@ -56,7 +56,9 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
     },
     ActionService: {
         ObjectState: vi.fn().mockResolvedValue({ scalable: false, replicas: 0, cordoned: false, containers: [] }),
-        DeleteMany: vi.fn().mockResolvedValue({ deleted: 0, failures: [] }),
+        DeleteMany: vi.fn().mockResolvedValue({ done: 0, failures: [] }),
+        PatchMany: vi.fn().mockResolvedValue({ done: 0, failures: [] }),
+        PreviewPatch: vi.fn().mockResolvedValue({ json: '', empty: true, error: '', line: 0 }),
     },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
@@ -140,7 +142,7 @@ function pods() {
 beforeEach(() => {
     workspace.closeDetail();
     workspace.dismissNotice();
-    vi.mocked(ActionService.DeleteMany).mockReset().mockResolvedValue({ deleted: 2, failures: [] });
+    vi.mocked(ActionService.DeleteMany).mockReset().mockResolvedValue({ done: 2, failures: [] });
 });
 
 /** Renders a pods table and waits for its rows. */
@@ -212,7 +214,7 @@ test('cancelling deletes nothing and keeps the selection', async () => {
 
 test('a refusal keeps that row ticked and says why', async () => {
     vi.mocked(ActionService.DeleteMany).mockResolvedValue({
-        deleted: 1,
+        done: 1,
         failures: [{ namespace: 'default', name: 'web-2', error: 'pods "web-2" is forbidden' }],
     });
     await shown();

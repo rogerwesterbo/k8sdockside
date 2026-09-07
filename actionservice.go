@@ -92,6 +92,24 @@ func (s *ActionService) DeleteMany(contextID, kind string, refs []kube.ObjectRef
 	return s.watcher.DeleteMany(kc, kind, refs)
 }
 
+// PatchMany applies one merge patch to several objects of one kind and reports
+// which of them refused it. The patch arrives as text, JSON from the form's
+// fields or YAML from its editor, and the backend reads it either way.
+func (s *ActionService) PatchMany(contextID, kind string, refs []kube.ObjectRef, patch string) (kube.BulkReport, error) {
+	kc, err := s.resolve(contextID)
+	if err != nil {
+		return kube.BulkReport{Failures: []kube.Failure{}}, err
+	}
+	return s.watcher.PatchMany(kc, kind, refs, patch)
+}
+
+// PreviewPatch reads a merge patch typed as YAML and answers with the JSON it
+// comes to, or with what is wrong with it. Called as the form is typed in, the
+// way CheckYAML is by the editor, so it touches no cluster.
+func (s *ActionService) PreviewPatch(text string) kube.PatchPreview {
+	return kube.MergePatchFromYAML(text)
+}
+
 // Scale sets a workload's replica count.
 func (s *ActionService) Scale(contextID, kind, namespace, name string, replicas int32) error {
 	kc, err := s.resolve(contextID)

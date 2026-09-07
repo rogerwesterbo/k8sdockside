@@ -212,9 +212,11 @@ func helmTable(secrets []*unstructured.Unstructured) Table {
 	}
 }
 
-// HelmReleases lists the releases installed in a cluster.
-func (w *Watcher) HelmReleases(kc Context, namespace string) (Table, error) {
+// HelmReleases lists the releases installed in a cluster, in the given
+// namespaces or in all of them when none is named.
+func (w *Watcher) HelmReleases(kc Context, namespaces []string) (Table, error) {
 	var table Table
+	keep := namespaceFilter(namespaces)
 	err := w.withClient(kc, func(c *clusterClient) error {
 		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 		defer cancel()
@@ -230,7 +232,7 @@ func (w *Watcher) HelmReleases(kc Context, namespace string) (Table, error) {
 
 		pointers := make([]*unstructured.Unstructured, 0, len(items))
 		for i := range items {
-			if namespace != AllNamespaces && items[i].GetNamespace() != namespace {
+			if keep != nil && !keep[items[i].GetNamespace()] {
 				continue
 			}
 			pointers = append(pointers, &items[i])

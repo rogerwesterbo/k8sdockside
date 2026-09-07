@@ -37,19 +37,21 @@ Events.On('resource:snapshot', (event) => {
 
 /** One tab's live view. Closing it stops the watch if no other tab shares it. */
 export interface Subscription {
-    setNamespace(namespace: string): void;
+    /** Narrows the rows to these namespaces; none means every namespace. */
+    setNamespaces(namespaces: string[]): void;
     close(): void;
 }
 
 /**
  * Opens a live view of one resource kind. Rows arrive through onTable, starting
  * with the cluster's current contents once the watch has synced; a cluster that
- * cannot be reached reports through onError instead.
+ * cannot be reached reports through onError instead. namespaces narrows the
+ * rows, and an empty list is the whole cluster.
  */
 export function subscribe(
     contextId: string,
     kind: string,
-    namespace: string,
+    namespaces: string[],
     onTable: Listener,
     onError: (message: string) => void,
 ): Subscription {
@@ -58,16 +60,17 @@ export function subscribe(
     // they are fetched once instead. Handled here rather than in the tab so
     // that a view still just asks for rows and gets them.
     if (kind === HELM_RELEASES) {
-        return fetchOnce(contextId, namespace, onTable, onError);
+        return fetchOnce(contextId, namespaces, onTable, onError);
     }
 
     let id: string | null = null;
     let closed = false;
     // Where the namespace filter has been moved to while we were still waiting
     // for the subscription to open, so an impatient click is not lost.
-    let wanted = namespace;
+    let wanted = namespaces;
+    let moved = false;
 
-    ResourceService.Subscribe(contextId, kind, namespace)
+    ResourceService.Subscribe(contextId, kind, namespaces)
         .then((subscriptionId) => {
             if (closed) {
                 // A snapshot may already have been buffered under this ID by
@@ -84,8 +87,8 @@ export function subscribe(
                 pending.delete(subscriptionId);
                 onTable(buffered);
             }
-            if (wanted !== namespace) {
-                void ResourceService.SetNamespace(subscriptionId, wanted);
+            if (moved) {
+                void ResourceService.SetNamespaces(subscriptionId, wanted);
             }
         })
         .catch((err: unknown) => {
@@ -93,9 +96,10 @@ export function subscribe(
         });
 
     return {
-        setNamespace(next: string): void {
+        setNamespaces(next: string[]): void {
             wanted = next;
-            if (id) void ResourceService.SetNamespace(id, next);
+            moved = true;
+            if (id) void ResourceService.SetNamespaces(id, next);
         },
         close(): void {
             closed = true;
@@ -115,13 +119,13 @@ export function subscribe(
  */
 function fetchOnce(
     contextId: string,
-    namespace: string,
+    namespaces: string[],
     onTable: Listener,
     onError: (message: string) => void,
 ): Subscription {
     let closed = false;
 
-    function load(ns: string): void {
+    function load(ns: string[]): void {
         HelmService.Releases(contextId, ns)
             .then((table) => {
                 if (!closed) onTable(adoptTable(table));
@@ -130,10 +134,10 @@ function fetchOnce(
                 if (!closed) onError(err instanceof Error ? err.message : String(err));
             });
     }
-    load(namespace);
+    load(namespaces);
 
     return {
-        setNamespace(next: string): void {
+        setNamespaces(next: string[]): void {
             if (!closed) load(next);
         },
         close(): void {

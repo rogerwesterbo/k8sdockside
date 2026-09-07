@@ -36,7 +36,7 @@ const settingsFile = vi.hoisted(() => {
 // real table with it. Stubbing the subscription is what lets that table exist
 // without a cluster behind it; these tests are about the strip, not the rows.
 vi.mock('../state/subscriptions', () => ({
-    subscribe: vi.fn(() => ({ setNamespace: vi.fn(), close: vi.fn() })),
+    subscribe: vi.fn(() => ({ setNamespaces: vi.fn(), close: vi.fn() })),
 }));
 
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({

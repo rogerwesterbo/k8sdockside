@@ -47,9 +47,20 @@ export interface RowRef {
     name: string;
 }
 
-/** How a bulk delete went: how many objects went, and which ones did not. */
+/** What a merge patch typed as YAML comes to, or what is wrong with it. */
+export interface PatchPreview {
+    /** The compact JSON each object would receive. */
+    json: string;
+    /** A document holding nothing yet: blank, or comments only. */
+    empty: boolean;
+    error: string;
+    /** The line the parser stopped at, 1-based; 0 when it named none. */
+    line: number;
+}
+
+/** How a bulk action went: how many objects took it, and which ones did not. */
 export interface BulkReport {
-    deleted: number;
+    done: number;
     failures: { namespace: string; name: string; error: string }[];
 }
 
@@ -163,7 +174,45 @@ class Actions {
         try {
             const report = await ActionService.DeleteMany(contextId, kind, refs);
             // Null rather than empty is what Go sends for none.
-            return { deleted: report.deleted, failures: report.failures ?? [] };
+            return { done: report.done, failures: report.failures ?? [] };
+        } catch (err) {
+            throw message(err);
+        }
+    }
+
+    /**
+     * Applies one merge patch to several objects of one kind, and says that
+     * each object that took it changed -- so a panel or editor showing one of
+     * them re-reads rather than going on showing what it held a moment ago.
+     * The patch travels as text, the form's JSON or the editor's YAML, and
+     * the backend reads it either way.
+     */
+    async patchMany(contextId: string, kind: string, refs: RowRef[], patch: string): Promise<BulkReport> {
+        let report: BulkReport;
+        try {
+            const raw = await ActionService.PatchMany(contextId, kind, refs, patch);
+            report = { done: raw.done, failures: raw.failures ?? [] };
+        } catch (err) {
+            throw message(err);
+        }
+        const refused = new Set(report.failures.map((f) => `${f.namespace}/${f.name}`));
+        for (const ref of refs) {
+            if (!refused.has(`${ref.namespace}/${ref.name}`)) changes.changed({ contextId, kind, ...ref });
+        }
+        return report;
+    }
+
+    /**
+     * Reads a merge patch typed as YAML for the form's preview: the JSON it
+     * comes to, or the parser's complaint and its line. A call into Go rather
+     * than a parser here, for the reason the editor's check is one: the
+     * parser that answers is the one that will read the patch when it is
+     * applied.
+     */
+    async previewPatch(text: string): Promise<PatchPreview> {
+        try {
+            const p = await ActionService.PreviewPatch(text);
+            return { json: p.json, empty: p.empty, error: p.error, line: p.line };
         } catch (err) {
             throw message(err);
         }
