@@ -41,6 +41,18 @@ export interface DrainState {
     done: boolean;
 }
 
+/** One object of a kind, as a table row names it. */
+export interface RowRef {
+    namespace: string;
+    name: string;
+}
+
+/** How a bulk delete went: how many objects went, and which ones did not. */
+export interface BulkReport {
+    deleted: number;
+    failures: { namespace: string; name: string; error: string }[];
+}
+
 const UNKNOWN: ObjectState = { scalable: false, replicas: 0, cordoned: false, containers: [] };
 
 function key(ref: ObjectRef): string {
@@ -135,6 +147,23 @@ class Actions {
     async remove(ref: ObjectRef): Promise<void> {
         try {
             await ActionService.Delete(ref.contextId, ref.kind, ref.namespace, ref.name);
+        } catch (err) {
+            throw message(err);
+        }
+    }
+
+    /**
+     * Deletes several objects of one kind in one call.
+     *
+     * The report says how many went and names the ones that did not, in the
+     * API server's words. Like `remove`, nothing is signalled as changed:
+     * what changed is gone.
+     */
+    async removeMany(contextId: string, kind: string, refs: RowRef[]): Promise<BulkReport> {
+        try {
+            const report = await ActionService.DeleteMany(contextId, kind, refs);
+            // Null rather than empty is what Go sends for none.
+            return { deleted: report.deleted, failures: report.failures ?? [] };
         } catch (err) {
             throw message(err);
         }

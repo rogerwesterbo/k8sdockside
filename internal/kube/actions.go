@@ -17,11 +17,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
+	"sync"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 )
 
 // restartedAt is the annotation `kubectl rollout restart` stamps on a pod
@@ -142,6 +147,98 @@ func (w *Watcher) Delete(kc Context, kind, namespace, name string) error {
 		}
 		return resourceFor(c.dynamic, mapping, namespace).Delete(ctx, name, metav1.DeleteOptions{})
 	})
+}
+
+// ObjectRef names one object of a kind: the two fields a table row carries.
+type ObjectRef struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+}
+
+// Failure is one object a bulk action could not act on, with the API server's
+// own words for why.
+type Failure struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Error     string `json:"error"`
+}
+
+// BulkReport is how a bulk action went: how many objects it dealt with, and
+// which ones it could not.
+type BulkReport struct {
+	Deleted  int       `json:"deleted"`
+	Failures []Failure `json:"failures"`
+}
+
+// bulkParallel is how many deletes are in flight at once. Enough that a
+// selection of fifty pods does not go one at a time; few enough that the
+// client's own rate limit (see newClusterClient) is what paces them rather
+// than the API server's fairness queue.
+const bulkParallel = 8
+
+// DeleteMany removes several objects of one kind.
+//
+// Each object is its own request, and one refusal does not stop the rest: a
+// selection of twelve pods where one is forbidden should still lose the other
+// eleven, with that one named. An object that has already gone counts as
+// deleted -- the table is live, and a pod can finish between being ticked and
+// the button being pressed -- since what the user asked for is what holds.
+func (w *Watcher) DeleteMany(kc Context, kind string, refs []ObjectRef) (BulkReport, error) {
+	report := BulkReport{Failures: []Failure{}}
+	err := w.withClient(kc, func(c *clusterClient) error {
+		mapping, err := c.mappingForKind(kind)
+		if err != nil {
+			return err
+		}
+		report = deleteEach(c.dynamic, mapping, refs)
+		return nil
+	})
+	return report, err
+}
+
+// deleteEach is the loop itself, over any dynamic client, which is what lets
+// the tests run it against a fake one.
+func deleteEach(client dynamic.Interface, mapping *meta.RESTMapping, refs []ObjectRef) BulkReport {
+	report := BulkReport{Failures: []Failure{}}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, bulkParallel)
+
+	for _, ref := range refs {
+		wg.Add(1)
+		go func(ref ObjectRef) {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+
+			// A timeout per request rather than one over the whole batch: a
+			// large selection on a slow cluster is not a reason to abandon
+			// the tail of it.
+			ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+			defer cancel()
+
+			err := resourceFor(client, mapping, ref.Namespace).Delete(ctx, ref.Name, metav1.DeleteOptions{})
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil && !apierrors.IsNotFound(err) {
+				report.Failures = append(report.Failures, Failure{Namespace: ref.Namespace, Name: ref.Name, Error: err.Error()})
+				return
+			}
+			report.Deleted++
+		}(ref)
+	}
+	wg.Wait()
+
+	// In the order the table shows them, whatever order the requests finished in.
+	sort.Slice(report.Failures, func(i, j int) bool {
+		a, b := report.Failures[i], report.Failures[j]
+		if a.Namespace != b.Namespace {
+			return a.Namespace < b.Namespace
+		}
+		return a.Name < b.Name
+	})
+	return report
 }
 
 // Scale sets a workload's replica count through the scale subresource.

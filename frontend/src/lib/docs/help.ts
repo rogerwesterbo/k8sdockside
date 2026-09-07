@@ -107,6 +107,7 @@ export const HELP: Page = {
                     items: [
                         '**Tables** are backed by a watch, not polled, so there is no refresh button: a change in the cluster appears as it happens. The namespace picker filters the cache and repaints instantly.',
                         '**Filter** in a table’s header matches any cell.',
+                        '**Select** rows with the checkboxes — or ⌘-click them, and shift-click for a range — and a bar offers to delete them together. The header checkbox takes every row the filter shows. It asks first and names the count; anything the cluster refuses stays ticked, with the reason.',
                         '**Describe** is the same report `kubectl describe` prints, with recent events at the end.',
                         '**Edit** opens the object’s YAML in the dock with syntax checking. Save with `⌘S`. A save against an object somebody else changed in the meantime is refused, with the API server’s own reason, rather than forced.',
                         '**Actions** depend on the kind: scale and restart for workloads; cordon, uncordon and drain for nodes; delete for anything. Each asks first.',

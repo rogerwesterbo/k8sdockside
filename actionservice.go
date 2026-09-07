@@ -81,6 +81,17 @@ func (s *ActionService) Delete(contextID, kind, namespace, name string) error {
 	return s.watcher.Delete(kc, kind, namespace, name)
 }
 
+// DeleteMany removes several objects of one kind from a cluster and reports
+// which of them it could not. One call rather than one per row, so a selection
+// is one round trip whatever its size and the refusals come back together.
+func (s *ActionService) DeleteMany(contextID, kind string, refs []kube.ObjectRef) (kube.BulkReport, error) {
+	kc, err := s.resolve(contextID)
+	if err != nil {
+		return kube.BulkReport{Failures: []kube.Failure{}}, err
+	}
+	return s.watcher.DeleteMany(kc, kind, refs)
+}
+
 // Scale sets a workload's replica count.
 func (s *ActionService) Scale(contextID, kind, namespace, name string, replicas int32) error {
 	kc, err := s.resolve(contextID)

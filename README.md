@@ -150,6 +150,8 @@ See [docs/development.md](docs/development.md).
 - Conflict-safe writes — a save against a moved object is refused, not forced,
   and the API server's own words come back
 - Object actions: scale, restart, cordon, drain, delete
+- Bulk delete: tick rows, or everything a filter matches, and delete them
+  together — refusals come back by name, in the API server's words
 - Log streaming, per container
 
 **Terminals and networking**

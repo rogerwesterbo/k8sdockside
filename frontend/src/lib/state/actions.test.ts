@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const ObjectState = vi.fn();
 const Delete = vi.fn();
+const DeleteMany = vi.fn();
 const Scale = vi.fn();
 const Restart = vi.fn();
 const Cordon = vi.fn();
@@ -38,7 +39,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside', () => ({
         Open: vi.fn().mockResolvedValue('logs-1'),
         Close: vi.fn(),
     },
-    ActionService: { ObjectState, Delete, Scale, Restart, Cordon, Drain, CancelDrain },
+    ActionService: { ObjectState, Delete, DeleteMany, Scale, Restart, Cordon, Drain, CancelDrain },
 }));
 
 const { actions } = await import('./actions.svelte');
@@ -71,6 +72,7 @@ beforeEach(() => {
     actions.forget(DEPLOYMENT);
     ObjectState.mockReset().mockResolvedValue(IDLE);
     Delete.mockReset().mockResolvedValue(undefined);
+    DeleteMany.mockReset().mockResolvedValue({ deleted: 0, failures: [] });
     Scale.mockReset().mockResolvedValue(undefined);
     Restart.mockReset().mockResolvedValue(undefined);
     Cordon.mockReset().mockResolvedValue(undefined);
@@ -228,5 +230,45 @@ describe('draining a node', () => {
 
         await expect(actions.drain(NODE)).rejects.toThrow('forbidden');
         expect(actions.drainOf(NODE)).toBeNull();
+    });
+});
+
+// Deleting several at once: one call carrying every row, and the backend's
+// report handed back as it is, so the table can say what went and what did not.
+describe('deleting a selection', () => {
+    const rows = [
+        { namespace: 'default', name: 'web-1' },
+        { namespace: 'default', name: 'web-2' },
+    ];
+
+    test('sends every row in one call and hands the report back', async () => {
+        DeleteMany.mockResolvedValue({
+            deleted: 1,
+            failures: [{ namespace: 'default', name: 'web-2', error: 'forbidden' }],
+        });
+
+        const report = await actions.removeMany('cfg::prod', 'pods', rows);
+
+        expect(DeleteMany).toHaveBeenCalledTimes(1);
+        expect(DeleteMany).toHaveBeenCalledWith('cfg::prod', 'pods', rows);
+        expect(report).toEqual({
+            deleted: 1,
+            failures: [{ namespace: 'default', name: 'web-2', error: 'forbidden' }],
+        });
+    });
+
+    // Go sends null for an empty slice; nothing downstream should have to know.
+    test('a report with no failures reads as an empty list', async () => {
+        DeleteMany.mockResolvedValue({ deleted: 2, failures: null });
+
+        const report = await actions.removeMany('cfg::prod', 'pods', rows);
+
+        expect(report).toEqual({ deleted: 2, failures: [] });
+    });
+
+    test('a refused call is raised in the backend\'s words', async () => {
+        DeleteMany.mockRejectedValue('unknown context "cfg::gone"');
+
+        await expect(actions.removeMany('cfg::gone', 'pods', rows)).rejects.toThrow('unknown context');
     });
 });

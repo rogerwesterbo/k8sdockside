@@ -25,9 +25,85 @@
         empty?: string;
         /** Overrides how one cell renders, for callers with a link in a column. */
         cell?: Snippet<[Row, number]>;
+        /**
+         * The rows that are ticked, by id, when the caller offers a selection.
+         * The checkbox column is drawn only when this is given: a selection
+         * with nothing to do to it would be clutter.
+         */
+        picked?: Set<string> | null;
+        /**
+         * Called with the rows to tick or untick. Shift on a checkbox sweeps
+         * from the last row ticked to this one in the order on screen -- which
+         * only this component knows, since it is the one sorting.
+         */
+        onpick?: (rows: Row[], on: boolean) => void;
     }
 
-    let { columns, rows, selectedRowId = null, onselect, empty = 'Nothing here.', cell }: Props = $props();
+    let {
+        columns,
+        rows,
+        selectedRowId = null,
+        onselect,
+        empty = 'Nothing here.',
+        cell,
+        picked = null,
+        onpick,
+    }: Props = $props();
+
+    /** The row last ticked on its own, which is where a shift-click sweeps from. */
+    let anchor: string | null = null;
+
+    function pick(row: Row, at: number, event: MouseEvent): void {
+        if (!picked) return;
+        const on = !picked.has(row.id);
+        if (event.shiftKey && anchor !== null) {
+            const from = sorted.findIndex((r) => r.id === anchor);
+            if (from !== -1) {
+                const [a, b] = from < at ? [from, at] : [at, from];
+                onpick?.(sorted.slice(a, b + 1), on);
+                return;
+            }
+        }
+        anchor = row.id;
+        onpick?.([row], on);
+    }
+
+    /**
+     * A click on the row opens it. With ⌘ or Ctrl held it ticks it instead,
+     * and with Shift it sweeps: the gestures every file list has taught, so
+     * the checkboxes are the visible way and not the only one.
+     */
+    function press(row: Row, at: number, event: MouseEvent): void {
+        if (picked && (event.metaKey || event.ctrlKey || event.shiftKey)) {
+            pick(row, at, event);
+            return;
+        }
+        onselect?.(row);
+    }
+
+    let allPicked = $derived.by(() => {
+        const set = picked;
+        return !!set && sorted.length > 0 && sorted.every((r) => set.has(r.id));
+    });
+    let somePicked = $derived.by(() => {
+        const set = picked;
+        return !!set && !allPicked && sorted.some((r) => set.has(r.id));
+    });
+
+    /** The header checkbox: everything on screen, or nothing. */
+    function pickAll(): void {
+        onpick?.(sorted, !allPicked);
+    }
+
+    /** Puts a checkbox in its third state, which is a property and not an attribute. */
+    function indeterminate(node: HTMLInputElement, value: boolean) {
+        node.indeterminate = value;
+        return {
+            update(next: boolean) {
+                node.indeterminate = next;
+            },
+        };
+    }
 
     // Null means "the order the caller gave", which the backend has already put
     // in each kind's natural order -- events most recent first, everything else
@@ -70,6 +146,18 @@
 <table>
     <thead>
         <tr>
+            {#if picked}
+                <th class="pick">
+                    <input
+                        type="checkbox"
+                        checked={allPicked}
+                        use:indeterminate={somePicked}
+                        onchange={pickAll}
+                        aria-label="Select all"
+                        title={allPicked ? 'Clear the selection' : 'Select every row shown'}
+                    />
+                </th>
+            {/if}
             {#each columns as column, index (column)}
                 <th class:sorted={sortColumn === index} aria-sort={sortColumn === index ? (sortDescending ? 'descending' : 'ascending') : 'none'}>
                     <button onclick={() => sortBy(index)}>
@@ -83,8 +171,25 @@
         </tr>
     </thead>
     <tbody>
-        {#each sorted as row (row.id)}
-            <tr class:selected={selectedRowId === row.id} onclick={() => onselect?.(row)}>
+        {#each sorted as row, at (row.id)}
+            <tr
+                class:selected={selectedRowId === row.id}
+                class:picked={picked?.has(row.id)}
+                onclick={(event) => press(row, at, event)}
+            >
+                {#if picked}
+                    <td class="pick">
+                        <input
+                            type="checkbox"
+                            checked={picked.has(row.id)}
+                            onclick={(event) => {
+                                event.stopPropagation();
+                                pick(row, at, event);
+                            }}
+                            aria-label="Select {row.name}"
+                        />
+                    </td>
+                {/if}
                 {#each row.cells as value, index (index)}
                     <td class={value.tone}>
                         {#if cell}{@render cell(row, index)}{:else}{value.text}{/if}
@@ -93,7 +198,7 @@
             </tr>
         {:else}
             <tr class="none">
-                <td colspan={columns.length}>{empty}</td>
+                <td colspan={columns.length + (picked ? 1 : 0)}>{empty}</td>
             </tr>
         {/each}
     </tbody>
@@ -148,6 +253,30 @@
 
     tbody tr.selected {
         background: var(--bg-active);
+    }
+
+    /* Ticked rows read as one set: the accent, kept apart from hover so a
+       sweep can still be seen while the pointer moves over it. */
+    tbody tr.picked {
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    tbody tr.picked:hover {
+        background: color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+
+    th.pick,
+    td.pick {
+        width: 30px;
+        padding: 0 0 0 12px;
+        vertical-align: middle;
+    }
+
+    .pick input {
+        display: block;
+        margin: 0;
+        accent-color: var(--accent);
+        cursor: pointer;
     }
 
     td {
