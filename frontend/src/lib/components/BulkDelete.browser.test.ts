@@ -114,6 +114,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
 
 const ResourceTable = (await import('./ResourceTable.svelte')).default;
 const { workspace } = await import('../state/workspace.svelte');
+const { views } = await import('../state/views');
 const { ActionService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services');
 
 // Deleting several rows at once. The rows are ticked in the table, a bar
@@ -142,6 +143,10 @@ function pods() {
 beforeEach(() => {
     workspace.closeDetail();
     workspace.dismissNotice();
+    // A table remembers its filter for the tab's lifetime, and these tables
+    // are never closed through the workspace: one test's search must not
+    // hide the rows the next one clicks.
+    views.forgetAll();
     vi.mocked(ActionService.DeleteMany).mockReset().mockResolvedValue({ done: 2, failures: [] });
 });
 

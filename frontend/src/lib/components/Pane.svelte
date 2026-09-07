@@ -30,12 +30,12 @@
     import {
         MIN_PANE_SIZE,
         PANE_HEADROOM,
-        currentTabDrag,
         iconForView,
         isDocumentView,
         isHorizontal,
         type PaneId,
     } from '../state/panes';
+    import { currentTabDrag, endTabDrag } from '../state/tabdrag.svelte';
     import { isAppTab, isSettingsTab, workspace } from '../state/workspace.svelte';
     import Dashboard from './Dashboard.svelte';
     import DetailPanel from './DetailPanel.svelte';
@@ -171,25 +171,25 @@
     //
     // A pane with nothing in it still has to be somewhere a tab can be dropped,
     // which means being visible while a drag is going on and not before. The
-    // window's own drag events answer that: a tab's drag begins in some strip
-    // and bubbles up here whichever pane it started in.
-
-    let dragging = $state(false);
-
-    function watchDragStart(): void {
-        dragging = currentTabDrag() !== null;
-    }
-
-    function endDrag(): void {
-        dragging = false;
-    }
+    // drag is a piece of shared state every pane reads, so all of them light
+    // up as it begins and all of them go dark as it ends -- see tabdrag.
 
     /** Whether a tab from another pane is in the air and this pane could take it. */
-    let receiving = $derived(dragging && currentTabDrag()?.from !== pane);
+    let receiving = $derived.by(() => {
+        const drag = currentTabDrag();
+        return drag !== null && drag.from !== pane;
+    });
+
+    /** What the drop target says. Names the place, since that is what is being chosen. */
+    const DROP_HINTS: Record<PaneId, string> = {
+        left: 'Drop to move to the left panel',
+        main: 'Drop to move to the main view',
+        right: 'Drop to move to the right panel',
+        bottom: 'Drop to move to the dock',
+    };
 
     function adopt(id: string, _from: PaneId, index: number): void {
         workspace.moveTabToPane(id, pane, index);
-        dragging = false;
     }
 
     /** The body takes a dropped tab at the end, where the strip takes it in place. */
@@ -198,7 +198,7 @@
         if (!drag || drag.from === pane) return;
         event.preventDefault();
         workspace.moveTabToPane(drag.id, pane);
-        dragging = false;
+        endTabDrag();
     }
 
     function dragOverBody(event: DragEvent): void {
@@ -284,7 +284,10 @@
     let bare = $derived(contents.tabs.length === 0);
 </script>
 
-<svelte:window ondragstart={watchDragStart} ondragend={endDrag} ondrop={endDrag} />
+<!-- A drag that ends anywhere but on a target -- let go over the table, or
+     outside the window -- still has to end. The source's own dragend reaches
+     here for those; a drop on a target ends the drag itself. -->
+<svelte:window ondragend={endTabDrag} ondrop={endTabDrag} />
 
 {#if present}
     <section
@@ -335,6 +338,17 @@
 
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="body" ondragover={dragOverBody} ondrop={dropOnBody}>
+            <!-- Where the tab in the air can land: drawn over whatever the
+                 pane is showing, the moment a drag begins, so the places a
+                 tab can go are on screen before anybody has to hunt for
+                 them. Decoration for the pointer only -- the menu's "Move
+                 to" items are the route that needs no aim. -->
+            {#if receiving}
+                <div class="dropzone" aria-hidden="true">
+                    <Icon name={pane === 'main' ? 'dashboard' : `dock-${pane}`} size={18} />
+                    <span>{DROP_HINTS[pane]}</span>
+                </div>
+            {/if}
             {#if open && active}
                 {#key active.id}
                     {#if active.view === 'clusters'}
@@ -504,11 +518,6 @@
         width: 220px;
     }
 
-    .pane.receiving {
-        outline: 2px dashed var(--accent);
-        outline-offset: -2px;
-    }
-
     /* The grab strip sits over the seam between the pane and what is next to
        it, so the whole edge is grabbable rather than the one pixel of the rule. */
     .handle {
@@ -550,6 +559,7 @@
     }
 
     .body {
+        position: relative;
         display: flex;
         flex-direction: column;
         flex: 1 1 auto;
@@ -558,9 +568,37 @@
         overflow: hidden;
     }
 
-    /* A folded bottom pane is its strip and nothing else. */
+    /* A folded bottom pane is its strip and nothing else... */
     .pane.bottom:not(.open) .body {
         flex: 0 0 auto;
+    }
+
+    /* ...until a tab is in the air, when it opens a body's worth of room to
+       aim at. A strip is a target a few pixels tall at the foot of the
+       window, and most of that is the hint text -- which is the "where is
+       the bottom area" that anybody dragging a tab there for the first time
+       asks. */
+    .pane.bottom.receiving:not(.open) .body {
+        flex: 0 0 96px;
+    }
+
+    .dropzone {
+        position: absolute;
+        inset: 6px;
+        z-index: 6;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 2px dashed var(--accent);
+        border-radius: var(--radius);
+        background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+        font-size: 12.5px;
+        color: var(--text);
+        /* The drop lands on the body underneath, which is what handles it;
+           the zone only says where. */
+        pointer-events: none;
     }
 
     .fold {

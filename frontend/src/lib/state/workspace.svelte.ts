@@ -30,6 +30,7 @@ import { editors } from './editor.svelte';
 import { forwards } from './forwards.svelte';
 import { logs } from './logs.svelte';
 import { terminals } from './terminals.svelte';
+import { views } from './views';
 import {
     CLUSTERS_TAB_ID,
     DETAILS_TAB_ID,
@@ -92,13 +93,12 @@ export {
     iconForView,
     resourceTabId,
     tabIdFor,
-    beginTabDrag,
-    currentTabDrag,
-    endTabDrag,
     MIN_PANE_SIZE,
     PANE_HEADROOM,
 } from './panes';
-export type { PaneId, PaneState, Tab, TabTarget, TabView, TabDrag } from './panes';
+export type { PaneId, PaneState, Tab, TabTarget, TabView } from './panes';
+export { beginTabDrag, currentTabDrag, endTabDrag } from './tabdrag.svelte';
+export type { TabDrag } from './tabdrag.svelte';
 
 /**
  * One tab in a pane, under the name the document views knew it by.
@@ -1230,7 +1230,7 @@ class Workspace {
 
     /**
      * Drops whatever a closed tab was holding: an editor's buffer, a log
-     * stream's scrollback, a shell.
+     * stream's scrollback, a shell, a list's sort and filter.
      *
      * A reopened tab must not come back holding an edit made against a version
      * of the object the cluster has moved past, or scrollback from a stream that
@@ -1242,6 +1242,7 @@ class Workspace {
         else if (tab.view === 'shell') terminals.forget(tab.id);
         else if (tab.view === 'details') this.clearDetail();
         else if (isDocumentView(tab.view)) editors.forget(tab.id);
+        else if (tab.view === 'resource') views.forget(tab.id);
     }
 
     /**
