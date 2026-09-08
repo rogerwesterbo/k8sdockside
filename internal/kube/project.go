@@ -105,6 +105,19 @@ func joinAny(items []any, limit int) string {
 
 // ---- pods ------------------------------------------------------------------
 
+// podReady is the ready count kubectl shows: how many of the pod's containers
+// are passing their readiness check, out of how many it has.
+//
+// The colouring is the part worth explaining. For a running pod the usual ratio
+// rules apply -- all of them ready is good, none of them is bad -- but a pod
+// that has finished has no ready containers and never will, because its
+// containers have exited. Toned as a ratio, every completed Job pod in the
+// namespace reads as a broken one, and in a namespace that runs a CronJob every
+// few minutes that is most of the list.
+//
+// So a finished pod's count is stated rather than judged. What actually
+// happened to it is in the Status column, which reads Succeeded or Failed and
+// is coloured for it -- a failed pod is still red there.
 func podReady(u *unstructured.Unstructured) Cell {
 	statuses := nestedSlice(u, "status", "containerStatuses")
 	ready := 0
@@ -116,6 +129,13 @@ func podReady(u *unstructured.Unstructured) Cell {
 	total := len(statuses)
 	if total == 0 {
 		total = len(nestedSlice(u, "spec", "containers"))
+	}
+	// terminal is the budget's own test for a finished pod, and the same one
+	// belongs here: the phase, not "was it made by a Job". A bare pod with a
+	// restartPolicy of Never that runs to completion is in exactly the same
+	// position as a Job's, and nothing here has to know which it was.
+	if terminal(u) {
+		return muted(fmt.Sprintf("%d/%d", ready, total))
 	}
 	return ratio(int64(ready), int64(total))
 }

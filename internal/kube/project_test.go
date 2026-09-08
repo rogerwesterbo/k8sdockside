@@ -35,6 +35,106 @@ func cellsByHeader(t *testing.T, table Table, row int) map[string]string {
 	return out
 }
 
+// cellsWithTone is cellsByHeader for the tests that are about the colour a cell
+// is given rather than the text in it.
+func cellsWithTone(t *testing.T, table Table, row int) map[string]Cell {
+	t.Helper()
+	if row >= len(table.Rows) {
+		t.Fatalf("row %d out of range, table has %d rows", row, len(table.Rows))
+	}
+	out := map[string]Cell{}
+	for i, header := range table.Columns {
+		if i < len(table.Rows[row].Cells) {
+			out[header] = table.Rows[row].Cells[i]
+		}
+	}
+	return out
+}
+
+// podOf builds a one-container pod in a phase, with that container ready or not.
+func podOf(name, phase string, ready bool, state map[string]any) *unstructured.Unstructured {
+	return obj(map[string]any{
+		"metadata": map[string]any{"name": name, "namespace": "prod"},
+		"spec":     map[string]any{"nodeName": "worker-1", "containers": []any{map[string]any{"name": "app"}}},
+		"status": map[string]any{
+			"phase": phase,
+			"containerStatuses": []any{map[string]any{
+				"ready":        ready,
+				"restartCount": int64(0),
+				"state":        state,
+			}},
+		},
+	})
+}
+
+func podRow(t *testing.T, pod *unstructured.Unstructured) map[string]Cell {
+	t.Helper()
+	table := buildLiveTable(KindPods, builtinColumns[KindPods], false, []*unstructured.Unstructured{pod})
+	return cellsWithTone(t, table, 0)
+}
+
+// A pod that has run to completion has no ready containers and never will, so
+// the ratio rules would mark every finished Job pod as a broken one -- and in a
+// namespace running a CronJob every few minutes, that is most of the list.
+func TestAFinishedPodsReadyCountIsStatedRatherThanJudged(t *testing.T) {
+	completed := map[string]any{"terminated": map[string]any{"reason": "Completed", "exitCode": int64(0)}}
+	cells := podRow(t, podOf("backup-29285", "Succeeded", false, completed))
+
+	if got := cells["Ready"]; got.Text != "0/1" || got.Tone != "info" {
+		t.Errorf("Ready = %+v, want 0/1 muted rather than coloured as a failure", got)
+	}
+	// What happened to it is the Status column's to say, and it says it well.
+	if got := cells["Status"]; got.Text != "Succeeded" || got.Tone != "ok" {
+		t.Errorf("Status = %+v, want Succeeded in the good tone", got)
+	}
+}
+
+// ...including one that finished badly. The pod is still red, in the column
+// that is actually about how it went.
+func TestAFailedPodIsRedInItsStatusRatherThanItsReadyCount(t *testing.T) {
+	failed := map[string]any{"terminated": map[string]any{"reason": "Error", "exitCode": int64(1)}}
+	cells := podRow(t, podOf("migrate-x9", "Failed", false, failed))
+
+	if got := cells["Ready"]; got.Text != "0/1" || got.Tone != "info" {
+		t.Errorf("Ready = %+v, want 0/1 muted", got)
+	}
+	if got := cells["Status"]; got.Text != "Error" || got.Tone != "error" {
+		t.Errorf("Status = %+v, want Error in the error tone", got)
+	}
+}
+
+// The point of the change is not to stop colouring the column: a pod that is
+// meant to be serving and is not ready is exactly what the red is for.
+func TestARunningPodWithNothingReadyIsStillRed(t *testing.T) {
+	cells := podRow(t, podOf("api-0", "Running", false, map[string]any{"running": map[string]any{}}))
+
+	if got := cells["Ready"]; got.Text != "0/1" || got.Tone != "error" {
+		t.Errorf("Ready = %+v, want 0/1 in the error tone", got)
+	}
+}
+
+func TestARunningPodThatIsReadyIsStillGreen(t *testing.T) {
+	cells := podRow(t, podOf("api-0", "Running", true, map[string]any{"running": map[string]any{}}))
+
+	if got := cells["Ready"]; got.Text != "1/1" || got.Tone != "ok" {
+		t.Errorf("Ready = %+v, want 1/1 in the good tone", got)
+	}
+}
+
+// The phase is the signal, not what created the pod: a bare pod with a
+// restartPolicy of Never that runs to completion is in the same position as a
+// Job's, and nothing here has to know which it was.
+func TestABarePodThatRanToCompletionIsTreatedTheSame(t *testing.T) {
+	pod := podOf("one-shot", "Succeeded", false, map[string]any{
+		"terminated": map[string]any{"reason": "Completed", "exitCode": int64(0)},
+	})
+	_ = unstructured.SetNestedField(pod.Object, "Never", "spec", "restartPolicy")
+
+	if got := podRow(t, pod)["Ready"]; got.Tone != "info" {
+		t.Errorf("Ready = %+v, want it muted whatever created the pod", got)
+	}
+}
+
 func TestPodStatusPrefersTheWaitingReasonOverThePhase(t *testing.T) {
 	pod := obj(map[string]any{
 		"metadata": map[string]any{"name": "api-0", "namespace": "prod"},
