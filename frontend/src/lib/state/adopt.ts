@@ -12,6 +12,7 @@
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/appconfig/models.js';
 import { DEFAULT_THEME_ID } from '../theme/apply';
+import type { ColumnPrefs } from '../columns';
 import type { PaneId } from './panes';
 
 /** One pane as the settings file holds it. See ./panes.ts for what a pane is. */
@@ -40,6 +41,32 @@ function adoptPane(pane: appconfig.PaneState | undefined | null, open: boolean, 
         open: pane?.open ?? open,
         size: pane?.size || size,
     };
+}
+
+/**
+ * One context's table settings out of the bindings, by kind.
+ *
+ * Every level of this arrives nullable -- the map, each kind's record, and both
+ * maps inside it -- because a context that has never had a column touched
+ * carries none of them. Resolving it here is what lets the store read a width
+ * without three fallbacks at every call site.
+ */
+function adoptColumns(
+    columns: { [kind: string]: appconfig.ColumnPrefs | undefined } | undefined | null,
+): Record<string, ColumnPrefs> {
+    return Object.fromEntries(
+        Object.entries(columns ?? {}).map(([kind, prefs]) => [
+            kind,
+            {
+                widths: Object.fromEntries(
+                    Object.entries(prefs?.widths ?? {}).filter(
+                        (entry): entry is [string, number] => typeof entry[1] === 'number',
+                    ),
+                ),
+                hidden: [...(prefs?.hidden ?? [])],
+            },
+        ]),
+    );
 }
 
 /** A kubeconfig file and the contexts parsed out of it. */
@@ -98,6 +125,39 @@ export interface SavedForward {
     browser: boolean;
 }
 
+/**
+ * What the user decided about one kubeconfig context: what to call it, what
+ * colour to tint it, where its Prometheus is, which nav groups are folded here,
+ * and what each of its tables looks like.
+ *
+ * Every field is resolved, so nothing downstream carries a fallback -- except
+ * collapsedGroups, where null is a value in its own right meaning "follow the
+ * global folding" and an empty list means "fold nothing here".
+ */
+export interface ContextPrefs {
+    alias: string;
+    color: string;
+    metrics: string;
+    collapsedGroups: string[] | null;
+    /** What the user changed about each kind's table here, keyed by kind. */
+    columns: Record<string, ColumnPrefs>;
+}
+
+/**
+ * Whether the user has said nothing about a context, in which case it is
+ * dropped rather than kept as a blank record. Mirrors ContextPrefs.isEmpty on
+ * the Go side, which applies the same rule to what is written.
+ */
+export function isEmptyContextPrefs(prefs: ContextPrefs): boolean {
+    return (
+        !prefs.alias &&
+        !prefs.color &&
+        !prefs.metrics &&
+        prefs.collapsedGroups === null &&
+        Object.keys(prefs.columns).length === 0
+    );
+}
+
 /** The persisted user preferences. */
 export interface Settings {
     manualFiles: string[];
@@ -113,7 +173,7 @@ export interface Settings {
     themeFolders: string[];
     /** Extra folders solution plugins are read from, on top of the default one. */
     pluginFolders: string[];
-    contexts: Record<string, { alias: string; color: string; metrics: string; collapsedGroups: string[] | null }>;
+    contexts: Record<string, ContextPrefs>;
     /**
      * Where every open view sits: which pane holds it, in what order, whether
      * each pane is showing its contents and how much room it takes. All three
@@ -210,11 +270,12 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
                     metrics: prefs?.metrics ?? '',
                     // null is "follows the global folding" and must survive.
                     collapsedGroups: prefs?.collapsedGroups ?? null,
+                    columns: adoptColumns(prefs?.columns),
                 },
             ]),
         ),
         panes: {
-            left: adoptPane(settings.panes?.left, true, 260),
+            left: adoptPane(settings.panes?.left, true, 320),
             main: adoptPane(settings.panes?.main, true, 0),
             right: adoptPane(settings.panes?.right, true, 420),
             // Folded until something is opened in it, which is what an older

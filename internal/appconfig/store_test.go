@@ -2,6 +2,7 @@ package appconfig
 
 import (
 	json "encoding/json/v2"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1053,5 +1054,166 @@ func TestTheSolutionsGroupIsRememberedAsPlugins(t *testing.T) {
 	}
 	if want := []string{"Workloads", "Plugins"}; !slices.Equal(got.Contexts["/k::a"].CollapsedGroups, want) {
 		t.Errorf("context collapsed groups = %v, want %v", got.Contexts["/k::a"].CollapsedGroups, want)
+	}
+}
+
+// ----- table columns --------------------------------------------------------
+
+// The widths and the hidden list are the user's, but a hand-edited file can put
+// anything in them -- and a column dragged to two pixels is a column that can no
+// longer be found to widen.
+func TestColumnWidthsAreHeldToAUsableRange(t *testing.T) {
+	store := openIn(t)
+
+	saved, err := store.SetContextPrefs("cfg::prod", ContextPrefs{
+		Columns: map[string]ColumnPrefs{
+			"pods": {Widths: map[string]int{"Name": 2, "Node": 99999, "Age": 180}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := saved.Contexts["cfg::prod"].Columns["pods"].Widths
+	want := map[string]int{"Name": MinColumnWidth, "Node": MaxColumnWidth, "Age": 180}
+	if !maps.Equal(got, want) {
+		t.Errorf("widths = %v, want %v", got, want)
+	}
+}
+
+// The settings file is written whole on every change, so a hidden list in the
+// order the clicks arrived would rewrite the file each time a column was
+// unhidden and hidden again, producing a diff where nothing had changed.
+func TestHiddenColumnsAreSortedAndDeduplicated(t *testing.T) {
+	store := openIn(t)
+
+	saved, err := store.SetContextPrefs("cfg::prod", ContextPrefs{
+		Columns: map[string]ColumnPrefs{
+			"pods": {Hidden: []string{"Node", "Age", "Node", ""}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := saved.Contexts["cfg::prod"].Columns["pods"].Hidden
+	if want := []string{"Age", "Node"}; !slices.Equal(got, want) {
+		t.Errorf("hidden = %v, want %v", got, want)
+	}
+}
+
+// A kind the user has put back to its defaults leaves nothing behind, and a
+// context whose only preference was that kind's columns is forgotten with it.
+func TestAKindPutBackToItsDefaultsIsForgotten(t *testing.T) {
+	store := openIn(t)
+
+	if _, err := store.SetContextPrefs("cfg::prod", ContextPrefs{
+		Columns: map[string]ColumnPrefs{"pods": {Hidden: []string{"Node"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := store.SetContextPrefs("cfg::prod", ContextPrefs{
+		Columns: map[string]ColumnPrefs{"pods": {}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := saved.Contexts["cfg::prod"]; ok {
+		t.Errorf("contexts = %+v, want the context forgotten with its last preference", saved.Contexts)
+	}
+}
+
+// ...but a context that still has something else to say about it stays, columns
+// or no columns. The alias is not given up because a column was put back.
+func TestColumnsAreNotTheOnlyReasonToKeepAContext(t *testing.T) {
+	store := openIn(t)
+
+	saved, err := store.SetContextPrefs("cfg::prod", ContextPrefs{
+		Alias:   "Production",
+		Columns: map[string]ColumnPrefs{"pods": {}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := saved.Contexts["cfg::prod"]; got.Alias != "Production" || got.Columns != nil {
+		t.Errorf("prefs = %+v, want the alias kept and the empty columns dropped", got)
+	}
+}
+
+// Two clusters listing the same kind are two different tables: the pods of a
+// dev cluster have short names and the pods of a production one have long ones.
+func TestColumnsAreKeptPerContextAndPerKind(t *testing.T) {
+	store := openIn(t)
+
+	for _, set := range []struct {
+		id    string
+		kind  string
+		width int
+	}{
+		{"cfg::dev", "pods", 200},
+		{"cfg::prod", "pods", 460},
+		{"cfg::prod", "services", 300},
+	} {
+		prefs := store.Get().Contexts[set.id]
+		if prefs.Columns == nil {
+			prefs.Columns = map[string]ColumnPrefs{}
+		}
+		prefs.Columns[set.kind] = ColumnPrefs{Widths: map[string]int{"Name": set.width}}
+		if _, err := store.SetContextPrefs(set.id, prefs); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := store.Get().Contexts
+	if w := got["cfg::dev"].Columns["pods"].Widths["Name"]; w != 200 {
+		t.Errorf("dev pods Name = %d, want 200", w)
+	}
+	if w := got["cfg::prod"].Columns["pods"].Widths["Name"]; w != 460 {
+		t.Errorf("prod pods Name = %d, want 460", w)
+	}
+	if w := got["cfg::prod"].Columns["services"].Widths["Name"]; w != 300 {
+		t.Errorf("prod services Name = %d, want 300", w)
+	}
+}
+
+// Everything the store hands out is a copy. A caller holding one and writing
+// into its maps must not be writing into the store's own state.
+func TestGetCopiesTheColumnsTwoLevelsDown(t *testing.T) {
+	store := openIn(t)
+	if _, err := store.SetContextPrefs("cfg::prod", ContextPrefs{
+		Columns: map[string]ColumnPrefs{"pods": {Widths: map[string]int{"Name": 300}, Hidden: []string{"Node"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := store.Get()
+	snapshot.Contexts["cfg::prod"].Columns["pods"].Widths["Name"] = 900
+	snapshot.Contexts["cfg::prod"].Columns["pods"].Hidden[0] = "Age"
+
+	kept := store.Get().Contexts["cfg::prod"].Columns["pods"]
+	if kept.Widths["Name"] != 300 || kept.Hidden[0] != "Node" {
+		t.Errorf("columns = %+v, want the store unchanged by a caller's writes", kept)
+	}
+}
+
+// A settings file written before columns could be resized has no such field at
+// all, and must read back as a table nobody has touched rather than as one with
+// every column hidden.
+func TestAFileFromBeforeColumnsCouldBeChanged(t *testing.T) {
+	path := tempSettings(t)
+
+	legacy := `{"contexts":{"cfg::prod":{"alias":"Production","color":"#b8384b","collapsedGroups":null}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := store.Get().Contexts["cfg::prod"]
+	if got.Alias != "Production" || got.Columns != nil {
+		t.Errorf("prefs = %+v, want the alias read and no column settings invented", got)
 	}
 }

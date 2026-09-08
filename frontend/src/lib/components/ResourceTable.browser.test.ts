@@ -313,3 +313,80 @@ test('what one tab remembers does not leak into another', async () => {
     await expect.poll(() => names()).toEqual(['old', 'new']);
     expect((page.getByPlaceholder('Filter deployments').element() as HTMLInputElement).value).toBe('');
 });
+
+// ----- columns --------------------------------------------------------------
+//
+// Unlike the sort and the search above, which last only while the tab is open,
+// what the columns look like goes to the settings file: it is a decision about
+// the kind rather than about this moment.
+
+/** The headings on screen, left to right, without the checkbox column. */
+const headings = () =>
+    [...document.querySelectorAll('thead th:not(.pick)')].map((th) => th.textContent?.trim() ?? '');
+
+test('a column turned off in the picker leaves the table', async () => {
+    workspace.settings.contexts = {};
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+
+    await page.getByRole('button', { name: 'Columns' }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Age' }).click();
+
+    await expect.poll(() => headings()).toEqual(['Name']);
+    expect(workspace.isColumnHidden(PROD, 'deployments', 'Age')).toBe(true);
+});
+
+test('a column hidden before the table loads is never drawn', async () => {
+    workspace.settings.contexts = {};
+    workspace.setColumnHidden(PROD, 'deployments', 'Age', true);
+
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+
+    await expect.poll(() => headings()).toEqual(['Name']);
+});
+
+test('a width dragged is remembered for this kind in this cluster', async () => {
+    workspace.settings.contexts = {};
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+
+    const grip = document.querySelector('[aria-label="Resize Name"]') as HTMLElement;
+    grip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true }));
+
+    await expect.poll(() => workspace.columnPrefs(PROD, 'deployments').widths.Name).toBeGreaterThan(0);
+    expect((document.querySelector('thead th:not(.pick)') as HTMLElement).style.width).not.toBe('');
+});
+
+// The chevron saying which way the rows run is on a heading that is no longer
+// there, so the order would have nothing on screen to explain it.
+test('hiding the sorted column gives the rows back their natural order', async () => {
+    workspace.settings.contexts = {};
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+
+    await page.getByRole('button', { name: 'Age' }).click();
+    await expect.poll(() => names()).toEqual(['new', 'old']);
+
+    await page.getByRole('button', { name: 'Columns' }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Age' }).click();
+
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+    expect(document.querySelector('th[aria-sort="ascending"]')).toBeNull();
+});
+
+// A CRD's printer columns are the definition's to change. A width kept for a
+// column nobody can see comes back, at last year's size, if the column returns.
+test('settings for a column the kind no longer has are dropped as it loads', async () => {
+    workspace.settings.contexts = {};
+    workspace.setColumnWidth(PROD, 'deployments', 'Replicas', 300);
+    workspace.setColumnWidth(PROD, 'deployments', 'Name', 200);
+
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+
+    await expect.poll(() => workspace.columnPrefs(PROD, 'deployments').widths).toEqual({ Name: 200 });
+});

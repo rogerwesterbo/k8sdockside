@@ -128,6 +128,8 @@
         display: ['M4 5h16v11H4z', 'M9 20h6', 'M12 16v4', 'M8 9h8', 'M8 12h5'],
         // Rows at two spacings: the table density.
         rows: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+        // A table split down its verticals: which columns a listing shows.
+        columns: ['M4 5h16v14H4z', 'M10 5v14', 'M15 5v14'],
         // A letter between size marks: the root font size.
         type: ['M5 6V4h14v2', 'M12 4v16', 'M9 20h6'],
         // A box being reopened: last session's tabs coming back.

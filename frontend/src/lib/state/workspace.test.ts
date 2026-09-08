@@ -96,6 +96,8 @@ const {
     DETAILS_TAB_ID,
     clustersTab,
 } = await import('./workspace.svelte');
+const { DEFAULT_PANE_SIZE } = await import('./panes');
+const { columnKeys, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH } = await import('../columns');
 const { labelFor, iconFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { views } = await import('./views');
@@ -2241,7 +2243,7 @@ describe('resetting the layout', () => {
 
         workspace.resetLayout();
 
-        expect(workspace.panes.left.size).toBe(260);
+        expect(workspace.panes.left.size).toBe(DEFAULT_PANE_SIZE.left);
     });
 
     test('leaves the bottom pane folded when the reset put nothing in it', () => {
@@ -2536,5 +2538,130 @@ describe('what a list was showing', () => {
         workspace.closeTab(resourceTabId(PROD, 'nodes'));
 
         expect(views.recall(id)?.sortColumn).toBe(3);
+    });
+});
+
+// Unlike a sort or a filter, which last only while the tab is open, what a
+// table's columns look like is a decision about the kind and is written to the
+// settings file -- per kind, and per context, because the same kind is not the
+// same table in two clusters.
+describe("a table's columns", () => {
+    beforeEach(() => {
+        workspace.settings.contexts = {};
+    });
+
+    test('start as the backend sends them: nothing hidden, nothing pinned', () => {
+        const prefs = workspace.columnPrefs(PROD, 'pods');
+
+        expect(prefs.hidden).toEqual([]);
+        expect(prefs.widths).toEqual({});
+        expect(workspace.hasColumnPrefs(PROD, 'pods')).toBe(false);
+    });
+
+    test('a width is remembered, held inside a range a column can be found in', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+        workspace.setColumnWidth(PROD, 'pods', 'Node', 2);
+        workspace.setColumnWidth(PROD, 'pods', 'Age', 99999);
+
+        expect(workspace.columnPrefs(PROD, 'pods').widths).toEqual({
+            Name: 420,
+            Node: MIN_COLUMN_WIDTH,
+            Age: MAX_COLUMN_WIDTH,
+        });
+    });
+
+    test('a width is given back to the contents, which is the only way to that default', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+
+        workspace.clearColumnWidth(PROD, 'pods', 'Name');
+
+        expect(workspace.columnPrefs(PROD, 'pods').widths).toEqual({});
+        expect(workspace.hasColumnPrefs(PROD, 'pods')).toBe(false);
+    });
+
+    test('a hidden column is remembered, sorted so a re-tick rewrites nothing', () => {
+        workspace.setColumnHidden(PROD, 'pods', 'Node', true);
+        workspace.setColumnHidden(PROD, 'pods', 'Age', true);
+
+        expect(workspace.columnPrefs(PROD, 'pods').hidden).toEqual(['Age', 'Node']);
+        expect(workspace.isColumnHidden(PROD, 'pods', 'Node')).toBe(true);
+        expect(workspace.isColumnHidden(PROD, 'pods', 'Name')).toBe(false);
+    });
+
+    test('showing them all leaves the widths alone', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+        workspace.setColumnHidden(PROD, 'pods', 'Node', true);
+
+        workspace.showAllColumns(PROD, 'pods');
+
+        expect(workspace.columnPrefs(PROD, 'pods').hidden).toEqual([]);
+        expect(workspace.columnPrefs(PROD, 'pods').widths).toEqual({ Name: 420 });
+    });
+
+    test('resetting gives back the table the backend sends', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+        workspace.setColumnHidden(PROD, 'pods', 'Node', true);
+
+        workspace.resetColumns(PROD, 'pods');
+
+        expect(workspace.hasColumnPrefs(PROD, 'pods')).toBe(false);
+        expect(workspace.settings.contexts[PROD]).toBeUndefined();
+    });
+
+    test('one kind is not another, and one cluster is not another', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+
+        expect(workspace.columnPrefs(PROD, 'services').widths).toEqual({});
+        expect(workspace.columnPrefs(STAGING, 'pods').widths).toEqual({});
+    });
+
+    test('the alias and the colour survive a column being dragged', () => {
+        workspace.setContextPrefs(PROD, 'Production', '#b8384b');
+
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+
+        expect(workspace.settings.contexts[PROD].alias).toBe('Production');
+        expect(workspace.settings.contexts[PROD].color).toBe('#b8384b');
+    });
+
+    test('...and a column survives the context being renamed', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+
+        workspace.setContextPrefs(PROD, 'Production', '');
+
+        expect(workspace.columnPrefs(PROD, 'pods').widths).toEqual({ Name: 420 });
+    });
+
+    // A CRD's printer columns are the definition's to change, and a kind the app
+    // itself lists can gain or lose one between releases. A width kept for a
+    // column nobody can see comes back, at last year's size, if it ever returns.
+    test('settings for a column the kind no longer has are dropped as it loads', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+        workspace.setColumnHidden(PROD, 'pods', 'Node', true);
+
+        workspace.pruneColumns(PROD, 'pods', ['Name', 'Ready', 'Age']);
+
+        expect(workspace.columnPrefs(PROD, 'pods')).toEqual({ widths: { Name: 420 }, hidden: [] });
+    });
+
+    test('a table that reported no columns at all cannot clear the record', () => {
+        workspace.setColumnWidth(PROD, 'pods', 'Name', 420);
+
+        workspace.pruneColumns(PROD, 'pods', []);
+
+        expect(workspace.columnPrefs(PROD, 'pods').widths).toEqual({ Name: 420 });
+    });
+
+    // Two columns can share a name -- a CRD printer column called "Name" beside
+    // the Name the app puts first -- and they are not the same column.
+    test('a repeated column name is told apart from the first of that name', () => {
+        const keys = columnKeys(['Name', 'Ready', 'Name']);
+
+        expect(keys).toEqual(['Name', 'Ready', 'Name#2']);
+
+        workspace.setColumnHidden(PROD, 'crd:widgets', keys[2], true);
+
+        expect(workspace.isColumnHidden(PROD, 'crd:widgets', 'Name')).toBe(false);
+        expect(workspace.isColumnHidden(PROD, 'crd:widgets', 'Name#2')).toBe(true);
     });
 });

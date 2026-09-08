@@ -43,6 +43,48 @@ type ContextPrefs struct {
 	// specifically, e.g. because this is the one cluster with the Gateway API
 	// installed.
 	CollapsedGroups []string `json:"collapsedGroups"`
+	// Columns is what the user changed about each kind's table here, keyed by
+	// the kind the tab lists. Per context because the same kind is not the same
+	// table in two clusters: the pods of a dev cluster have short names and the
+	// pods of a production one have long ones, and a width dragged for the
+	// second is the wrong width for the first.
+	Columns map[string]ColumnPrefs `json:"columns,omitempty"`
+}
+
+// ColumnPrefs is what the user changed about one kind's table: the widths they
+// dragged columns to, and the columns they turned off. Absent fields mean "as
+// the backend sends it", which is the default every kind starts at.
+//
+// Keyed by column name rather than by position. A kind's columns are not fixed
+// -- a CRD declares its own printer columns, and the app's own lists gain and
+// lose them between releases -- so an index written today can name a different
+// column tomorrow, silently moving one column's width onto another and hiding
+// something the user never hid. A name that has gone is simply not found.
+//
+// Where a kind declares the same name twice -- a CRD printer column called
+// "Name" beside the Name the app puts first -- the repeats are distinguished by
+// an occurrence suffix, "Name#2". The frontend builds these keys; see
+// frontend/src/lib/columns.ts, which is the one place that rule lives.
+type ColumnPrefs struct {
+	// Widths is the width in px the user dragged a column to, by column key.
+	// A column not listed here sizes itself to its contents, as it always did.
+	Widths map[string]int `json:"widths,omitempty"`
+	// Hidden are the columns the user turned off, by column key. Sorted, so a
+	// settings file does not churn on a re-tick that changes nothing.
+	Hidden []string `json:"hidden,omitempty"`
+}
+
+// isEmpty reports whether the user has said nothing about one kind's table, in
+// which case the entry is dropped rather than kept as a blank one.
+func (c ColumnPrefs) isEmpty() bool {
+	return len(c.Widths) == 0 && len(c.Hidden) == 0
+}
+
+// isEmpty reports whether the user has said nothing about a context at all. An
+// empty override is not nothing: CollapsedGroups of length zero means "show
+// every group here", which is a choice and not the absence of one.
+func (p ContextPrefs) isEmpty() bool {
+	return p.Alias == "" && p.Color == "" && p.Metrics == "" && p.CollapsedGroups == nil && len(p.Columns) == 0
 }
 
 // TabRef identifies one open tab: a kubeconfig context and the resource kind
@@ -538,6 +580,16 @@ const (
 // samples is already more than a line four hundred pixels wide can say.
 const MaxMetricsRange = 7 * 24 * 60
 
+// The range a table column may be dragged to, in px. The floor leaves room for
+// a sort chevron and an ellipsis, below which a column shows nothing and cannot
+// be found again to widen; the ceiling is wider than any window the app is
+// usable in, and is there so a hand-edited file cannot push every other column
+// off the screen.
+const (
+	MinColumnWidth = 48
+	MaxColumnWidth = 1600
+)
+
 // legacyThemes maps what Preferences.Theme held before the app had themes onto
 // the theme ids that replaced them.
 //
@@ -676,9 +728,8 @@ func (s *Store) SetContextPrefs(id string, prefs ContextPrefs) (Settings, error)
 	}
 	return s.update(func(d *Settings) {
 		// A folding override is a preference in its own right, so a context
-		// carrying only that one is kept. An empty override is meaningful: it
-		// says "show every group here", which is not the same as no override.
-		if prefs.Alias == "" && prefs.Color == "" && prefs.Metrics == "" && prefs.CollapsedGroups == nil {
+		// carrying only that one is kept -- see ContextPrefs.isEmpty.
+		if prefs.isEmpty() {
 			delete(d.Contexts, id)
 			return
 		}
@@ -707,7 +758,7 @@ func (s *Store) SetMetricsEndpoint(contextID, value string) (Settings, error) {
 		// The same emptiness rule SetContextPrefs applies: a context with
 		// nothing left to say about it is forgotten rather than kept as a blank
 		// entry cluttering the settings file.
-		if prefs.Alias == "" && prefs.Color == "" && prefs.Metrics == "" && prefs.CollapsedGroups == nil {
+		if prefs.isEmpty() {
 			delete(d.Contexts, contextID)
 			return
 		}
@@ -1126,6 +1177,19 @@ func normalise(s Settings) Settings {
 	if s.Contexts == nil {
 		s.Contexts = map[string]ContextPrefs{}
 	}
+	// After the columns are cleaned up, not before: a record whose only
+	// preference was one kind's table is empty once that kind has been put back
+	// to its defaults, and only normaliseColumns knows that it has been. Doing
+	// it here rather than in each mutator is what makes the rule hold for a
+	// hand-edited file too.
+	for id, prefs := range s.Contexts {
+		prefs.Columns = normaliseColumns(prefs.Columns)
+		if prefs.isEmpty() {
+			delete(s.Contexts, id)
+			continue
+		}
+		s.Contexts[id] = prefs
+	}
 	if s.TabOrder == nil {
 		s.TabOrder = []TabRef{}
 	}
@@ -1310,6 +1374,51 @@ func withClustersTab(p *Panes) *Panes {
 	return p
 }
 
+// normaliseColumns brings one context's table settings into a shape the rest of
+// the app can trust: widths inside MinColumnWidth..MaxColumnWidth, hidden lists
+// deduplicated and sorted, and nothing kept for a kind the user has since put
+// back to its defaults.
+//
+// The sorting is not tidiness. The settings file is written whole on every
+// change, so a hidden list in whatever order the clicks arrived would rewrite
+// the file each time a column was unhidden and hidden again, producing a diff
+// where nothing changed.
+func normaliseColumns(in map[string]ColumnPrefs) map[string]ColumnPrefs {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]ColumnPrefs, len(in))
+	for kind, prefs := range in {
+		clean := ColumnPrefs{}
+		for column, px := range prefs.Widths {
+			// A column with no name cannot be matched back to anything on
+			// screen, so it could only ever sit in the file unreachable.
+			if column == "" {
+				continue
+			}
+			if clean.Widths == nil {
+				clean.Widths = map[string]int{}
+			}
+			clean.Widths[column] = min(max(px, MinColumnWidth), MaxColumnWidth)
+		}
+		for _, column := range prefs.Hidden {
+			if column == "" || slices.Contains(clean.Hidden, column) {
+				continue
+			}
+			clean.Hidden = append(clean.Hidden, column)
+		}
+		slices.Sort(clean.Hidden)
+		if clean.isEmpty() {
+			continue
+		}
+		out[kind] = clean
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // normalisePane fills in what one pane's record does not say. The minimum size
 // is the point: below it a pane shows its tab strip and three lines of whatever
 // is in it, which is not a view of anything.
@@ -1470,7 +1579,29 @@ func clone(s Settings) Settings {
 	out.Contexts = make(map[string]ContextPrefs, len(s.Contexts))
 	for k, v := range s.Contexts {
 		v.CollapsedGroups = slices.Clone(v.CollapsedGroups)
+		v.Columns = cloneColumns(v.Columns)
 		out.Contexts[k] = v
+	}
+	return out
+}
+
+// cloneColumns copies one context's table settings, maps and slices and all, so
+// that a caller holding the result cannot reach back into the store. Nil stays
+// nil: a context that has never had a column touched carries no map.
+func cloneColumns(in map[string]ColumnPrefs) map[string]ColumnPrefs {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]ColumnPrefs, len(in))
+	for kind, prefs := range in {
+		copied := ColumnPrefs{Hidden: slices.Clone(prefs.Hidden)}
+		if prefs.Widths != nil {
+			copied.Widths = make(map[string]int, len(prefs.Widths))
+			for column, px := range prefs.Widths {
+				copied.Widths[column] = px
+			}
+		}
+		out[kind] = copied
 	}
 	return out
 }

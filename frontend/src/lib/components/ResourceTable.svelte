@@ -19,9 +19,11 @@
     import { extensions, setBadLine } from '../editor/setup';
     import { buildMergePatch, type PatchMove, type PatchTarget } from '../patch';
     import { customKindFor, labelFor, singularFor } from '../catalogue';
+    import { describeColumns } from '../columns';
     import { resourceTabId } from '../state/panes';
     import { views } from '../state/views';
     import SegmentedControl from './settings/SegmentedControl.svelte';
+    import ColumnPicker from './ColumnPicker.svelte';
     import ContainerPills from './ContainerPills.svelte';
     import SortableTable from './SortableTable.svelte';
     import { alpha } from '../colors';
@@ -438,6 +440,36 @@
         workspace.openDetail({ contextId, kind: workspace.listedKind(kind), namespace: row.namespace, name: row.name });
     }
 
+    // ----- columns ---------------------------------------------------------
+    //
+    // Which columns are shown and how wide each is belong to the settings file,
+    // not to `views`: unlike the sort and the filter these are a decision about
+    // the kind rather than about this moment, and somebody who narrowed Name
+    // because their pod names are short wants it narrow again tomorrow. Stored
+    // per context as well as per kind -- see Workspace's column section.
+
+    /** Every column the backend sent, with the key the settings file uses. */
+    let allColumns = $derived(describeColumns(table?.columns ?? []));
+    let columnPrefs = $derived(workspace.columnPrefs(contextId, kind));
+
+    // Settings for columns the kind no longer has are dropped as the table
+    // loads. A CRD's printer columns are the definition's to change, and a
+    // width kept for a column nobody can see is one that comes back, at last
+    // year's size, if the column ever does.
+    $effect(() => {
+        const columns = table?.columns ?? [];
+        if (columns.length > 0) untrack(() => workspace.pruneColumns(contextId, kind, columns));
+    });
+
+    // A hidden column cannot be sorted by: the chevron saying which way is on
+    // the heading that is no longer there, so the rows would be in an order
+    // with nothing on screen to explain it.
+    $effect(() => {
+        const off = new Set(columnPrefs.hidden);
+        const at = sortColumn;
+        if (at !== null && off.has(allColumns[at]?.key)) untrack(() => (sortColumn = null));
+    });
+
     // A CustomResourceDefinition is the one row that leads somewhere: its name
     // opens a tab listing the objects of that kind. A definition is named
     // "<plural>.<group>", which is exactly the kind string such a tab wants.
@@ -485,6 +517,17 @@
         </div>
 
         <span class="count">{rows.length}{table && rows.length !== table.rows.length ? ` of ${table.rows.length}` : ''}</span>
+
+        {#if allColumns.length > 0}
+            <ColumnPicker
+                columns={allColumns}
+                hidden={columnPrefs.hidden}
+                resized={Object.keys(columnPrefs.widths).length > 0}
+                ontoggle={(column, off) => workspace.setColumnHidden(contextId, kind, column, off)}
+                onshowall={() => workspace.showAllColumns(contextId, kind)}
+                onreset={() => workspace.resetColumns(contextId, kind)}
+            />
+        {/if}
     </div>
 
     {#if pickable && picked.size > 0}
@@ -610,6 +653,10 @@
             <SortableTable
                 columns={table.columns}
                 {rows}
+                widths={columnPrefs.widths}
+                hidden={columnPrefs.hidden}
+                onresize={(column, px) => workspace.setColumnWidth(contextId, kind, column, px)}
+                onresizeend={(column) => workspace.clearColumnWidth(contextId, kind, column)}
                 {selectedRowId}
                 onselect={select}
                 picked={pickable ? picked : null}

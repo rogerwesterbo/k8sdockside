@@ -24,7 +24,15 @@ import {
 } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 import type * as appconfig from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/appconfig/models.js';
-import { adoptFiles, adoptSettings, type ConfigFile, type Settings } from './adopt';
+import {
+    adoptFiles,
+    adoptSettings,
+    isEmptyContextPrefs,
+    type ConfigFile,
+    type ContextPrefs,
+    type Settings,
+} from './adopt';
+import { clampColumnWidth, columnKeys, noColumnPrefs, type ColumnPrefs } from '../columns';
 import { changes } from './changes.svelte';
 import { editors } from './editor.svelte';
 import { forwards } from './forwards.svelte';
@@ -860,19 +868,40 @@ class Workspace {
      * debounced, because this is called from a text field on every keystroke.
      */
     setContextPrefs(contextId: string, alias: string, color: string): void {
-        // The folding override is a separate preference stored on the same
-        // record; renaming or recolouring a context must not discard it.
-        const collapsedGroups = this.settings.contexts[contextId]?.collapsedGroups ?? null;
-        // Carried through rather than rebuilt: the metrics endpoint is edited
-        // elsewhere, and rewriting the whole record here would drop it.
-        const metrics = this.settings.contexts[contextId]?.metrics ?? '';
-        const prefs = { alias, color, metrics, collapsedGroups };
-        if (!alias && !color && !metrics && collapsedGroups === null) {
+        this.writeContextPrefs(contextId, { alias, color });
+    }
+
+    /**
+     * Changes part of what is remembered about one context and saves the whole
+     * record.
+     *
+     * Every caller here changes one thing -- a colour, a folding override, a
+     * column width -- but SetContextPrefs takes the whole record and replaces
+     * it, so anything not carried through is deleted. Rebuilding it by hand at
+     * each call site is how the metrics endpoint used to be lost by the folding
+     * writer: a field added later is a field some earlier writer forgets. One
+     * merge means a new preference is carried by all of them at once.
+     *
+     * A context left with nothing said about it is forgotten rather than kept as
+     * an empty record, which is the same rule the store applies on the far side.
+     */
+    private writeContextPrefs(contextId: string, patch: Partial<ContextPrefs>): void {
+        const current = this.settings.contexts[contextId];
+        const merged: ContextPrefs = {
+            alias: current?.alias ?? '',
+            color: current?.color ?? '',
+            metrics: current?.metrics ?? '',
+            collapsedGroups: current?.collapsedGroups ?? null,
+            columns: current?.columns ?? {},
+            ...patch,
+        };
+
+        if (isEmptyContextPrefs(merged)) {
             delete this.settings.contexts[contextId];
         } else {
-            this.settings.contexts[contextId] = prefs;
+            this.settings.contexts[contextId] = merged;
         }
-        this.persistContextPrefs(contextId, prefs);
+        this.persistContextPrefs(contextId, $state.snapshot(merged) as appconfig.ContextPrefs);
     }
 
     private persistContextPrefs = this.writer(
@@ -886,6 +915,135 @@ class Workspace {
     /** Clears the alias and colour, returning the context to its defaults. */
     resetContextPrefs(contextId: string): void {
         this.setContextPrefs(contextId, '', '');
+    }
+
+    // ----- table columns -------------------------------------------------
+    //
+    // Per kind per context, because the same kind is not the same table in two
+    // clusters: the pods of a dev cluster have short names and the pods of a
+    // production one have long ones, and a width dragged for the second is the
+    // wrong width for the first.
+    //
+    // Stored on the context record with the alias and the colour, so it goes
+    // out through the writer those already use. A second writer over the same
+    // record would race them -- every settings call answers with the whole
+    // file -- and dragging a column while a rename was in flight would carry
+    // the old name back.
+
+    /** What the user changed about one kind's table here. Never null. */
+    columnPrefs(contextId: string, kind: string): ColumnPrefs {
+        return this.settings.contexts[contextId]?.columns[kind] ?? noColumnPrefs();
+    }
+
+    /** Records the width a column was dragged to, clamped to a usable range. */
+    setColumnWidth(contextId: string, kind: string, column: string, px: number): void {
+        const prefs = this.columnPrefs(contextId, kind);
+        this.writeColumns(contextId, kind, {
+            ...prefs,
+            widths: { ...prefs.widths, [column]: clampColumnWidth(px) },
+        });
+    }
+
+    /**
+     * Puts one column back to sizing itself to its contents. What a double
+     * click on its edge does, and the only way back to the default width --
+     * dragging can reach any width but the one the browser would have chosen.
+     */
+    clearColumnWidth(contextId: string, kind: string, column: string): void {
+        const prefs = this.columnPrefs(contextId, kind);
+        if (!(column in prefs.widths)) return;
+        const widths = { ...prefs.widths };
+        delete widths[column];
+        this.writeColumns(contextId, kind, { ...prefs, widths });
+    }
+
+    /** Whether a column is turned off in one kind's table here. */
+    isColumnHidden(contextId: string, kind: string, column: string): boolean {
+        return this.columnPrefs(contextId, kind).hidden.includes(column);
+    }
+
+    /**
+     * Shows or hides one column.
+     *
+     * Sorted on the way in for the reason the store sorts it: the settings file
+     * is written whole, so a list in click order would produce a diff every
+     * time a column was hidden and shown again.
+     */
+    setColumnHidden(contextId: string, kind: string, column: string, hidden: boolean): void {
+        const prefs = this.columnPrefs(contextId, kind);
+        if (prefs.hidden.includes(column) === hidden) return;
+        const next = hidden
+            ? [...prefs.hidden, column].sort()
+            : prefs.hidden.filter((name) => name !== column);
+        this.writeColumns(contextId, kind, { ...prefs, hidden: next });
+    }
+
+    /** Shows every column again, leaving the widths as they are. */
+    showAllColumns(contextId: string, kind: string): void {
+        const prefs = this.columnPrefs(contextId, kind);
+        if (prefs.hidden.length === 0) return;
+        this.writeColumns(contextId, kind, { ...prefs, hidden: [] });
+    }
+
+    /**
+     * Puts one kind's table back to how it arrives: every column shown, each at
+     * the width its contents want.
+     */
+    resetColumns(contextId: string, kind: string): void {
+        if (!this.settings.contexts[contextId]?.columns[kind]) return;
+        this.writeColumns(contextId, kind, noColumnPrefs());
+    }
+
+    /** Whether the user has changed anything about one kind's table here. */
+    hasColumnPrefs(contextId: string, kind: string): boolean {
+        const prefs = this.settings.contexts[contextId]?.columns[kind];
+        return !!prefs && (Object.keys(prefs.widths).length > 0 || prefs.hidden.length > 0);
+    }
+
+    /**
+     * Writes one kind's table settings, dropping the entry when the user has
+     * put everything back -- which is what lets a context with nothing else set
+     * be forgotten rather than kept for an empty record.
+     */
+    private writeColumns(contextId: string, kind: string, prefs: ColumnPrefs): void {
+        const columns = { ...(this.settings.contexts[contextId]?.columns ?? {}) };
+        if (Object.keys(prefs.widths).length === 0 && prefs.hidden.length === 0) {
+            delete columns[kind];
+        } else {
+            columns[kind] = prefs;
+        }
+        this.writeContextPrefs(contextId, { columns });
+    }
+
+    /**
+     * Forgets the settings for columns a kind no longer has.
+     *
+     * A CRD's printer columns are the definition's to change, and a kind the
+     * app itself lists can gain or lose one between releases. Neither is worth
+     * a prompt, but a width kept for a column nobody can see is a width that
+     * comes back if the column ever does -- at whatever the user dragged it to
+     * a year ago -- so a table reports its real columns as it loads and
+     * anything else is dropped.
+     *
+     * Only ever narrows, and only for a kind the user has actually touched, so
+     * a table that fails to load and reports nothing cannot clear the record.
+     */
+    pruneColumns(contextId: string, kind: string, columns: string[]): void {
+        const prefs = this.settings.contexts[contextId]?.columns[kind];
+        if (!prefs || columns.length === 0) return;
+
+        const known = new Set(columnKeys(columns));
+        const widths = Object.fromEntries(
+            Object.entries(prefs.widths).filter(([column]) => known.has(column)),
+        );
+        const hidden = prefs.hidden.filter((column) => known.has(column));
+        if (
+            Object.keys(widths).length === Object.keys(prefs.widths).length &&
+            hidden.length === prefs.hidden.length
+        ) {
+            return;
+        }
+        this.writeColumns(contextId, kind, { widths, hidden });
     }
 
     /** Selects a context in the sidebar and expands its resource tree. */
@@ -2098,20 +2256,7 @@ class Workspace {
      * shared default.
      */
     private setFoldingOverride(contextId: string, groups: string[] | null): void {
-        const prefs = this.settings.contexts[contextId];
-        const merged = {
-            alias: prefs?.alias ?? '',
-            color: prefs?.color ?? '',
-            metrics: prefs?.metrics ?? '',
-            collapsedGroups: groups,
-        };
-
-        if (!merged.alias && !merged.color && !merged.metrics && groups === null) {
-            delete this.settings.contexts[contextId];
-        } else {
-            this.settings.contexts[contextId] = merged;
-        }
-        this.persistContextPrefs(contextId, merged);
+        this.writeContextPrefs(contextId, { collapsedGroups: groups });
     }
 
     /** Whether any of a context's sections is open, and so worth collapsing. */
@@ -2524,9 +2669,14 @@ class Workspace {
         try {
             let saved: appconfig.Settings | null = null;
             for (const [id, prefs] of entries) {
-                // Matches setFoldingOverride: a context left with nothing set
-                // is forgotten rather than kept as an empty record.
-                const cleared = { alias: prefs.alias, color: prefs.color, collapsedGroups: null };
+                // Only the folding is given up. Everything else on the record
+                // -- the alias, the colour, the metrics endpoint, the table
+                // columns -- is the user's and is carried through; the store
+                // forgets a context left with nothing set.
+                const cleared = $state.snapshot({
+                    ...prefs,
+                    collapsedGroups: null,
+                }) as appconfig.ContextPrefs;
                 saved = await SettingsService.SetContextPrefs(id, cleared);
             }
             if (saved) this.settings = adoptSettings(saved);
