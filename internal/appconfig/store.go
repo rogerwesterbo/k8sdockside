@@ -370,8 +370,8 @@ type Preferences struct {
 	//
 	// Nothing here knows what a colour is; see internal/themes.
 	Theme string `json:"theme"`
-	// Density is comfortable or compact, and drives the table row height.
-	// Empty means comfortable.
+	// Density is comfortable, compact or spacious, and drives the table row
+	// height. Empty means comfortable.
 	Density string `json:"density"`
 	// RestoreTabs reopens last session's tabs at launch.
 	//
@@ -574,6 +574,10 @@ const (
 const (
 	DensityComfortable = "comfortable"
 	DensityCompact     = "compact"
+	// Taller rows than comfortable. For a big screen, a room the app is read
+	// across, or eyes that would rather not lean in -- zoom scales everything
+	// together, which is the wrong tool when only the table is too tight.
+	DensitySpacious = "spacious"
 )
 
 // MaxMetricsRange bounds how far back a chart may look, in minutes. A week of
@@ -1229,7 +1233,7 @@ func normalise(s Settings) Settings {
 		s.Preferences.Theme = p.Theme
 	}
 	switch s.Preferences.Density {
-	case DensityComfortable, DensityCompact:
+	case DensityComfortable, DensityCompact, DensitySpacious:
 	default:
 		s.Preferences.Density = p.Density
 	}

@@ -12,15 +12,19 @@
 -->
 <script lang="ts">
     import { workspace } from '../../state/workspace.svelte';
+    import type { Density } from '../../state/adopt';
     import Icon from '../Icon.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import SettingsRow from './SettingsRow.svelte';
     import SettingsSection from './SettingsSection.svelte';
     import Toggle from './Toggle.svelte';
 
+    // Ordered by how much room each takes, so the control reads as a scale
+    // rather than as three unrelated words.
     const DENSITIES = [
-        { value: 'comfortable', label: 'Comfortable' },
         { value: 'compact', label: 'Compact' },
+        { value: 'comfortable', label: 'Comfortable' },
+        { value: 'spacious', label: 'Spacious' },
     ];
 
     // Set by the settings view so the theme row can hand the user over to the
@@ -110,12 +114,15 @@
         />
     </SettingsRow>
 
-    <SettingsRow label="Table density" hint="How tall a row is in a resource listing.">
+    <SettingsRow
+        label="Table density"
+        hint="How tall a row is in a resource listing. Spacious is for a screen read from across the room; compact fits about a quarter more rows in the same pane. Zoom scales the whole window together, which is the wrong tool when only the tables are too tight."
+    >
         <SegmentedControl
             options={DENSITIES}
             value={workspace.density}
             label="Table density"
-            onchange={(v) => workspace.setDensity(v as 'comfortable' | 'compact')}
+            onchange={(v) => workspace.setDensity(v as Density)}
         />
     </SettingsRow>
 

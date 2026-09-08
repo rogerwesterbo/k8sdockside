@@ -552,6 +552,30 @@ func TestUnknownPreferenceValuesFallBackToTheDefaults(t *testing.T) {
 	}
 }
 
+// Every density the app offers survives a round trip. Written as a table so
+// that adding a fourth is a line here rather than a test nobody remembers to
+// widen -- the normalise switch is the kind of code that quietly keeps working
+// for the values it already knew about.
+func TestEveryDensityIsKept(t *testing.T) {
+	for _, density := range []string{DensityComfortable, DensityCompact, DensitySpacious} {
+		t.Run(density, func(t *testing.T) {
+			path := tempSettings(t)
+			body := `{"contexts":{},"preferences":{"density":"` + density + `"}}`
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			store, err := openAt(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := store.Get().Preferences.Density; got != density {
+				t.Errorf("density = %q, want %q", got, density)
+			}
+		})
+	}
+}
+
 // A theme id the store does not recognise is kept rather than reset. The store
 // cannot know what themes exist -- one may live in a folder that has not been
 // read, or on a machine this file has not reached -- so resetting would quietly

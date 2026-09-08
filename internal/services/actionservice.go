@@ -129,6 +129,28 @@ func (s *ActionService) Restart(contextID, kind, namespace, name string) error {
 }
 
 // Cordon closes a node to new work, or reopens it.
+// VMOperation runs one virtual machine lifecycle operation: start, stop,
+// restart, pause, unpause, softreboot or migrate. The virtctl set, minus the
+// two that are a terminal rather than a command -- see kube/kubevirtops.go for
+// which mechanism each one uses and why.
+func (s *ActionService) VMOperation(contextID, op, namespace, name string) error {
+	kc, err := s.resolve(contextID)
+	if err != nil {
+		return err
+	}
+	return s.watcher.VMOperation(kc, op, namespace, name)
+}
+
+// VMState reads which of those operations make sense right now: a stopped
+// machine offers Start, a running one Stop and Pause, a paused one Unpause.
+func (s *ActionService) VMState(contextID, kind, namespace, name string) (kube.VMState, error) {
+	kc, err := s.resolve(contextID)
+	if err != nil {
+		return kube.VMState{}, err
+	}
+	return s.watcher.VMState(kc, kind, namespace, name)
+}
+
 func (s *ActionService) Cordon(contextID, name string, on bool) error {
 	kc, err := s.resolve(contextID)
 	if err != nil {

@@ -159,6 +159,15 @@ export function isEmptyContextPrefs(prefs: ContextPrefs): boolean {
 }
 
 /** The persisted user preferences. */
+/**
+ * How tall a row is in a resource listing.
+ *
+ * Named rather than written out at each of its three uses, so that adding a
+ * fourth is one edit here and a compile error everywhere it has to be handled.
+ * Mirrors appconfig's Density constants, which are what the settings file holds.
+ */
+export type Density = 'comfortable' | 'compact' | 'spacious';
+
 export interface Settings {
     manualFiles: string[];
     manualFolders: string[];
@@ -193,7 +202,7 @@ export interface Settings {
          * installed at the time -- see internal/themes.
          */
         theme: string;
-        density: 'comfortable' | 'compact';
+        density: Density;
         restoreTabs: boolean;
         confirmSourceRemoval: boolean;
         showKubeconfigNames: boolean;
@@ -288,7 +297,7 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // names no installed theme is kept as it is and resolved where the
             // theme is applied, not here.
             theme: settings.preferences?.theme || DEFAULT_THEME_ID,
-            density: (settings.preferences?.density || 'comfortable') as 'comfortable' | 'compact',
+            density: (settings.preferences?.density || 'comfortable') as Density,
             // null is "never chosen", and the default is on. `??` rather than
             // `||`: an explicit false is a choice and must survive.
             restoreTabs: settings.preferences?.restoreTabs ?? true,

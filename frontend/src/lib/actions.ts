@@ -15,6 +15,13 @@ export type ActionId =
     | 'scale'
     | 'restart'
     | 'nodepods'
+    | 'vmstart'
+    | 'vmstop'
+    | 'vmrestart'
+    | 'vmpause'
+    | 'vmunpause'
+    | 'vmsoftreboot'
+    | 'vmmigrate'
     | 'cordon'
     | 'drain'
     | 'delete'
@@ -64,6 +71,60 @@ const SHELL: Action = { id: 'shell', label: 'Shell', icon: 'terminal', form: 'im
 const FORWARD: Action = { id: 'forward', label: 'Forward', icon: 'forward', form: 'ports' };
 const SCALE: Action = { id: 'scale', label: 'Scale', icon: 'scale', form: 'number' };
 const RESTART: Action = { id: 'restart', label: 'Restart', icon: 'repeat', form: 'immediate' };
+/**
+ * What can be done to a virtual machine: the lifecycle half of virtctl.
+ *
+ * Which of them the bar actually draws depends on what the machine is doing --
+ * a stopped one offers Start and nothing else, a paused one offers Unpause --
+ * and that is decided from the cluster's own answer rather than from the last
+ * button pressed. See actionsForVM.
+ *
+ * Stop and Restart ask first. Both take the guest down, and a virtual machine
+ * is not a pod: nothing reschedules it, and whatever was running inside it was
+ * not designed to be killed and replaced. Start, Pause and Unpause are
+ * immediate, because each is undone by the button that replaces it.
+ */
+const VM_START: Action = { id: 'vmstart', label: 'Start', icon: 'rocket', form: 'immediate' };
+const VM_STOP: Action = { id: 'vmstop', label: 'Stop', icon: 'close', form: 'confirm', tone: 'danger' };
+const VM_RESTART: Action = { id: 'vmrestart', label: 'Restart', icon: 'repeat', form: 'confirm' };
+const VM_PAUSE: Action = { id: 'vmpause', label: 'Pause', icon: 'clock', form: 'immediate' };
+const VM_UNPAUSE: Action = { id: 'vmunpause', label: 'Resume', icon: 'rocket', form: 'immediate' };
+/**
+ * A reboot asked of the guest rather than done to it: KubeVirt sends the ACPI
+ * signal and the operating system shuts itself down properly. It needs the
+ * guest agent, and it is the polite version of Restart.
+ */
+const VM_SOFT_REBOOT: Action = { id: 'vmsoftreboot', label: 'Reboot', icon: 'refresh', form: 'confirm' };
+/**
+ * Move the guest to another node without stopping it. Offered only where
+ * KubeVirt says the guest is live-migratable -- a machine with passed-through
+ * hardware is not, and the button would produce a migration that fails a moment
+ * later.
+ */
+const VM_MIGRATE: Action = { id: 'vmmigrate', label: 'Migrate', icon: 'forward', form: 'confirm' };
+
+/** The KubeVirt kinds the lifecycle actions are offered on. */
+export const VM_KINDS = ['crd:virtualmachines.kubevirt.io', 'crd:virtualmachineinstances.kubevirt.io'];
+
+/**
+ * What a virtual machine offers right now.
+ *
+ * Not a fixed list, because most of these are only meaningful in one state:
+ * offering Stop on a stopped machine is a button that errors, and offering both
+ * Pause and Resume is a bar that cannot say which one the machine needs.
+ */
+export function actionsForVM(state: { running: boolean; paused: boolean; migratable: boolean }): Action[] {
+    if (!state.running) {
+        // A machine with no guest can only be started. Restarting one is
+        // starting it, and the word for that is Start.
+        return [VM_START];
+    }
+    const out: Action[] = [state.paused ? VM_UNPAUSE : VM_PAUSE, VM_RESTART, VM_SOFT_REBOOT];
+    if (state.migratable) out.push(VM_MIGRATE);
+    out.push(VM_STOP);
+    return out;
+}
+
 /**
  * The pods placed on a node.
  *

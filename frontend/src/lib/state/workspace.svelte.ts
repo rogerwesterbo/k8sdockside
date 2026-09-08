@@ -30,6 +30,7 @@ import {
     isEmptyContextPrefs,
     type ConfigFile,
     type ContextPrefs,
+    type Density,
     type Settings,
 } from './adopt';
 import { clampColumnWidth, columnKeys, noColumnPrefs, type ColumnPrefs } from '../columns';
@@ -2507,7 +2508,7 @@ class Workspace {
         }
     }
 
-    setDensity(density: 'comfortable' | 'compact'): void {
+    setDensity(density: Density): void {
         this.updatePreferences({ density });
     }
 

@@ -13,6 +13,7 @@ import { Events } from '@wailsio/runtime';
 import { ActionService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
 import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
 import { changes, type ObjectRef } from './changes.svelte';
+import { VM_KINDS } from '../actions';
 
 /** What the bar knows about an object beyond its name. */
 export interface ObjectState {
@@ -21,6 +22,12 @@ export interface ObjectState {
     cordoned: boolean;
     /** A pod's containers, as the same squares the table draws. */
     containers: kube.Pill[];
+    /**
+     * A virtual machine's lifecycle state, for the bar that offers Start or
+     * Stop but never both. `isMachine` is false for every other kind, which is
+     * what keeps a Deployment from growing VM buttons.
+     */
+    vm: { isMachine: boolean; running: boolean; paused: boolean; migratable: boolean; status: string };
 }
 
 /** A pod a drain would not move, and why. */
@@ -64,7 +71,8 @@ export interface BulkReport {
     failures: { namespace: string; name: string; error: string }[];
 }
 
-const UNKNOWN: ObjectState = { scalable: false, replicas: 0, cordoned: false, containers: [] };
+const NOT_A_MACHINE = { isMachine: false, running: false, paused: false, migratable: false, status: '' };
+const UNKNOWN: ObjectState = { scalable: false, replicas: 0, cordoned: false, containers: [], vm: NOT_A_MACHINE };
 
 function key(ref: ObjectRef): string {
     return `${ref.contextId}#${ref.kind}#${ref.namespace}#${ref.name}`;
@@ -129,9 +137,36 @@ class Actions {
                 cordoned: state.cordoned,
                 // Null rather than empty is what Go sends for a kind with none.
                 containers: state.containers ?? [],
+                // Only asked for the two KubeVirt kinds, and only after the
+                // first call has answered: every other object pays nothing for
+                // a question that is not about it.
+                vm: VM_KINDS.includes(ref.kind) ? await this.vmState(ref) : NOT_A_MACHINE,
             };
         } catch {
             // Deliberately silent -- see above.
+        }
+    }
+
+    /**
+     * A machine's lifecycle state, or "not a machine" when the cluster will not
+     * say.
+     *
+     * Swallowed like the call above it and for the same reason: a KubeVirt the
+     * user can read but not act on should still show the panel, with the
+     * buttons simply absent rather than an error where they would be.
+     */
+    private async vmState(ref: ObjectRef): Promise<ObjectState['vm']> {
+        try {
+            const state = await ActionService.VMState(ref.contextId, ref.kind, ref.namespace, ref.name);
+            return {
+                isMachine: state.isMachine,
+                running: state.running,
+                paused: state.paused,
+                migratable: state.migratable,
+                status: state.status ?? '',
+            };
+        } catch {
+            return NOT_A_MACHINE;
         }
     }
 
@@ -230,6 +265,18 @@ class Actions {
 
     async cordon(ref: ObjectRef, on: boolean): Promise<void> {
         await this.run(ref, () => ActionService.Cordon(ref.contextId, ref.name, on));
+    }
+
+    /**
+     * One virtual machine lifecycle operation: the virtctl set, minus the two
+     * that are a terminal rather than a command.
+     *
+     * `op` is the backend's own name for it -- start, stop, restart, pause,
+     * unpause, softreboot, migrate -- rather than the action id, so the two
+     * sides do not have to agree on a UI string.
+     */
+    async vmOperation(ref: ObjectRef, op: string): Promise<void> {
+        await this.run(ref, () => ActionService.VMOperation(ref.contextId, op, ref.namespace, ref.name));
     }
 
     /** The drain on this node, or null if it has never had one. */

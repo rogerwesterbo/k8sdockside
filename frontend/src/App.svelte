@@ -19,6 +19,7 @@
     import Pane from './lib/components/Pane.svelte';
     import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
+    import { rowMetrics } from './lib/density';
     import { applyTheme } from './lib/theme/apply';
 
     onMount(() => {
@@ -63,11 +64,14 @@
         if (theme) applyTheme(theme);
     });
 
+    // The density preference, written onto the root as the two custom
+    // properties every table and the sidebar read. See lib/density.ts for what
+    // each one is worth and why the pair is decided in one place.
     $effect(() => {
         const root = document.documentElement;
-        const compact = workspace.density === 'compact';
-        root.style.setProperty('--row-h', compact ? '24px' : '30px');
-        root.style.setProperty('--cell-pad-y', compact ? '3px' : '6px');
+        const metrics = rowMetrics(workspace.density);
+        root.style.setProperty('--row-h', metrics.height);
+        root.style.setProperty('--cell-pad-y', metrics.padding);
     });
 
     function onZoomKey(event: KeyboardEvent): void {

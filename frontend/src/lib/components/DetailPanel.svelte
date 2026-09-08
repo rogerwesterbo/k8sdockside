@@ -10,6 +10,7 @@
 <script lang="ts">
     import { HELM_RELEASES, singularFor } from '../catalogue';
     import MetricsPanel from '../charts/MetricsPanel.svelte';
+    import VirtualMachine from '../kubevirt/VirtualMachine.svelte';
     import ResourceBudget from '../budget/ResourceBudget.svelte';
     import { alpha } from '../colors';
     import { actions } from '../state/actions.svelte';
@@ -54,6 +55,20 @@
      * rather than by a report read off an object. See HelmRelease.svelte.
      */
     let isRelease = $derived(target?.kind === HELM_RELEASES);
+    /**
+     * The KubeVirt kinds that lay out as facts and tables rather than as YAML.
+     *
+     * Named here rather than asked of the backend because it decides what to
+     * render before anything is fetched, and the list is the same on both
+     * sides -- kube.IsKubeVirtDetailKind. A kind gaining a panel is a change to
+     * both, which is what a test pins.
+     */
+    const KUBEVIRT_DETAIL = [
+        'crd:virtualmachines.kubevirt.io',
+        'crd:virtualmachineinstances.kubevirt.io',
+        'crd:virtualmachineinstancemigrations.kubevirt.io',
+    ];
+    let isMachine = $derived(!!target && KUBEVIRT_DETAIL.includes(target.kind));
 
     /**
      * The object's containers, read by the action bar below and shown again
@@ -124,6 +139,18 @@
                 name={target.name}
                 compact
             />
+
+            {#if isMachine && target}
+                <!-- Above the report rather than instead of it: the summary is
+                     what somebody opened the panel for, and the whole object is
+                     what they scroll to when it does not answer them. -->
+                <VirtualMachine
+                    contextId={target.contextId}
+                    kind={target.kind}
+                    namespace={target.namespace}
+                    name={target.name}
+                />
+            {/if}
 
             {#if isRelease}
                 <HelmRelease

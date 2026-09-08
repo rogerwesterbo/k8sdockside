@@ -108,19 +108,43 @@ func withNamespace(cols []column, namespaced bool) []column {
 
 // ---- value helpers ---------------------------------------------------------
 
+// All four tolerate a nil object and answer with the zero value. That is not
+// defensive padding: a detail view reads several objects that may or may not
+// exist -- a stopped VM has no instance, a pending one no pod -- and the
+// alternative is a nil check at every one of a hundred field reads.
+
 func nestedString(u *unstructured.Unstructured, fields ...string) string {
+	if u == nil {
+		return ""
+	}
 	s, _, _ := unstructured.NestedString(u.Object, fields...)
 	return s
 }
 
 func nestedInt(u *unstructured.Unstructured, fields ...string) int64 {
+	if u == nil {
+		return 0
+	}
 	n, _, _ := unstructured.NestedInt64(u.Object, fields...)
 	return n
 }
 
 func nestedSlice(u *unstructured.Unstructured, fields ...string) []any {
+	if u == nil {
+		return nil
+	}
 	s, _, _ := unstructured.NestedSlice(u.Object, fields...)
 	return s
+}
+
+// nestedMap reads a nested object. Returned as `any` so it composes with asMap,
+// which is how every caller here uses it.
+func nestedMap(u *unstructured.Unstructured, fields ...string) any {
+	if u == nil {
+		return nil
+	}
+	m, _, _ := unstructured.NestedMap(u.Object, fields...)
+	return m
 }
 
 func asMap(v any) map[string]any {

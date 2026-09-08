@@ -50,7 +50,10 @@ const { changes } = await import('./changes.svelte');
 const NODE = { contextId: 'cfg::prod', kind: 'nodes', namespace: '', name: 'wrkr01' };
 const DEPLOYMENT = { contextId: 'cfg::prod', kind: 'deployments', namespace: 'default', name: 'web' };
 
-const IDLE = { scalable: false, replicas: 0, cordoned: false, containers: [] };
+// `vm` is false for every kind that is not a KubeVirt machine, which is what
+// keeps a Deployment from growing Start and Stop buttons.
+const NOT_A_MACHINE = { isMachine: false, running: false, paused: false, migratable: false, status: '' };
+const IDLE = { scalable: false, replicas: 0, cordoned: false, containers: [], vm: NOT_A_MACHINE };
 
 /** One drain report, as the backend sends it. */
 function report(over: Record<string, unknown> = {}) {

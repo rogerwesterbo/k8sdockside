@@ -507,6 +507,59 @@ test('a node name is a name, not a link to something else', async () => {
     expect(page.getByRole('button', { name: 'worker-1' }).elements()).toHaveLength(0);
 });
 
+// A custom resource's columns come from the CRD's own additionalPrinterColumns,
+// not from us: KubeVirt calls its VirtualMachineInstance column "NodeName".
+// Matching on the heading is what lets a plugin's kinds reach a node without
+// the app knowing anything about that plugin.
+test('a NodeName column leads to the node, the way a Node column does', async () => {
+    views.forgetAll();
+    render(ResourceTable, { contextId: PROD, kind: 'crd:virtualmachineinstances.kubevirt.io' });
+    pushed.send({
+        kind: 'crd:virtualmachineinstances.kubevirt.io',
+        columns: ['Name', 'Phase', 'IP', 'NodeName', 'Ready'],
+        namespaced: true,
+        error: '',
+        rows: [
+            {
+                id: 'vmi/default/win11',
+                name: 'win11',
+                namespace: 'default',
+                cells: [plain('win11'), plain('Running'), plain('10.1.2.3'), plain('wrkr01'), plain('True')],
+            },
+        ],
+    });
+    await expect.poll(() => names()).toEqual(['win11']);
+
+    await page.getByRole('button', { name: 'wrkr01' }).click();
+
+    await expect.poll(() => workspace.activeTab?.kind).toBe('pods');
+    expect(views.recall(resourceTabId(PROD, 'pods'))?.node).toBe('wrkr01');
+});
+
+// A column called "Node Selector" is not a node, and turning it into a link to
+// one would be worse than leaving it alone.
+test('a column that merely mentions nodes is left alone', async () => {
+    views.forgetAll();
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send({
+        kind: 'deployments',
+        columns: ['Name', 'Node Selector'],
+        namespaced: true,
+        error: '',
+        rows: [
+            {
+                id: 'deployments/default/web',
+                name: 'web',
+                namespace: 'default',
+                cells: [plain('web'), plain('disktype=ssd')],
+            },
+        ],
+    });
+
+    await expect.poll(() => names()).toEqual(['web']);
+    expect(page.getByRole('button', { name: 'disktype=ssd' }).elements()).toHaveLength(0);
+});
+
 test('a node name in the pods listing leads to the other pods there', async () => {
     views.forgetAll();
     render(ResourceTable, { contextId: PROD, kind: 'pods' });

@@ -70,6 +70,8 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
         Cordon: vi.fn().mockResolvedValue(undefined),
         Drain: vi.fn().mockResolvedValue('drain-1'),
         CancelDrain: vi.fn(),
+        VMState: vi.fn().mockResolvedValue({ isMachine: false, running: false, paused: false, migratable: false, status: '' }),
+        VMOperation: vi.fn().mockResolvedValue(undefined),
     },
     LogService: {
         Containers: vi.fn().mockResolvedValue([]),
@@ -142,7 +144,9 @@ const RELEASE = { contextId: PROD, kind: 'helmreleases', namespace: 'default', n
 const settle = () => new Promise((r) => setTimeout(r, 60));
 
 beforeEach(async () => {
-    for (const ref of [POD, NODE, DEPLOYMENT, SERVICE, RELEASE]) actions.forget(ref);
+    // VM included: its state says isMachine, and a stale one would give the
+    // next object's bar a set of buttons that are not about it.
+    for (const ref of [POD, NODE, DEPLOYMENT, SERVICE, RELEASE, VM]) actions.forget(ref);
     workspace.closeDetail();
     // A test that opened something in the dock has to have it taken away again,
     // and the write that goes with it has to land before the next test starts.
@@ -191,6 +195,10 @@ beforeEach(async () => {
     });
     vi.mocked(TerminalService.Launch).mockReset().mockResolvedValue(undefined);
     vi.mocked(TerminalService.LaunchNode).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ActionService.VMOperation).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ActionService.VMState)
+        .mockReset()
+        .mockResolvedValue({ isMachine: false, running: false, paused: false, migratable: false, status: '' });
 });
 
 test('an ordinary object offers to be edited and deleted', async () => {
@@ -219,6 +227,103 @@ test('a node offers the pods placed on it, beside cordon and drain', async () =>
 
     await expect.poll(() => workspace.activeTab?.kind).toBe('pods');
     expect(views.recall(resourceTabId(PROD, 'pods'))?.node).toBe('wrkr01');
+});
+
+// ----- virtual machines -----------------------------------------------------
+
+const VM = { contextId: PROD, kind: 'crd:virtualmachines.kubevirt.io', namespace: 'vms', name: 'win11' };
+
+/** Answers VMState for the machine tests, which every one of them needs. */
+function machine(over: Record<string, unknown> = {}) {
+    vi.mocked(ActionService.VMState).mockResolvedValue({
+        isMachine: true,
+        running: true,
+        paused: false,
+        migratable: true,
+        status: 'Running',
+        ...over,
+    });
+}
+
+test('a running machine offers the virtctl lifecycle set', async () => {
+    machine();
+
+    render(ObjectActions, { object: VM });
+
+    for (const label of ['Pause', 'Restart', 'Reboot', 'Migrate', 'Stop']) {
+        await expect.element(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+    }
+});
+
+test('a stopped machine offers only Start', async () => {
+    machine({ running: false, status: 'Stopped' });
+
+    render(ObjectActions, { object: VM });
+
+    await expect.element(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+    expect(page.getByRole('button', { name: 'Stop', exact: true }).elements()).toHaveLength(0);
+});
+
+test('starting a machine sends the operation the backend names', async () => {
+    machine({ running: false, status: 'Stopped' });
+    render(ObjectActions, { object: VM });
+    await expect.element(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Start', exact: true }).click();
+
+    await expect
+        .poll(() => vi.mocked(ActionService.VMOperation).mock.calls[0])
+        .toEqual([PROD, 'start', 'vms', 'win11']);
+});
+
+// Both take the guest down, and a virtual machine is not a pod: nothing
+// reschedules it, and what was running inside was not built to be killed.
+test('stopping asks before it does anything', async () => {
+    machine();
+    render(ObjectActions, { object: VM });
+    await expect.element(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Stop', exact: true }).click();
+
+    expect(vi.mocked(ActionService.VMOperation)).not.toHaveBeenCalled();
+});
+
+// Every one of these used to ask "Delete Virtualmachineinstance win11?", because
+// the question fell through to Delete's for any action it did not name. A
+// confirmation that describes the wrong operation is worse than none: it is
+// read, believed, and answered Yes.
+test.each([
+    ['Stop', /Stop virtual machine win11\?/],
+    ['Restart', /Restart virtual machine win11\?/],
+    ['Reboot', /Reboot virtual machine win11\?/],
+    ['Migrate', /Migrate virtual machine win11 to another node\?/],
+])('%s asks about %s, not about deleting', async (button, asked) => {
+    machine();
+    render(ObjectActions, { object: VM });
+    await expect.element(page.getByRole('button', { name: button, exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: button, exact: true }).click();
+
+    await expect.element(page.getByText(asked)).toBeVisible();
+    expect(page.getByText(/Delete/).elements()).toHaveLength(0);
+});
+
+test('a machine KubeVirt says cannot move is not offered a migration', async () => {
+    machine({ migratable: false });
+
+    render(ObjectActions, { object: VM });
+
+    await expect.element(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+    expect(page.getByRole('button', { name: 'Migrate', exact: true }).elements()).toHaveLength(0);
+});
+
+test('an ordinary object grows no machine buttons', async () => {
+    render(ObjectActions, { object: DEPLOYMENT });
+
+    await expect.element(page.getByRole('button', { name: 'Edit' })).toBeVisible();
+    // Exact: a Deployment has Restart, and "Restart" contains "Start".
+    expect(page.getByRole('button', { name: 'Start', exact: true }).elements()).toHaveLength(0);
+    expect(page.getByRole('button', { name: 'Migrate', exact: true }).elements()).toHaveLength(0);
 });
 
 test('nothing else offers it: a pod is not a place other pods are placed', async () => {

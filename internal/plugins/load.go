@@ -27,6 +27,10 @@ var builtinOrder = []string{
 	"argocd",
 	"flux",
 	"prometheus",
+	// Last of the four: a cluster running virtual machines is a smaller
+	// population than one running Argo, Flux or Prometheus, and this list is
+	// about what to reach for first rather than about importance.
+	"kubevirt",
 }
 
 // Builtin returns the plugins that ship with the app, in the order they are

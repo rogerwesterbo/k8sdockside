@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { actionsFor, type ActionId } from './actions';
+import { actionsFor, actionsForVM, type ActionId } from './actions';
 import { DASHBOARD, HELM_RELEASES, PORT_FORWARDS, SETTINGS, customKindFor } from './catalogue';
 
 /** The action ids a kind offers, which is all these tests care about. */
@@ -153,5 +153,54 @@ describe('how the bar treats each one', () => {
                 expect(action.icon, `${kind}/${action.id}`).not.toBe('');
             }
         }
+    });
+});
+
+// The virtctl set, minus the two that are a terminal rather than a command.
+// Which buttons the bar draws follows what the machine is doing: offering Stop
+// on a stopped machine is a button that errors, and offering Pause and Resume
+// together is a bar that cannot say which one the machine needs.
+describe('what a virtual machine offers', () => {
+    const vm = (over: Partial<{ running: boolean; paused: boolean; migratable: boolean }> = {}) => ({
+        running: true,
+        paused: false,
+        migratable: true,
+        ...over,
+    });
+    const idsOf = (state: Parameters<typeof actionsForVM>[0]) => actionsForVM(state).map((a) => a.id);
+
+    test('a stopped machine can only be started', () => {
+        expect(idsOf(vm({ running: false }))).toEqual(['vmstart']);
+    });
+
+    test('a running one offers everything that acts on a live guest', () => {
+        expect(idsOf(vm())).toEqual(['vmpause', 'vmrestart', 'vmsoftreboot', 'vmmigrate', 'vmstop']);
+    });
+
+    test('a paused one offers Resume in place of Pause, not beside it', () => {
+        const ids = idsOf(vm({ paused: true }));
+
+        expect(ids).toContain('vmunpause');
+        expect(ids).not.toContain('vmpause');
+    });
+
+    // Passed-through hardware is why a guest cannot be moved, and the button
+    // would produce a migration that fails a moment later.
+    test('a guest that cannot be moved is not offered a migration', () => {
+        expect(idsOf(vm({ migratable: false }))).not.toContain('vmmigrate');
+    });
+
+    // Both take the guest down, and a virtual machine is not a pod: nothing
+    // reschedules it, and what was running inside was not built to be killed.
+    test('the two that take the guest down ask first', () => {
+        for (const id of ['vmstop', 'vmrestart']) {
+            const action = actionsForVM(vm()).find((a) => a.id === id);
+            expect(action?.form).toBe('confirm');
+        }
+    });
+
+    test('the ones undone by the button that replaces them do not', () => {
+        expect(actionsForVM(vm({ running: false }))[0].form).toBe('immediate');
+        expect(actionsForVM(vm()).find((a) => a.id === 'vmpause')?.form).toBe('immediate');
     });
 });

@@ -12,7 +12,7 @@
 -->
 <script lang="ts">
     import { singularFor } from '../catalogue';
-    import { actionsFor, type Action, type ActionId } from '../actions';
+    import { actionsFor, actionsForVM, type Action, type ActionId } from '../actions';
     import { actions } from '../state/actions.svelte';
     import { forwards, type PortOption } from '../state/forwards.svelte';
     import { helm } from '../state/helm.svelte';
@@ -24,8 +24,35 @@
     // into rather than passed through.
     let { object }: { object: DetailTarget } = $props();
 
-    let available = $derived(actionsFor(object.kind));
+    /**
+     * A virtual machine's bar is built from what the machine is doing rather
+     * than from its kind alone -- a stopped one offers Start, a paused one
+     * Resume -- so the lifecycle buttons go in front of Edit and Delete once
+     * the cluster has answered. Until it has, the bar is the ordinary two.
+     */
+    /**
+     * What each lifecycle operation is called once it has been asked for.
+     *
+     * The past tense of the button is not always the button: pressing Migrate
+     * asks for a migration rather than completing one, and saying "migrated"
+     * would claim a guest had moved when it has only started moving.
+     */
+    const VM_DONE: Record<string, string> = {
+        vmstart: 'starting',
+        vmstop: 'stopping',
+        vmrestart: 'restarting',
+        vmpause: 'paused',
+        vmunpause: 'resumed',
+        vmsoftreboot: 'rebooting',
+        vmmigrate: 'migrating',
+    };
+
     let facts = $derived(actions.stateOf(object));
+    let available = $derived(
+        facts.vm.isMachine
+            ? [...actionsForVM(facts.vm), ...actionsFor(object.kind)]
+            : actionsFor(object.kind),
+    );
     let drain = $derived(actions.drainOf(object));
 
     /**
@@ -74,6 +101,18 @@
 
     /** What the object is, for the questions: "pod web", "node wrkr01". */
     let subject = $derived(`${singularFor(object.kind)} ${object.name}`);
+
+    /**
+     * The same object as the lifecycle questions name it.
+     *
+     * Not `subject`, which for these kinds reads "Virtualmachineinstance web" --
+     * a plural turned singular by dropping a letter, which is the right answer
+     * for a custom resource nobody has a word for and the wrong one here. The
+     * lifecycle actions run against the VirtualMachine either way (a running
+     * instance carries its machine's name), so both kinds are one machine to
+     * these questions.
+     */
+    let machine = $derived(`virtual machine ${object.name}`);
 
     // A new object is a new bar. Read what its buttons need to say, and drop
     // any half-asked question belonging to the object we have left.
@@ -192,6 +231,21 @@
                 case 'drain':
                     await actions.drain(object);
                     break;
+                case 'vmstart':
+                case 'vmstop':
+                case 'vmrestart':
+                case 'vmpause':
+                case 'vmunpause':
+                case 'vmsoftreboot':
+                case 'vmmigrate': {
+                    // The backend's own name for the operation, which is the
+                    // action id without the prefix the UI needs to keep its
+                    // ids apart from a workload's Restart.
+                    const op = id.slice('vm'.length);
+                    await actions.vmOperation(object, op);
+                    workspace.inform(`${subject} ${VM_DONE[id]}`);
+                    break;
+                }
                 case 'rollback':
                     await helm.rollback(object, value);
                     workspace.inform(`${object.name} rolled back to revision ${value}`);
@@ -281,15 +335,43 @@
         return parts.join(' · ');
     }
 
-    /** The question each asked-for action puts. */
+    /**
+     * The question each asked-for action puts.
+     *
+     * Every branch names its own action. There is deliberately no "and
+     * otherwise Delete" here: an action added to the catalogue with
+     * form: 'confirm' and no question written for it would inherit that
+     * default and ask to delete something it was never going to delete,
+     * which is the worst way for this component to be wrong. An unwritten
+     * question asks in the button's own words instead.
+     */
     function question(id: ActionId): string {
-        if (id === 'drain') return `Drain ${subject}? Everything running on it will be moved.`;
-        // One release is many objects, which is what makes this worth spelling
-        // out rather than asking "Uninstall X?".
-        if (id === 'uninstall') {
-            return `Uninstall ${object.name}? Everything the release installed will be removed.`;
+        switch (id) {
+            case 'delete':
+                return `Delete ${subject}?`;
+            case 'drain':
+                return `Drain ${subject}? Everything running on it will be moved.`;
+            // One release is many objects, which is what makes this worth
+            // spelling out rather than asking "Uninstall X?".
+            case 'uninstall':
+                return `Uninstall ${object.name}? Everything the release installed will be removed.`;
+
+            // The machine ones say what happens to the guest, because that is
+            // the part that is not obvious from the button. A virtual machine
+            // is not a pod: nothing reschedules it, and whatever is running
+            // inside was not written to be killed and replaced.
+            case 'vmstop':
+                return `Stop ${machine}? The guest is powered off — anything running inside it stops.`;
+            case 'vmrestart':
+                return `Restart ${machine}? The guest is powered off and started again, without being asked to shut down first.`;
+            case 'vmsoftreboot':
+                return `Reboot ${machine}? The guest is asked to shut itself down and start again, which needs the guest agent.`;
+            case 'vmmigrate':
+                return `Migrate ${machine} to another node? The guest keeps running while it moves.`;
         }
-        return `Delete ${subject}?`;
+        // Nothing reaches here today. If something does, it asks for itself.
+        const action = available.find((a) => a.id === id);
+        return `${action?.label ?? id} ${subject}?`;
     }
 
     /** How one revision reads in the rollback picker. */

@@ -63,6 +63,16 @@
      */
     const PREVIEW_DELAY = 250;
 
+    /**
+     * The column headings that mean "the node this row is on".
+     *
+     * Lowercased on both sides, so a CRD that shouts its headers matches too.
+     * This is a small list of spellings rather than a fuzzy match: a column
+     * called "Node Selector" is not a node, and turning it into a link to one
+     * would be worse than leaving it alone.
+     */
+    const NODE_HEADERS = new Set(['node', 'nodename', 'node name', 'target node', 'source node']);
+
     // How this tab was left, if it has been on screen before -- see views.
     // Read once, untracked: the pane keys this component on the tab, so the
     // props do not change for as long as it lives.
@@ -435,11 +445,31 @@
     // Filtering only: the ordering is SortableTable's, and the backend has
     // already put the rows in this kind's natural order.
     /**
-     * Where the node a row is placed on is written, or -1 for a listing that
-     * does not say. Only the pod table has one, which is what makes the node
-     * filter a pod thing rather than a general one.
+     * The columns that name the node a row is placed on.
+     *
+     * Matched by heading rather than by kind, because the headings are not all
+     * ours to choose: a built-in table's come from columns.go, and a custom
+     * resource's come from the CRD's own additionalPrinterColumns -- KubeVirt
+     * calls its VirtualMachineInstance column "NodeName". A listing with no
+     * such column simply has no node to offer, which is most of them.
+     *
+     * A set rather than one index: a kind may print more than one (a source and
+     * a target), and each is worth following.
      */
-    let nodeColumn = $derived(table?.columns.indexOf('Node') ?? -1);
+    let nodeColumns = $derived.by(() => {
+        const at = new Set<number>();
+        (table?.columns ?? []).forEach((name, index) => {
+            if (NODE_HEADERS.has(name.trim().toLowerCase())) at.add(index);
+        });
+        return at;
+    });
+
+    /**
+     * The one the node filter reads, or -1 for a listing that does not say
+     * where a row runs. The first, where a kind names several: narrowing to a
+     * node means "placed here", and the first is the placement.
+     */
+    let nodeColumn = $derived(nodeColumns.size > 0 ? Math.min(...nodeColumns) : -1);
 
     let rows = $derived.by(() => {
         if (!table) return [];
@@ -520,7 +550,7 @@
         <button class="drill" onclick={(event) => openInstances(row, event)} title="List the {row.name} in this cluster">
             {row.cells[0]?.text}
         </button>
-    {:else if nodeColumn >= 0 && index === nodeColumn && value?.text}
+    {:else if nodeColumns.has(index) && value?.text}
         <!-- The other end of the same journey: a pod says where it is placed,
              and that name is worth following back to everything else there. -->
         <button class="drill quiet" onclick={(event) => openPodsOn(value.text, event)} title="List the pods placed on {value.text}">

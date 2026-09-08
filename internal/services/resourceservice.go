@@ -182,6 +182,22 @@ func (s *ResourceService) Describe(contextID, kind, namespace, name string) (str
 // live read rather than the informer's copy: the cache drops managed fields and
 // redacts secret values, and an editor must open on the object rather than on
 // the table's view of it.
+// KubeVirtDetail reads one KubeVirt object laid out for its own panel: the
+// facts and tables a person opens a virtual machine to find, rather than the
+// YAML every other kind describes as.
+//
+// A call of its own rather than another field on Describe, for the reason the
+// budget is one: it reads several objects -- the VirtualMachine, its instance,
+// the virt-launcher pod, the migrations naming it -- and a cluster that has no
+// KubeVirt should not pay for any of that when describing an ordinary pod.
+func (s *ResourceService) KubeVirtDetail(contextID, kind, namespace, name string) (kube.KubeVirtDetail, error) {
+	kc, err := s.resolve(contextID)
+	if err != nil {
+		return kube.KubeVirtDetail{Error: err.Error()}, err
+	}
+	return s.watcher.KubeVirtDetail(kc, kind, namespace, name)
+}
+
 func (s *ResourceService) ResourceYAML(contextID, kind, namespace, name string) (string, error) {
 	ctx, err := s.resolve(contextID)
 	if err != nil {
