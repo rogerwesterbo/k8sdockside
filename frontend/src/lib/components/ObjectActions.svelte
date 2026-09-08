@@ -143,6 +143,10 @@
             workspace.openShell(object);
             return;
         }
+        if (action.id === 'nodepods') {
+            workspace.showPodsOnNode(object.contextId, object.name);
+            return;
+        }
         if (action.form === 'ports') {
             asking = action.id;
             void loadPorts();

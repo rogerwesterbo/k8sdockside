@@ -6,6 +6,14 @@
 export const DASHBOARD = 'dashboard';
 
 /**
+ * The two kinds this app names in code rather than only in the nav list: a node
+ * drills through to the pods placed on it, so both ends of that need saying.
+ * The strings are kube.KindNodes and kube.KindPods on the Go side.
+ */
+export const NODES = 'nodes';
+export const PODS = 'pods';
+
+/**
  * The app-wide settings view, which opens as a tab like any other but belongs
  * to no cluster. It is a sentinel kind for the same reason DASHBOARD is: the
  * tab machinery already keys everything off `kind`, and a second concept of

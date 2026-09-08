@@ -64,8 +64,10 @@ describe('what particular kinds can do', () => {
         expect(ids(kind)).not.toContain('logs');
     });
 
-    test('a node can be cordoned and drained', () => {
-        expect(ids('nodes')).toEqual(['edit', 'shell', 'cordon', 'drain', 'delete']);
+    test('a node can be cordoned and drained, and says what is on it first', () => {
+        // Pods comes before both: "what is actually running here" is the
+        // question asked immediately before cordoning or draining.
+        expect(ids('nodes')).toEqual(['edit', 'shell', 'nodepods', 'cordon', 'drain', 'delete']);
     });
 
     // A shell on a node is a privileged pod created on it rather than an exec,

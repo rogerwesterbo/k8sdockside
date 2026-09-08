@@ -64,6 +64,7 @@ import {
     HELM_RELEASES,
     NAV_GROUPS,
     PLUGIN_OVERVIEW,
+    PODS,
     SETTINGS,
     HELP,
     KUBERNETES,
@@ -1162,6 +1163,26 @@ class Workspace {
             });
         }
         this.activateTab(id);
+    }
+
+    /**
+     * Opens the pod listing narrowed to one node.
+     *
+     * The question a node raises is "what is running on it" -- before a drain,
+     * after an eviction, or when one node is the busy one -- and the answer was
+     * only reachable by opening every pod in the cluster and reading the Node
+     * column. It is the same drill-through a CustomResourceDefinition's name
+     * offers, applied to the other place in the app where one object names a
+     * list of others.
+     *
+     * One pods tab per cluster, as always: this narrows the tab rather than
+     * opening a second one, the way the namespace picker does. The filter is
+     * written before the tab is opened so a tab being built for the first time
+     * reads it as it mounts.
+     */
+    showPodsOnNode(contextId: string, node: string): void {
+        views.focusNode(resourceTabId(contextId, PODS), node);
+        this.openTab(contextId, PODS);
     }
 
     /**

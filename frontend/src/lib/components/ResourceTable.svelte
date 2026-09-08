@@ -77,13 +77,20 @@
     let query = $state(remembered?.query ?? '');
     let sortColumn = $state<number | null>(remembered?.sortColumn ?? null);
     let sortDescending = $state(remembered?.sortDescending ?? false);
+    /** The node this listing is narrowed to, empty for all of them. */
+    let node = $state(remembered?.node ?? '');
 
     // Written on every change rather than on the way out, because there is
     // no way out to speak of: the component is torn down by the {#key} the
     // moment another tab is brought forward.
     $effect(() => {
-        views.remember(tabId, { sortColumn, sortDescending, namespaces: selected, query });
+        views.remember(tabId, { sortColumn, sortDescending, namespaces: selected, query, node });
     });
+
+    // ...and read back when something outside this table changes it. Clicking a
+    // node in the nodes list narrows the pods tab, which may already be open
+    // and mounted -- in which case nothing else would tell it.
+    $effect(() => views.watch(() => (node = views.recall(tabId)?.node ?? '')));
     let loading = $state(true);
     let error = $state<string | null>(null);
     /** Bumped by the retry button; the subscribing effect reads it as a dependency. */
@@ -427,11 +434,25 @@
 
     // Filtering only: the ordering is SortableTable's, and the backend has
     // already put the rows in this kind's natural order.
+    /**
+     * Where the node a row is placed on is written, or -1 for a listing that
+     * does not say. Only the pod table has one, which is what makes the node
+     * filter a pod thing rather than a general one.
+     */
+    let nodeColumn = $derived(table?.columns.indexOf('Node') ?? -1);
+
     let rows = $derived.by(() => {
         if (!table) return [];
         const needle = query.trim().toLowerCase();
-        if (!needle) return table.rows;
-        return table.rows.filter((row) => row.cells.some((cell) => cell.text.toLowerCase().includes(needle)));
+        const on = nodeColumn >= 0 ? node : '';
+        if (!needle && !on) return table.rows;
+        return table.rows.filter((row) => {
+            // Exactly the node, not a substring of it: worker-1 and worker-11
+            // are different machines, and the search box below is already the
+            // place for "anything containing".
+            if (on && row.cells[nodeColumn]?.text !== on) return false;
+            return !needle || row.cells.some((cell) => cell.text.toLowerCase().includes(needle));
+        });
     });
 
     // Opened as what the row is, not as the tab's kind: a plugin view's rows
@@ -470,14 +491,22 @@
         if (at !== null && off.has(allColumns[at]?.key)) untrack(() => (sortColumn = null));
     });
 
-    // A CustomResourceDefinition is the one row that leads somewhere: its name
-    // opens a tab listing the objects of that kind. A definition is named
-    // "<plural>.<group>", which is exactly the kind string such a tab wants.
+    // A CustomResourceDefinition is the one row whose *name* leads somewhere:
+    // its name opens a tab listing the objects of that kind, and a definition is
+    // named "<plural>.<group>", which is exactly the kind string such a tab
+    // wants. Nothing else takes the name over -- clicking a row's name is how
+    // its describe panel opens, and a kind that quietly meant something else by
+    // it would be a different app per table.
     let drillable = $derived(kind === 'customresourcedefinitions');
 
     function openInstances(row: Row, event: MouseEvent): void {
         event.stopPropagation();
         workspace.openTab(contextId, customKindFor(row.name));
+    }
+
+    function openPodsOn(name: string, event: MouseEvent): void {
+        event.stopPropagation();
+        workspace.showPodsOnNode(contextId, name);
     }
 </script>
 
@@ -490,6 +519,12 @@
     {#if drillable && index === 0}
         <button class="drill" onclick={(event) => openInstances(row, event)} title="List the {row.name} in this cluster">
             {row.cells[0]?.text}
+        </button>
+    {:else if nodeColumn >= 0 && index === nodeColumn && value?.text}
+        <!-- The other end of the same journey: a pod says where it is placed,
+             and that name is worth following back to everything else there. -->
+        <button class="drill quiet" onclick={(event) => openPodsOn(value.text, event)} title="List the pods placed on {value.text}">
+            {value.text}
         </button>
     {:else if value?.pills?.length}
         <ContainerPills pills={value.pills} />
@@ -509,6 +544,18 @@
             </span>
         {:else if table?.namespaced}
             <NamespacePicker namespaces={available} {selected} onchange={(next) => (selected = next)} />
+        {/if}
+
+        {#if node && nodeColumn >= 0}
+            <!-- Beside the namespace picker, because it is the same kind of
+                 statement: which slice of the cluster this listing is showing.
+                 A chip rather than a picker -- it is set by clicking a node,
+                 and the only thing to do to it here is take it off. -->
+            <button class="node-filter" onclick={() => (node = '')} title="Show the pods on every node again">
+                <Icon name="server" size={12} />
+                <span class="value">{node}</span>
+                <Icon name="close" size={11} />
+            </button>
         {/if}
 
         <div class="search">
@@ -931,6 +978,36 @@
 
 
 
+    /* The node this listing is narrowed to. Reads as a statement with a way
+       out, rather than as a control offering a choice. */
+    .node-filter {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex: 0 0 auto;
+        height: 22px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        font-size: 11px;
+        color: var(--text-dim);
+    }
+
+    .node-filter:hover {
+        color: var(--text);
+        border-color: var(--accent);
+    }
+
+    .node-filter .value {
+        font-family: var(--mono);
+        color: var(--text);
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     /* A name that opens a tab of its own, rather than just the describe panel. */
     .drill {
         font: inherit;
@@ -943,6 +1020,16 @@
 
     .drill:hover {
         text-decoration: underline;
+    }
+
+    /* The Node column in a pod listing leads somewhere too, but it is not what
+       the row is about -- so it reads as the cell it is until pointed at. */
+    .drill.quiet {
+        color: inherit;
+    }
+
+    .drill.quiet:hover {
+        color: var(--accent);
     }
 
 

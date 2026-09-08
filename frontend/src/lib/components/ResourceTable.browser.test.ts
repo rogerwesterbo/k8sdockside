@@ -112,6 +112,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
 const ResourceTable = (await import('./ResourceTable.svelte')).default;
 const { workspace } = await import('../state/workspace.svelte');
 const { views } = await import('../state/views');
+const { resourceTabId } = await import('../state/panes');
 
 const PROD = '/home/u/.kube/prod::admin@prod';
 
@@ -389,4 +390,130 @@ test('settings for a column the kind no longer has are dropped as it loads', asy
     pushed.send(agesTable());
 
     await expect.poll(() => workspace.columnPrefs(PROD, 'deployments').widths).toEqual({ Name: 200 });
+});
+
+// ----- pods on one node -----------------------------------------------------
+//
+// The question a node raises is "what is running on it" -- before a drain,
+// after an eviction, or when one node is the busy one. It used to mean opening
+// every pod in the cluster and reading the Node column.
+
+/** A pods table across two nodes, with the Node column the filter reads. */
+function podsOnNodes() {
+    const on = (name: string, node: string) => ({
+        id: `pods/default/${name}`,
+        name,
+        namespace: 'default',
+        cells: [plain(name), plain('1/1'), plain(node), plain('Running')],
+    });
+    return {
+        kind: 'pods',
+        columns: ['Name', 'Ready', 'Node', 'Status'],
+        namespaced: true,
+        error: '',
+        rows: [on('api', 'worker-1'), on('web', 'worker-2'), on('cache', 'worker-1')],
+    };
+}
+
+test('a pod listing narrowed to a node shows only the pods placed there', async () => {
+    views.forgetAll();
+    views.focusNode(resourceTabId(PROD, 'pods'), 'worker-1');
+
+    render(ResourceTable, { contextId: PROD, kind: 'pods' });
+    pushed.send(podsOnNodes());
+
+    await expect.poll(() => names()).toEqual(['api', 'cache']);
+});
+
+// worker-1 and worker-11 are different machines. The search box below the chip
+// is already the place for "anything containing".
+test('the node filter is the whole name, not a substring of it', async () => {
+    views.forgetAll();
+    views.focusNode(resourceTabId(PROD, 'pods'), 'worker-1');
+
+    render(ResourceTable, { contextId: PROD, kind: 'pods' });
+    const table = podsOnNodes();
+    table.rows.push({
+        id: 'pods/default/edge',
+        name: 'edge',
+        namespace: 'default',
+        cells: [plain('edge'), plain('1/1'), plain('worker-11'), plain('Running')],
+    });
+    pushed.send(table);
+
+    await expect.poll(() => names()).toEqual(['api', 'cache']);
+});
+
+test('the chip says which node, and takes the filter off again', async () => {
+    views.forgetAll();
+    views.focusNode(resourceTabId(PROD, 'pods'), 'worker-1');
+
+    render(ResourceTable, { contextId: PROD, kind: 'pods' });
+    pushed.send(podsOnNodes());
+    await expect.poll(() => names()).toEqual(['api', 'cache']);
+
+    await page.getByTitle('Show the pods on every node again').click();
+
+    await expect.poll(() => names()).toEqual(['api', 'web', 'cache']);
+});
+
+// A listing with no Node column has no node to filter on, and must not grow a
+// chip that would hide every row.
+test('a listing that does not say where a row runs is left alone', async () => {
+    views.forgetAll();
+    views.focusNode(resourceTabId(PROD, 'deployments'), 'worker-1');
+
+    render(ResourceTable, { contextId: PROD, kind: 'deployments' });
+    pushed.send(agesTable());
+
+    await expect.poll(() => names()).toEqual(['old', 'new']);
+});
+
+// The tab may already be open and mounted when a node is clicked, in which case
+// nothing else would tell it -- see views.watch.
+test('a tab already on screen picks up a node chosen elsewhere', async () => {
+    views.forgetAll();
+    render(ResourceTable, { contextId: PROD, kind: 'pods' });
+    pushed.send(podsOnNodes());
+    await expect.poll(() => names()).toEqual(['api', 'web', 'cache']);
+
+    workspace.showPodsOnNode(PROD, 'worker-2');
+
+    await expect.poll(() => names()).toEqual(['web']);
+});
+
+// The name is how a row's describe panel opens, in every table. A node whose
+// name quietly listed pods instead took that away, which is a different app per
+// table -- so the way to the pods is the action bar, beside Cordon and Drain.
+test('a node name is a name, not a link to something else', async () => {
+    views.forgetAll();
+    render(ResourceTable, { contextId: PROD, kind: 'nodes' });
+    pushed.send({
+        kind: 'nodes',
+        columns: ['Name', 'Roles', 'Version'],
+        namespaced: false,
+        error: '',
+        rows: [
+            {
+                id: 'nodes//worker-1',
+                name: 'worker-1',
+                namespace: '',
+                cells: [plain('worker-1'), plain('control-plane'), plain('v1.31.0')],
+            },
+        ],
+    });
+
+    await expect.poll(() => names()).toEqual(['worker-1']);
+    expect(page.getByRole('button', { name: 'worker-1' }).elements()).toHaveLength(0);
+});
+
+test('a node name in the pods listing leads to the other pods there', async () => {
+    views.forgetAll();
+    render(ResourceTable, { contextId: PROD, kind: 'pods' });
+    pushed.send(podsOnNodes());
+    await expect.poll(() => names()).toEqual(['api', 'web', 'cache']);
+
+    await page.getByRole('button', { name: 'worker-2' }).click();
+
+    await expect.poll(() => names()).toEqual(['web']);
 });

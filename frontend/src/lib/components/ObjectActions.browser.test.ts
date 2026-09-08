@@ -124,6 +124,8 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
 }));
 
 const { workspace } = await import('../state/workspace.svelte');
+const { views } = await import('../state/views');
+const { resourceTabId } = await import('../state/panes');
 const { actions } = await import('../state/actions.svelte');
 const { helm } = await import('../state/helm.svelte');
 const { ActionService, HelmService, PortForwardService, TerminalService } = await import(
@@ -204,6 +206,26 @@ test('a node offers what only a node can do', async () => {
 
     await expect.element(page.getByRole('button', { name: 'Cordon' })).toBeVisible();
     await expect.element(page.getByRole('button', { name: 'Drain' })).toBeVisible();
+});
+
+// "What is actually running here" is the question asked immediately before
+// cordoning or draining, which is why it sits beside them rather than being a
+// link on the node's name in the list -- a name opens a describe panel, in
+// every table.
+test('a node offers the pods placed on it, beside cordon and drain', async () => {
+    render(ObjectActions, { object: NODE });
+
+    await page.getByRole('button', { name: 'Pods' }).click();
+
+    await expect.poll(() => workspace.activeTab?.kind).toBe('pods');
+    expect(views.recall(resourceTabId(PROD, 'pods'))?.node).toBe('wrkr01');
+});
+
+test('nothing else offers it: a pod is not a place other pods are placed', async () => {
+    render(ObjectActions, { object: POD });
+
+    await expect.element(page.getByRole('button', { name: 'Edit' })).toBeVisible();
+    expect(page.getByRole('button', { name: 'Pods', exact: true }).elements()).toHaveLength(0);
 });
 
 // The one button whose label is the cluster's answer rather than ours: offering

@@ -2520,7 +2520,7 @@ describe('what a list was showing', () => {
     test('is dropped when its tab is closed', () => {
         workspace.openTab(PROD, 'pods');
         const id = resourceTabId(PROD, 'pods');
-        views.remember(id, { sortColumn: 3, sortDescending: true, namespaces: ['web'], query: 'api' });
+        views.remember(id, { sortColumn: 3, sortDescending: true, namespaces: ['web'], query: 'api', node: '' });
 
         workspace.closeTab(id);
 
@@ -2531,7 +2531,7 @@ describe('what a list was showing', () => {
         workspace.openTab(PROD, 'pods');
         workspace.openTab(PROD, 'nodes');
         const id = resourceTabId(PROD, 'pods');
-        views.remember(id, { sortColumn: 3, sortDescending: true, namespaces: [], query: '' });
+        views.remember(id, { sortColumn: 3, sortDescending: true, namespaces: [], query: '', node: '' });
 
         workspace.activateTab(resourceTabId(PROD, 'nodes'));
         workspace.moveTabToPane(id, 'bottom');

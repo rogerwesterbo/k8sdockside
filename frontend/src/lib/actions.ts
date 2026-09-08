@@ -14,6 +14,7 @@ export type ActionId =
     | 'forward'
     | 'scale'
     | 'restart'
+    | 'nodepods'
     | 'cordon'
     | 'drain'
     | 'delete'
@@ -63,6 +64,16 @@ const SHELL: Action = { id: 'shell', label: 'Shell', icon: 'terminal', form: 'im
 const FORWARD: Action = { id: 'forward', label: 'Forward', icon: 'forward', form: 'ports' };
 const SCALE: Action = { id: 'scale', label: 'Scale', icon: 'scale', form: 'number' };
 const RESTART: Action = { id: 'restart', label: 'Restart', icon: 'repeat', form: 'immediate' };
+/**
+ * The pods placed on a node.
+ *
+ * An action rather than a link on the node's name in the list. The name is how
+ * a row's describe panel opens, in every table -- a kind that quietly meant
+ * something else by it would be a different app per table -- and this belongs
+ * next to Cordon and Drain anyway: "what is actually running here" is the
+ * question asked immediately before both of them.
+ */
+const NODE_PODS: Action = { id: 'nodepods', label: 'Pods', icon: 'box', form: 'immediate' };
 /** Its label follows the node: a cordoned one offers to be uncordoned instead. */
 const CORDON: Action = { id: 'cordon', label: 'Cordon', icon: 'shield', form: 'immediate' };
 // Draining moves every workload off a node. Routine, and never a single click.
@@ -194,7 +205,7 @@ export function actionsFor(kind: string): Action[] {
     if (FORWARDABLE.includes(kind)) out.push(FORWARD);
     if (SCALABLE.includes(kind)) out.push(SCALE);
     if (ROLLABLE.includes(kind)) out.push(RESTART);
-    if (kind === 'nodes') out.push(CORDON, DRAIN);
+    if (kind === 'nodes') out.push(NODE_PODS, CORDON, DRAIN);
     out.push(DELETE);
     return out;
 }

@@ -21,15 +21,62 @@ export interface TabView {
     sortDescending: boolean;
     namespaces: string[];
     query: string;
+    /**
+     * The node a pod listing is narrowed to, empty for all of them.
+     *
+     * Kept beside the namespace filter because it is the same kind of thing --
+     * which slice of the cluster this tab is showing -- and it is remembered
+     * for the same reason: "the pods on the node I am draining" is exactly the
+     * view somebody leaves for a moment and expects to find again.
+     */
+    node: string;
 }
 
 const remembered = new Map<string, TabView>();
+
+/**
+ * Bumped whenever something outside a table changes what that table should be
+ * showing -- today, focusNode.
+ *
+ * A plain Map cannot be watched, and the tables that read it are Svelte
+ * components. Rather than make this module depend on Svelte, it publishes a
+ * counter and a subscribe: a mounted table reads the counter, and reads its own
+ * view again when it moves. A table that is not mounted needs none of this --
+ * it reads its view as it is built.
+ */
+let revision = 0;
+const watchers = new Set<() => void>();
+
+function bump(): void {
+    revision++;
+    for (const notify of watchers) notify();
+}
 
 export const views = {
     /** How a tab was left, or null for one that has not been seen. */
     recall(tabId: string): TabView | null {
         const view = remembered.get(tabId);
         return view ? { ...view, namespaces: [...view.namespaces] } : null;
+    },
+
+    /**
+     * Narrows a pod listing to one node, whether or not its tab is on screen.
+     *
+     * Written here rather than passed to the table because the table may not
+     * exist yet: clicking a node opens the pods tab, and the component that
+     * will show it is built afterwards and reads its view as it mounts. A tab
+     * that *is* already mounted watches this through views.revision.
+     */
+    focusNode(tabId: string, node: string): void {
+        const view = remembered.get(tabId) ?? {
+            sortColumn: null,
+            sortDescending: false,
+            namespaces: [],
+            query: '',
+            node: '',
+        };
+        remembered.set(tabId, { ...view, node });
+        bump();
     },
 
     remember(tabId: string, view: TabView): void {
@@ -44,5 +91,16 @@ export const views = {
     /** Drops every tab's view. For tests, which share this module across cases. */
     forgetAll(): void {
         remembered.clear();
+    },
+
+    /** How many times a view has been changed from outside its own table. */
+    revision(): number {
+        return revision;
+    },
+
+    /** Calls back on every such change. Returns the unsubscribe. */
+    watch(notify: () => void): () => void {
+        watchers.add(notify);
+        return () => watchers.delete(notify);
     },
 };
