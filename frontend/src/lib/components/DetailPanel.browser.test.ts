@@ -28,6 +28,14 @@ const settingsFile = vi.hoisted(() => {
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
+        // The describe panel draws a budget for what it is describing, and
+        // starts reading it as it mounts.
+        Budget: vi.fn().mockResolvedValue({
+            scope: { kind: 'cluster', name: '' },
+            amounts: [],
+            usage: { source: '', error: '' },
+        }),
+        CPUDelay: vi.fn().mockResolvedValue({ nodes: [], error: '' }),
         Describe: vi.fn().mockResolvedValue('Name: web'),
         ResourceYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
         CheckYAML: vi.fn().mockResolvedValue({ valid: true, message: '', line: 0 }),

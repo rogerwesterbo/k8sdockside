@@ -52,6 +52,14 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
     },
     KubeconfigService: { Sync: vi.fn().mockResolvedValue([]), Files: vi.fn().mockResolvedValue([]) },
     ResourceService: {
+        // The describe panel draws a budget for what it is describing, and
+        // starts reading it as it mounts.
+        Budget: vi.fn().mockResolvedValue({
+            scope: { kind: 'cluster', name: '' },
+            amounts: [],
+            usage: { source: '', error: '' },
+        }),
+        CPUDelay: vi.fn().mockResolvedValue({ nodes: [], error: '' }),
         Describe: vi.fn().mockResolvedValue(''),
         Namespaces: vi.fn().mockResolvedValue(['default']),
         ResourceYAML: vi.fn().mockResolvedValue('kind: Pod\n'),
