@@ -22,6 +22,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
         Sync: vi.fn().mockResolvedValue([]),
         Files: vi.fn().mockResolvedValue([]),
         RemoveContext: vi.fn().mockResolvedValue([]),
+        RestoreContext: vi.fn().mockResolvedValue([]),
     },
     ResourceService: { Describe: vi.fn().mockResolvedValue(''), Ping: vi.fn().mockResolvedValue(undefined) },
     LogService: {
@@ -94,9 +95,9 @@ function ctx(file: string, name: string) {
 
 // Removing one context, from its own row. It removes the context from this
 // app and nothing else: the kubeconfig is not written, and the file's other
-// contexts stay. Unlike a hidden file it is not listed anywhere to be brought
-// back -- it comes back by being added again -- so the Hidden list must not
-// appear for it.
+// contexts stay. A rescan finds the context and hides it again, so -- exactly
+// like a hidden file -- it is listed under Hidden, where it can be brought
+// back.
 const { KubeconfigService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services');
 
 const CONFIG = '/home/u/.kube/config';
@@ -116,6 +117,9 @@ beforeEach(() => {
     vi.mocked(KubeconfigService.RemoveContext).mockReset().mockResolvedValue([
         { path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] },
     ]);
+    vi.mocked(KubeconfigService.RestoreContext).mockReset().mockResolvedValue([
+        { path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod'), ctx(CONFIG, 'dev')] },
+    ]);
 });
 
 test('each context row offers to remove that context, whether or not file names are shown', async () => {
@@ -128,13 +132,35 @@ test('each context row offers to remove that context, whether or not file names 
     expect(document.querySelectorAll('.context').length).toBe(1);
 });
 
-test('a removed context is not listed under Hidden, and there is nothing to restore', async () => {
+// The removal outlives a rescan, so it has to be visible somewhere: without
+// this the only way back was to delete the context from the kubeconfig, sync,
+// and write it again -- and the sidebar's refresh button looked broken.
+test('a removed context is listed under Hidden, where it can be brought back', async () => {
     workspace.files = [{ path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] }];
     workspace.settings.excludedContexts = [DEV];
     render(Sidebar);
 
-    await expect.element(page.getByRole('button', { name: 'Remove prod' })).toBeInTheDocument();
-    expect(page.getByText('Hidden').elements().length).toBe(0);
-    expect(page.getByRole('button', { name: 'Show dev again' }).elements().length).toBe(0);
-    expect(document.querySelectorAll('.context').length).toBe(1);
+    await expect.element(page.getByText('Hidden')).toBeInTheDocument();
+
+    await page.getByRole('button', { name: 'Show context dev again' }).click();
+
+    expect(KubeconfigService.RestoreContext).toHaveBeenCalledWith(DEV);
+    await expect.element(page.getByRole('button', { name: 'Remove dev' })).toBeInTheDocument();
+    expect(document.querySelectorAll('.context').length).toBe(2);
+});
+
+// It is named by its context, not by the path its id is built from: nobody
+// removed "/home/u/.kube/config::dev", they removed dev.
+test('a removed context is listed by name', async () => {
+    workspace.files = [{ path: CONFIG, source: 'auto', error: '', contexts: [ctx(CONFIG, 'prod')] }];
+    workspace.settings.excludedContexts = [DEV];
+    render(Sidebar);
+
+    await expect.element(page.getByText('Hidden')).toBeInTheDocument();
+
+    const row = [...document.querySelectorAll('.source-row')].find((el) =>
+        el.querySelector('button')?.getAttribute('aria-label') === 'Show context dev again',
+    );
+    expect(row?.querySelector('.path')?.textContent).toBe('dev');
+    expect(row?.querySelector('.path')?.getAttribute('title')).toContain(CONFIG);
 });

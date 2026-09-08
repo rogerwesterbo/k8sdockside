@@ -454,3 +454,55 @@ func TestTheNodesTableShowsAllocatableBesideCapacity(t *testing.T) {
 		t.Errorf("Mem alloc = %q, want 30Gi", cells["Mem alloc"])
 	}
 }
+
+func TestPodScopeIsBoundedByThePodsOwnLimits(t *testing.T) {
+	// A pod owns no hardware and has no quota, so drawing it against the
+	// cluster would say nothing. What bounds it is what it is allowed to grow
+	// into -- and usage pressed against that line is the reason it is being
+	// throttled, which is the whole point of showing the two together.
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running",
+			map[string]any{"cpu": "500m", "memory": "1Gi"},
+			map[string]any{"cpu": "2", "memory": "2Gi"}),
+		podSpec("prod", "api-1", "worker-1", "Running",
+			map[string]any{"cpu": "250m", "memory": "512Mi"},
+			map[string]any{"cpu": "1", "memory": "1Gi"}),
+	}
+	usage := Usage{Source: SourceMetricsServer, Pods: map[string]Measured{
+		"prod/api-0": {CPU: 1.9, Memory: 1.5},
+	}}
+
+	b := Rollup(Scope{Kind: ScopePod, Namespace: "prod", Name: "api-0"}, Inventory{Pods: pods}, usage)
+
+	cpu := amountFor(t, b, "CPU")
+	if cpu.Requested != 0.5 || cpu.Limits != 2 {
+		t.Errorf("CPU = %v requested / %v limits, want 0.5 / 2 -- the other pod is not this one", cpu.Requested, cpu.Limits)
+	}
+	if !cpu.HasCapacity || cpu.Allocatable != 2 {
+		t.Errorf("CPU ceiling = %v (present %v), want the pod's own 2-core limit", cpu.Allocatable, cpu.HasCapacity)
+	}
+	if !cpu.HasUsed || cpu.Used != 1.9 {
+		t.Errorf("CPU used = %v (present %v), want 1.9 from the pod reading", cpu.Used, cpu.HasUsed)
+	}
+
+	// A pod count on one pod is a bar that always reads one.
+	for _, a := range b.Amounts {
+		if a.Label == "Pods" {
+			t.Error("a pod's budget counts pods, which can only ever say one")
+		}
+	}
+}
+
+func TestAPodWithNoLimitsIsLeftUnbounded(t *testing.T) {
+	// Nothing caps it, so nothing throttles it either. A ceiling of zero would
+	// draw it as full.
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running", map[string]any{"cpu": "500m"}, nil),
+	}
+
+	b := Rollup(Scope{Kind: ScopePod, Namespace: "prod", Name: "api-0"}, Inventory{Pods: pods}, Usage{})
+
+	if cpu := amountFor(t, b, "CPU"); cpu.HasCapacity {
+		t.Errorf("CPU ceiling = %v, want none: the pod has no limit", cpu.Allocatable)
+	}
+}

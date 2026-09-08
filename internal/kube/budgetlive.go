@@ -41,8 +41,9 @@ func (w *Watcher) Budget(kc Context, scope Scope, fallback UsageFallback) (Budge
 func (c *clusterClient) inventory(ctx context.Context, scope Scope) (Inventory, error) {
 	var inv Inventory
 
-	// A namespace owns no hardware, so its nodes are not worth a list call.
-	if scope.Kind != ScopeNamespace {
+	// A namespace owns no hardware and neither does a pod, so their nodes are
+	// not worth a list call.
+	if scope.Kind != ScopeNamespace && scope.Kind != ScopePod {
 		nodes, _, err := c.list(ctx, KindNodes, metav1.ListOptions{})
 		if err != nil {
 			return inv, err
@@ -78,6 +79,10 @@ func (c *clusterClient) podsInScope(ctx context.Context, scope Scope) ([]unstruc
 		})
 	case ScopeNamespace:
 		return c.listIn(ctx, KindPods, scope.Name, metav1.ListOptions{})
+	case ScopePod:
+		return c.listIn(ctx, KindPods, scope.Namespace, metav1.ListOptions{
+			FieldSelector: "metadata.name=" + scope.Name,
+		})
 	default:
 		return c.listIn(ctx, KindPods, "", metav1.ListOptions{})
 	}

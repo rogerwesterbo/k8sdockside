@@ -37,12 +37,21 @@ func (c *clusterClient) metricsServerUsage(ctx context.Context, scope Scope) Usa
 
 	usage := Usage{Source: SourceMetricsServer, Nodes: nodeReadings(nodes)}
 
-	// Pod readings are a much longer list than the node readings and only a
-	// namespace needs them -- there is no node reading for a namespace, so its
-	// pods have to be added up instead. Failing to get them is not worth losing
-	// the node readings over.
-	if scope.Kind == ScopeNamespace {
-		if pods, _, err := c.list(ctx, kindPodMetrics, metav1.ListOptions{}); err == nil {
+	// Pod readings are a much longer list than the node readings, and only the
+	// two scopes with no node reading of their own need them: a namespace has
+	// to add its pods up, and a pod is one of them. Narrowed to the namespace
+	// wherever there is one, which on a large cluster is the difference between
+	// a namespace's pods and every pod there is. Failing to get them is not
+	// worth losing the node readings over.
+	switch scope.Kind {
+	case ScopeNamespace:
+		if pods, err := c.listIn(ctx, kindPodMetrics, scope.Name, metav1.ListOptions{}); err == nil {
+			usage.Pods = podReadings(pods)
+		}
+	case ScopePod:
+		if pods, err := c.listIn(ctx, kindPodMetrics, scope.Namespace, metav1.ListOptions{
+			FieldSelector: "metadata.name=" + scope.Name,
+		}); err == nil {
 			usage.Pods = podReadings(pods)
 		}
 	}

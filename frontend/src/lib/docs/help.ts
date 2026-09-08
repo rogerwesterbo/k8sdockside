@@ -55,7 +55,7 @@ export const HELP: Page = {
                         '**Sections** — Cluster, Workloads, Network and the rest — fold and unfold. Folding one applies to every context; hold **Alt** to fold it for this context only, and a section set differently from the rest wears a small mark.',
                         '**Plugins** lists the installed plugins for every cluster and says in the margin which of them this cluster does not appear to have.',
                         '**Custom Resource Definitions** reads the cluster’s CRDs on first unfold and lists them by API group. Any of them opens as a table with the columns `kubectl get` would print.',
-                        '**Removing and hiding.** The close button on a context row removes that one context from k8sdockside. The kubeconfig is not changed, and the context is not kept anywhere to be restored: it appears again if it is added again, to the kubeconfig or by re-adding its file. The close button on a file heading hides the whole file, which is listed under **Hidden** at the foot of the sidebar with a button to bring it back.',
+                        '**Removing and hiding.** The close button on a context row removes that one context from k8sdockside; the close button on a file heading hides the whole file. Neither writes to your kubeconfig, and a rescan brings neither back — the next scan finds them and hides them again. Both are listed under **Hidden** at the foot of the sidebar, each with a button to bring it back.',
                         '**Filter** appears above the list once there are more than a handful of contexts.',
                     ],
                 },

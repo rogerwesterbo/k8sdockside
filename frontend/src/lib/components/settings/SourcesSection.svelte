@@ -9,6 +9,7 @@
   piece of state under the two views and they cannot disagree.
 -->
 <script lang="ts">
+    import { splitContextId } from '../../state/adopt';
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';
     import SettingsSection from './SettingsSection.svelte';
@@ -107,11 +108,11 @@
         </ul>
     {/if}
 
-    {#if workspace.excluded.length > 0}
+    {#if workspace.excluded.length > 0 || workspace.removedContexts.length > 0}
         <h3>Hidden</h3>
         <p class="note">
             Discovery would find these again on the next sync, so refusing one has to be remembered rather than
-            forgotten. Restore any of them here.
+            forgotten — a rescan will not bring them back. Restore any of them here.
         </p>
         <ul class="paths">
             {#each workspace.excluded as path (path)}
@@ -123,6 +124,25 @@
                         onclick={() => workspace.restoreFile(path)}
                         title="Show {path} again"
                         aria-label="Show {path} again"
+                    >
+                        <Icon name="undo" size={12} />
+                    </button>
+                </li>
+            {/each}
+            <!-- A removed context belongs under the same heading: it is the
+                 same act on a smaller thing, and it was the one with nowhere
+                 to undo it. -->
+            {#each workspace.removedContexts as id (id)}
+                {@const context = splitContextId(id)}
+                <li>
+                    <Icon name="server" size={13} />
+                    <span class="path selectable dim">{context.name}</span>
+                    <span class="reason">in {context.file}</span>
+                    <button
+                        class="drop restore"
+                        onclick={() => workspace.restoreContext(id)}
+                        title="Show {context.name} again"
+                        aria-label="Show context {context.name} again"
                     >
                         <Icon name="undo" size={12} />
                     </button>
@@ -152,7 +172,7 @@
         </ul>
     {/if}
 
-    {#if workspace.loaded && workspace.files.length === 0 && workspace.excluded.length === 0}
+    {#if workspace.loaded && workspace.files.length === 0 && workspace.excluded.length === 0 && workspace.removedContexts.length === 0}
         <p class="empty">
             No kubeconfig found. Add files above, or point k8sdockside at a folder and it will take every one in
             there — whatever they are named.

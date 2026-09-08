@@ -126,6 +126,7 @@
 
     function stopDrag(): void {
         adoptAt = null;
+        stopEdge();
         endTabDrag();
     }
 
@@ -133,7 +134,10 @@
     // this strip and then dropped on another leaves here without a drop, and
     // the dragleave for it is not guaranteed.
     $effect(() => {
-        if (currentTabDrag() === null) adoptAt = null;
+        if (currentTabDrag() === null) {
+            adoptAt = null;
+            stopEdge();
+        }
     });
 
     /** Whether the tab in the air came from somewhere this strip can take it from. */
@@ -143,32 +147,52 @@
     }
 
     /**
-     * Reorders as the pointer passes over a neighbour, so the strip shows the
-     * result directly instead of an insertion marker. The write to disk is
-     * debounced by the store, so a whole drag costs one save.
+     * Where in the strip a horizontal position falls: 0 before the first tab,
+     * tabs.length past the last, and past a tab's midpoint counts as after it.
+     *
+     * Reading the position rather than asking which tab the pointer happens to
+     * be over is what makes every position reachable. The strip is not a row of
+     * tabs and nothing else: the scroll arrows are drawn over its ends, there is
+     * padding at each end and a gap between every pair, and the controls sit
+     * past them all. A drag over any of that used to be a drag over nothing,
+     * which is why a tab could not be taken to the end of a strip that
+     * scrolled -- the end of one is mostly not tab.
      */
-    function dragOver(event: DragEvent, index: number): void {
-        if (foreign()) {
-            event.preventDefault();
-            event.stopPropagation();
-            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-            // Past the midpoint drops after the tab, which is what makes the
-            // last position in a strip reachable at all.
-            const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-            adoptAt = event.clientX > box.left + box.width / 2 ? index + 1 : index;
-            return;
+    function insertionAt(clientX: number): number | null {
+        if (!stripEl) return null;
+        const boxes = stripEl.querySelectorAll<HTMLElement>('.tab');
+        if (boxes.length === 0) return null;
+
+        for (let i = 0; i < boxes.length; i++) {
+            const box = boxes[i].getBoundingClientRect();
+            if (clientX < box.left + box.width / 2) return i;
         }
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-        if (dragIndex === null || dragIndex === index) return;
-        // dragIndex follows the tab to its new position on its own.
-        onmove(dragIndex, index);
+        return boxes.length;
+    }
+
+    /** The tab a position is inside, if it is inside one at all. */
+    function tabAt(clientX: number): number | null {
+        if (!stripEl) return null;
+        const boxes = stripEl.querySelectorAll<HTMLElement>('.tab');
+        for (let i = 0; i < boxes.length; i++) {
+            const box = boxes[i].getBoundingClientRect();
+            if (clientX >= box.left && clientX < box.right) return i;
+        }
+        return null;
     }
 
     /** Takes in a tab dragged from another pane. A local drag has already landed. */
     function drop(event: DragEvent): void {
         const drag = currentTabDrag();
-        if (!foreign() || !drag) return;
+        if (!drag) return;
+        if (!foreign()) {
+            // A local reorder happened on the way over, so there is nothing to
+            // do but end it. The drop is still taken rather than left to the
+            // browser, which would otherwise read the payload as dropped text.
+            event.preventDefault();
+            stopDrag();
+            return;
+        }
         event.preventDefault();
         event.stopPropagation();
         onadopt?.(drag.id, drag.from, adoptAt ?? tabs.length);
@@ -183,10 +207,34 @@
      * the parts that would take one.
      */
     function dragOverStrip(event: DragEvent): void {
-        if (!foreign()) return;
+        if (currentTabDrag() === null) return;
+        // Held near an end, this is also how the tabs beyond it are asked for.
+        edgeScroll(event);
+
         event.preventDefault();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-        adoptAt = tabs.length;
+
+        const at = insertionAt(event.clientX);
+        if (foreign()) {
+            // A tab from another pane is not in this list yet, so it gets a
+            // marker where it would land rather than being reordered into place.
+            adoptAt = at ?? tabs.length;
+            return;
+        }
+        if (dragIndex === null) return;
+
+        // Reaching a neighbour is enough to displace it; the midpoint only
+        // decides where a position between tabs belongs. Asking for the
+        // midpoint everywhere would mean dragging a tab as far as half the
+        // neighbour before anything happened -- and on a strip that scrolls
+        // that point is often off screen, so the swap could not be asked for
+        // at all. Reordering as the pointer moves, rather than on drop, is what
+        // shows the result directly instead of a marker.
+        const over = tabAt(event.clientX);
+        // An insertion point runs one past the end; a position in the list
+        // does not.
+        const target = over ?? (at === null ? null : Math.min(at, tabs.length - 1));
+        if (target !== null && target !== dragIndex) onmove(dragIndex, target);
     }
 
     let rootEl = $state<HTMLElement | null>(null);
@@ -201,6 +249,7 @@
         const into = event.relatedTarget;
         if (into instanceof Node && rootEl?.contains(into)) return;
         adoptAt = null;
+        stopEdge();
     }
 
     /** Alt+Arrow moves the focused tab, so reordering is not drag-only. */
@@ -289,6 +338,82 @@
         tabs.length;
         measure();
     });
+
+    // ----- dragging past the edge ---------------------------------------
+    //
+    // Nothing scrolls an overflowing element while a drag is in flight: the
+    // browser scrolls the *page* near the window's edge and leaves a scroller
+    // inside it alone. So with more tabs than fit, everything outside the
+    // visible window was unreachable -- a tab could not be dragged to the end
+    // past a last tab it could not reach, and the tabs scrolled off could not
+    // be passed at all. Holding the pointer at either edge scrolls the strip
+    // under it, which is what makes the whole order reachable again.
+
+    /** How close to an edge starts the scroll, and how fast it goes there. */
+    const EDGE_ZONE = 48;
+    const EDGE_SLOWEST = 4;
+    const EDGE_FASTEST = 16;
+
+    let edgeStep = 0;
+    let edgeFrame: number | null = null;
+
+    /** Scrolls one frame's worth, and stops at the end rather than spinning. */
+    function stepEdge(): void {
+        edgeFrame = null;
+        if (!stripEl || edgeStep === 0) return;
+        // `instant` rather than a write to scrollLeft: the strip sets
+        // scroll-behavior: smooth for the arrows and for scrolling a tab into
+        // view, and a smooth animation restarted every frame crawls.
+        stripEl.scrollBy({ left: edgeStep, behavior: 'instant' });
+        measure();
+        if ((edgeStep < 0 && !canLeft) || (edgeStep > 0 && !canRight)) {
+            edgeStep = 0;
+            return;
+        }
+        edgeFrame = requestAnimationFrame(stepEdge);
+    }
+
+    /**
+     * Starts, steers or stops the edge scroll from where the pointer is.
+     *
+     * Speed rises with how far into the edge the pointer has gone, so resting
+     * just inside it creeps along tab by tab and pushing right up against it
+     * covers a long strip quickly -- the same gesture doing both jobs.
+     */
+    function edgeScroll(event: DragEvent): void {
+        if (!stripEl) return;
+        const box = stripEl.getBoundingClientRect();
+
+        let depth = 0;
+        let direction = 0;
+        if (event.clientX < box.left + EDGE_ZONE) {
+            direction = -1;
+            depth = (box.left + EDGE_ZONE - event.clientX) / EDGE_ZONE;
+        } else if (event.clientX > box.right - EDGE_ZONE) {
+            direction = 1;
+            depth = (event.clientX - (box.right - EDGE_ZONE)) / EDGE_ZONE;
+        }
+
+        if (direction === 0) {
+            stopEdge();
+            return;
+        }
+        const speed = EDGE_SLOWEST + (EDGE_FASTEST - EDGE_SLOWEST) * Math.min(1, Math.max(0, depth));
+        edgeStep = direction * speed;
+        if (edgeFrame === null) edgeFrame = requestAnimationFrame(stepEdge);
+    }
+
+    function stopEdge(): void {
+        edgeStep = 0;
+        if (edgeFrame !== null) {
+            cancelAnimationFrame(edgeFrame);
+            edgeFrame = null;
+        }
+    }
+
+    // A strip taken off screen mid-drag -- a pane closed, a layout changed --
+    // would otherwise leave a frame queued against an element nobody holds.
+    $effect(() => stopEdge);
 
     /**
      * Keep the active tab on screen. Reordering, restoring a session or closing
@@ -456,6 +581,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
     class="strip {rule}"
+    class:in-drag={currentTabDrag() !== null}
     bind:this={rootEl}
     ondragover={dragOverStrip}
     ondrop={drop}
@@ -496,9 +622,7 @@
                     oncontextmenu={(e) => openMenu(e, tab)}
                     onkeydown={(e) => onKeyDown(e, index)}
                     ondragstart={(e) => startDrag(e, index)}
-                    ondragover={(e) => dragOver(e, index)}
                     ondragend={stopDrag}
-                    ondrop={drop}
                 >
                     <Icon name={tab.icon} size={14} />
                     <span class="title">{tab.title}</span>
@@ -691,6 +815,15 @@
     .nudge.shown {
         visibility: visible;
         opacity: 1;
+    }
+
+    /* An arrow is drawn over the end of the strip, which while a tab is in the
+       air would be thirty pixels of tab that cannot be dropped on or reordered
+       past. Nothing needs clicking mid-drag, so the arrows stand aside and the
+       tab underneath takes the drag -- the edge still scrolls, because that is
+       decided by where the pointer is rather than by what it is over. */
+    .strip.in-drag .nudge {
+        pointer-events: none;
     }
 
     .nudge:hover {

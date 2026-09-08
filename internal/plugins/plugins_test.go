@@ -553,3 +553,45 @@ func TestTheBuiltinPrometheusPluginChartsItsOwnHealthOnItsOverview(t *testing.T)
 		}
 	}
 }
+
+// A chart of CPU usage cannot answer the question people actually arrive with
+// mid-incident: a container pinned against its limit and one running
+// comfortably under it draw the same line. Throttling and pressure are where
+// the difference shows, so the built-in plugin carries them on every surface it
+// charts CPU on -- including namespaces, which has no other reason to have a
+// Metrics panel at all.
+func TestTheBuiltinPrometheusPluginChartsCPUDelayEverywhereItChartsCPU(t *testing.T) {
+	var prom Plugin
+	for _, p := range Builtin() {
+		if p.ID == "prometheus" {
+			prom = p
+		}
+	}
+	if prom.ID == "" {
+		t.Fatal("no builtin prometheus plugin")
+	}
+
+	for _, attach := range []string{AttachDashboard, "nodes", "pods", "namespaces"} {
+		var throttling, pressure bool
+		for _, chart := range prom.ChartsFor(attach) {
+			if strings.Contains(chart.Query, "container_cpu_cfs_throttled") {
+				throttling = true
+			}
+			if strings.Contains(chart.Query, "_pressure_") {
+				pressure = true
+				// PSI and throttle ratios are fractions of wall time, and the
+				// frontend writes a percent by multiplying by a hundred. A
+				// chart that returned 0-100 here would read as 8,700%.
+				if chart.Unit != "percent" {
+					t.Errorf("%s chart %q has unit %q, want percent", attach, chart.ID, chart.Unit)
+				}
+			}
+		}
+		if !throttling {
+			t.Errorf("%s has no CFS throttling chart", attach)
+		}
+		if !pressure {
+			t.Errorf("%s has no pressure (PSI) chart", attach)
+		}
+	}
+}

@@ -4,7 +4,7 @@
     "tagline": "monitoring, as the Prometheus Operator installs it",
     "icon": "gauge",
     "docs": "https://prometheus-operator.dev/docs/getting-started/introduction/",
-    "description": "The Prometheus Operator turns monitoring into Kubernetes objects: a Prometheus is a running server, and the ServiceMonitors, PodMonitors and ScrapeConfigs around it are what it has been told to scrape. This plugin also draws the graphs on pods, nodes and the cluster dashboard \u2014 those queries assume the metric and label names the kube-prometheus-stack sets up (cAdvisor with a node label, kube-state-metrics). If your Prometheus is set up differently, copy this plugin into your own plugins folder under the same id and change the queries.",
+    "description": "The Prometheus Operator turns monitoring into Kubernetes objects: a Prometheus is a running server, and the ServiceMonitors, PodMonitors and ScrapeConfigs around it are what it has been told to scrape. This plugin also draws the graphs on pods, nodes, namespaces and the cluster dashboard \u2014 those queries assume the metric and label names the kube-prometheus-stack sets up (cAdvisor with a node label, kube-state-metrics, node-exporter). CPU throttling is read from cAdvisor's CFS counters and works on any cluster; pressure (PSI) needs node-exporter on a kernel with PSI for the node charts, and a cgroup v2 kubelet exporting cAdvisor's container_pressure metrics for the pod and namespace ones. If your Prometheus is set up differently, copy this plugin into your own plugins folder under the same id and change the queries.",
     "requires": [
         {
             "kind": "crd:prometheuses.monitoring.coreos.com",
@@ -159,6 +159,42 @@
             "query": "sum by (container) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m]))"
         },
         {
+            "id": "pod-cpu-commitment",
+            "label": "CPU requested vs used",
+            "attach": "pods",
+            "unit": "cores",
+            "legend": "series",
+            "description": "This pod's own request and limit against what it burns. Needs kube-state-metrics. The clearest place to see a request that was guessed rather than measured.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "pod-cpu-throttling",
+            "label": "CPU throttling",
+            "attach": "pods",
+            "unit": "percent",
+            "legend": "container",
+            "description": "Share of CFS periods in which each container was stopped early. A container throttled while using less CPU than it asks for has a limit set below what it actually needs \u2014 the clearest reading in the app that a limit, not the cluster, is the thing slowing it down.",
+            "query": "sum by (container) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])) / sum by (container) (rate(container_cpu_cfs_periods_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "pod-cpu-delay",
+            "label": "CPU delay",
+            "attach": "pods",
+            "unit": "seconds",
+            "legend": "container",
+            "description": "Seconds of throttling per second, per container: how much time it was actually held back, rather than how often. Latency the process itself sees as the CPU simply going away.",
+            "query": "sum by (container) (rate(container_cpu_cfs_throttled_seconds_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "pod-pressure",
+            "label": "Pressure (PSI)",
+            "attach": "pods",
+            "unit": "percent",
+            "legend": "pressure",
+            "description": "This pod's worst cgroup, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs a cgroup v2 node whose kubelet exports cAdvisor's container_pressure metrics; older clusters draw nothing here and the throttling charts above are the ones to read.",
+            "query": "label_replace(max(rate(container_pressure_cpu_waiting_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_waiting_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_stalled_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(max(rate(container_pressure_io_waiting_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_io_stalled_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"io stalled\", \"\", \"\")"
+        },
+        {
             "id": "pod-memory",
             "label": "Memory",
             "attach": "pods",
@@ -166,6 +202,15 @@
             "legend": "container",
             "description": "Working set per container \u2014 what the kernel would have to reclaim, which is what the OOM killer looks at.",
             "query": "sum by (container) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "pod-memory-commitment",
+            "label": "Memory requested vs used",
+            "attach": "pods",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "This pod's request and limit against its working set. Needs kube-state-metrics. The working set touching the limit line is what the OOM killer acts on.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}), \"series\", \"used\", \"\", \"\")"
         },
         {
             "id": "pod-network",
@@ -184,12 +229,55 @@
             "query": "sum(rate(container_cpu_usage_seconds_total{node=\"$name\",container!=\"\"}[5m]))"
         },
         {
+            "id": "node-cpu-commitment",
+            "label": "CPU requested vs used",
+            "attach": "nodes",
+            "unit": "cores",
+            "legend": "series",
+            "description": "What this node has been asked to hold against what it is actually doing. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\",node=\"$node\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\",node=\"$node\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{node=\"$node\",container!=\"\"}[5m])), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "node-cpu-throttling",
+            "label": "CPU throttling",
+            "attach": "nodes",
+            "unit": "percent",
+            "description": "Share of CFS periods in which a container placed here was throttled. High while the node's own CPU line is far from full is limits set too low, not a node too small.",
+            "query": "sum(rate(container_cpu_cfs_throttled_periods_total{node=\"$node\",container!=\"\",container!=\"POD\"}[5m])) / sum(rate(container_cpu_cfs_periods_total{node=\"$node\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "node-cpu-delay",
+            "label": "CPU delay",
+            "attach": "nodes",
+            "unit": "seconds",
+            "description": "Seconds of throttling per second across everything on this node \u2014 the time its containers spent stopped, waiting for the next CFS period.",
+            "query": "sum(rate(container_cpu_cfs_throttled_seconds_total{node=\"$node\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "node-pressure",
+            "label": "Pressure (PSI)",
+            "attach": "nodes",
+            "unit": "percent",
+            "legend": "pressure",
+            "description": "Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs node-exporter on a kernel with PSI. It reports against its own scrape address rather than a node name, so the node is matched on the hostname it reports in node_uname_info \u2014 a cluster whose node names are not its hostnames draws nothing here.",
+            "query": "label_replace(sum(rate(node_pressure_cpu_waiting_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(sum(rate(node_pressure_memory_waiting_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(sum(rate(node_pressure_memory_stalled_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(sum(rate(node_pressure_io_waiting_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(sum(rate(node_pressure_io_stalled_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"io stalled\", \"\", \"\")"
+        },
+        {
             "id": "node-memory",
             "label": "Memory",
             "attach": "nodes",
             "unit": "bytes",
             "description": "Working set of everything scheduled on this node.",
             "query": "sum(container_memory_working_set_bytes{node=\"$name\",container!=\"\"})"
+        },
+        {
+            "id": "node-memory-commitment",
+            "label": "Memory requested vs used",
+            "attach": "nodes",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "Requested, limits and working set for everything placed on this node. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\",node=\"$node\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\",node=\"$node\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{node=\"$node\",container!=\"\"}), \"series\", \"used\", \"\", \"\")"
         },
         {
             "id": "node-pods",
@@ -208,12 +296,55 @@
             "query": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]))"
         },
         {
+            "id": "cluster-cpu-commitment",
+            "label": "CPU requested vs used",
+            "attach": "dashboard",
+            "unit": "cores",
+            "legend": "series",
+            "description": "What the scheduler has booked, what those pods may grow into, and what they are really burning. Needs kube-state-metrics. Requested far above used is a cluster paying for room nobody uses; used near limits is a cluster about to throttle.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m])), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "cluster-cpu-throttling",
+            "label": "CPU throttling",
+            "attach": "dashboard",
+            "unit": "percent",
+            "description": "Share of CFS periods in which a container was stopped early because it had spent its slice, across the cluster. Only containers with a CPU limit are ever throttled, so a flat zero means nothing is capped \u2014 not that nothing is busy.",
+            "query": "sum(rate(container_cpu_cfs_throttled_periods_total{container!=\"\",container!=\"POD\"}[5m])) / sum(rate(container_cpu_cfs_periods_total{container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "cluster-cpu-delay",
+            "label": "Most throttled pods",
+            "attach": "dashboard",
+            "unit": "seconds",
+            "description": "The five pods losing the most time to CPU throttling, as seconds of delay per second. A pod at one second per second is spending all of its time waiting for its next slice.",
+            "query": "topk(5, sum by (namespace, pod) (rate(container_cpu_cfs_throttled_seconds_total{container!=\"\",container!=\"POD\"}[5m])))"
+        },
+        {
+            "id": "cluster-pressure",
+            "label": "Worst node pressure (PSI)",
+            "attach": "dashboard",
+            "unit": "percent",
+            "legend": "pressure",
+            "description": "The busiest node in the cluster, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs node-exporter on a kernel with PSI (cgroup v2).",
+            "query": "label_replace(max(rate(node_pressure_cpu_waiting_seconds_total[5m])), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(max(rate(node_pressure_memory_waiting_seconds_total[5m])), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(max(rate(node_pressure_memory_stalled_seconds_total[5m])), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(max(rate(node_pressure_io_waiting_seconds_total[5m])), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(max(rate(node_pressure_io_stalled_seconds_total[5m])), \"pressure\", \"io stalled\", \"\", \"\")"
+        },
+        {
             "id": "cluster-memory",
             "label": "Cluster memory",
             "attach": "dashboard",
             "unit": "bytes",
             "description": "Working set across every workload in the cluster.",
             "query": "sum(container_memory_working_set_bytes{container!=\"\"})"
+        },
+        {
+            "id": "cluster-memory-commitment",
+            "label": "Memory requested vs used",
+            "attach": "dashboard",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "Requested, limits and working set across the cluster. Needs kube-state-metrics. Memory limits are the ones that kill: used approaching limits is an OOM waiting to happen.",
+            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{container!=\"\"}), \"series\", \"used\", \"\", \"\")"
         },
         {
             "id": "cluster-pods",
@@ -234,58 +365,48 @@
             "query": "sum by (code) (rate(apiserver_request_total[5m]))"
         },
         {
-            "id": "cluster-cpu-commitment",
-            "label": "CPU requested vs used",
-            "attach": "dashboard",
+            "id": "namespace-cpu",
+            "label": "CPU",
+            "attach": "namespaces",
             "unit": "cores",
-            "legend": "series",
-            "description": "What the scheduler has booked, what those pods may grow into, and what they are really burning. Needs kube-state-metrics. Requested far above used is a cluster paying for room nobody uses; used near limits is a cluster about to throttle.",
-            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[5m])), \"series\", \"used\", \"\", \"\")"
+            "legend": "pod",
+            "description": "Cores used by the eight busiest pods in this namespace. Eight rather than all of them: a namespace of two hundred pods is a chart nobody can read.",
+            "query": "topk(8, sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$name\",container!=\"\",container!=\"POD\"}[5m])))"
         },
         {
-            "id": "cluster-memory-commitment",
-            "label": "Memory requested vs used",
-            "attach": "dashboard",
+            "id": "namespace-cpu-throttling",
+            "label": "CPU throttling",
+            "attach": "namespaces",
+            "unit": "percent",
+            "description": "Share of CFS periods in which a container in this namespace was throttled. Only containers with a CPU limit are ever throttled, so a flat zero means nothing here is capped.",
+            "query": "sum(rate(container_cpu_cfs_throttled_periods_total{namespace=\"$name\",container!=\"\",container!=\"POD\"}[5m])) / sum(rate(container_cpu_cfs_periods_total{namespace=\"$name\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "namespace-cpu-delay",
+            "label": "Most throttled pods",
+            "attach": "namespaces",
+            "unit": "seconds",
+            "legend": "pod",
+            "description": "The five pods here losing the most time to CPU throttling, as seconds of delay per second.",
+            "query": "topk(5, sum by (pod) (rate(container_cpu_cfs_throttled_seconds_total{namespace=\"$name\",container!=\"\",container!=\"POD\"}[5m])))"
+        },
+        {
+            "id": "namespace-pressure",
+            "label": "Pressure (PSI)",
+            "attach": "namespaces",
+            "unit": "percent",
+            "legend": "pressure",
+            "description": "The worst-off pod in this namespace, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs a cgroup v2 node whose kubelet exports cAdvisor's container_pressure metrics.",
+            "query": "label_replace(max(rate(container_pressure_cpu_waiting_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_waiting_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_stalled_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(max(rate(container_pressure_io_waiting_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_io_stalled_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"io stalled\", \"\", \"\")"
+        },
+        {
+            "id": "namespace-memory",
+            "label": "Memory",
+            "attach": "namespaces",
             "unit": "bytes",
-            "legend": "series",
-            "description": "Requested, limits and working set across the cluster. Needs kube-state-metrics. Memory limits are the ones that kill: used approaching limits is an OOM waiting to happen.",
-            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{container!=\"\"}), \"series\", \"used\", \"\", \"\")"
-        },
-        {
-            "id": "node-cpu-commitment",
-            "label": "CPU requested vs used",
-            "attach": "nodes",
-            "unit": "cores",
-            "legend": "series",
-            "description": "What this node has been asked to hold against what it is actually doing. Needs kube-state-metrics.",
-            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\",node=\"$node\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\",node=\"$node\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{node=\"$node\",container!=\"\"}[5m])), \"series\", \"used\", \"\", \"\")"
-        },
-        {
-            "id": "node-memory-commitment",
-            "label": "Memory requested vs used",
-            "attach": "nodes",
-            "unit": "bytes",
-            "legend": "series",
-            "description": "Requested, limits and working set for everything placed on this node. Needs kube-state-metrics.",
-            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\",node=\"$node\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\",node=\"$node\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{node=\"$node\",container!=\"\"}), \"series\", \"used\", \"\", \"\")"
-        },
-        {
-            "id": "pod-cpu-commitment",
-            "label": "CPU requested vs used",
-            "attach": "pods",
-            "unit": "cores",
-            "legend": "series",
-            "description": "This pod's own request and limit against what it burns. Needs kube-state-metrics. The clearest place to see a request that was guessed rather than measured.",
-            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"cpu\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"cpu\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])), \"series\", \"used\", \"\", \"\")"
-        },
-        {
-            "id": "pod-memory-commitment",
-            "label": "Memory requested vs used",
-            "attach": "pods",
-            "unit": "bytes",
-            "legend": "series",
-            "description": "This pod's request and limit against its working set. Needs kube-state-metrics. The working set touching the limit line is what the OOM killer acts on.",
-            "query": "label_replace(sum(kube_pod_container_resource_requests{resource=\"memory\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"requested\", \"\", \"\") or label_replace(sum(kube_pod_container_resource_limits{resource=\"memory\",namespace=\"$namespace\",pod=\"$name\"}), \"series\", \"limits\", \"\", \"\") or label_replace(sum(container_memory_working_set_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}), \"series\", \"used\", \"\", \"\")"
+            "legend": "pod",
+            "description": "Working set of the eight largest pods in this namespace \u2014 what the kernel would have to reclaim, which is what the OOM killer looks at.",
+            "query": "topk(8, sum by (pod) (container_memory_working_set_bytes{namespace=\"$name\",container!=\"\",container!=\"POD\"}))"
         }
     ],
     "usage": {

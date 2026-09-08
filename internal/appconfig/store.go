@@ -478,7 +478,7 @@ func Defaults() Settings {
 			Left: PaneState{
 				Tabs: []PaneTabRef{{Type: ViewClusters, Kind: KindClusters}},
 				Open: true,
-				Size: 260,
+				Size: 320,
 			},
 			Main:  PaneState{Tabs: []PaneTabRef{}, Open: true},
 			Right: PaneState{Tabs: []PaneTabRef{}, Size: 420},
@@ -487,7 +487,7 @@ func Defaults() Settings {
 			// one with nothing in it is a third of the window showing nothing.
 			Bottom: PaneState{Tabs: []PaneTabRef{}, Size: 320},
 		},
-		Layout: Layout{DetailPane: PaneRight, SidebarWidth: 260, Zoom: 1},
+		Layout: Layout{DetailPane: PaneRight, SidebarWidth: 320, Zoom: 1},
 		Preferences: Preferences{
 			Theme:    themes.DefaultID,
 			Density:  DensityComfortable,
@@ -779,6 +779,21 @@ func (s *Store) ExcludeContext(id string) (Settings, error) {
 		if !slices.Contains(d.ExcludedContexts, id) {
 			d.ExcludedContexts = append(d.ExcludedContexts, id)
 		}
+	})
+}
+
+// UnexcludeContext brings back a context the user removed, so the next scan
+// lists it again.
+//
+// The counterpart to ExcludeContext, and there for the same reason
+// UnexcludeFile is: a removal that nothing can undo is a removal that has to be
+// got right first time, and this one is a click away from the row it hides.
+func (s *Store) UnexcludeContext(id string) (Settings, error) {
+	if id == "" {
+		return s.Get(), errors.New("context id is required")
+	}
+	return s.update(func(d *Settings) {
+		d.ExcludedContexts = slices.DeleteFunc(d.ExcludedContexts, func(c string) bool { return c == id })
 	})
 }
 

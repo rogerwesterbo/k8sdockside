@@ -22,13 +22,16 @@
 
     let target = $derived(workspace.detailTarget);
     /**
-     * The two kinds that own a resource budget of their own.
+     * The kinds that own a resource budget of their own.
      *
-     * A node holds hardware and a namespace holds a quota; everything else is
-     * accounted for inside one of those two, so a budget on it would either
-     * repeat the parent's numbers or invent a denominator.
+     * A node holds hardware, a namespace holds a quota, and a pod holds its own
+     * limits -- which is the denominator that matters in front of a pod being
+     * throttled, since the kernel stops it at its limit whatever the node has
+     * spare. Everything else is accounted for inside one of those three, so a
+     * budget on it would either repeat the parent's numbers or invent a
+     * denominator.
      */
-    const BUDGET_SCOPES: Record<string, string> = { nodes: 'node', namespaces: 'namespace' };
+    const BUDGET_SCOPES: Record<string, string> = { nodes: 'node', namespaces: 'namespace', pods: 'pod' };
     let budgetScope = $derived(target ? (BUDGET_SCOPES[target.kind] ?? '') : '');
     let color = $derived(target ? workspace.colorOf(target.contextId) : 'var(--accent)');
     /**
@@ -107,6 +110,7 @@
                 <ResourceBudget
                     contextId={target.contextId}
                     scope={budgetScope}
+                    namespace={target.namespace}
                     name={target.name}
                     title="Resources"
                     compact

@@ -59,12 +59,12 @@ func (s *KubeconfigService) Sync() []kube.File {
 // them, and forgets every removal that no file matched.
 //
 // A removal lives in the app's own settings, since a kubeconfig is never
-// written, and it is not listed anywhere the user could undo it. That makes
-// its lifetime the whole promise: it is honoured while the context is in its
-// file, and forgotten as soon as a scan no longer finds it, so that a context
-// added again -- by the tool that wrote it the first time, or by re-adding the
-// file it lives in -- shows up rather than vanishing into an old removal that
-// nothing on screen explains.
+// written. It is honoured while the context is in its file, and forgotten as
+// soon as a scan no longer finds it, so that a context added again -- by the
+// tool that wrote it the first time, or by re-adding the file it lives in --
+// shows up rather than vanishing into an old removal nobody remembers making.
+// While it is honoured it is listed, under Hidden beside the excluded files,
+// which is where RestoreContext undoes it.
 //
 // A file that could not be read says nothing about what it holds, so its
 // removals are kept until it can be read again.
@@ -203,9 +203,10 @@ func (s *KubeconfigService) RestoreFile(path string) ([]kube.File, error) {
 // writes one -- so the removal is remembered in the app's own settings, and a
 // rescan leaves the context out again for as long as the file holds it.
 //
-// Unlike a hidden file, a removed context is not listed anywhere to be
-// brought back: it is gone from the app. It comes back by being added again,
-// to the kubeconfig or by re-adding its file -- see withoutRemoved.
+// Which is why RestoreContext exists beside it. A rescan finds the context and
+// hides it again, so without somewhere to undo the removal the only way back
+// was to take the context out of the kubeconfig, sync, and put it back --
+// something nobody would guess and the confirmation did not say.
 func (s *KubeconfigService) RemoveContext(id string) ([]kube.File, error) {
 	if id == "" {
 		return s.Files(), errors.New("no context given")
@@ -216,11 +217,35 @@ func (s *KubeconfigService) RemoveContext(id string) ([]kube.File, error) {
 	return s.Sync(), nil
 }
 
+// RestoreContext brings back a context the user removed, so the next scan lists
+// it again.
+//
+// Nothing checks that the id still names anything: a removal whose context has
+// since left its file is forgotten by withoutRemoved on the next scan anyway,
+// and refusing to undo a removal because the thing behind it is missing would
+// leave the entry on screen with a button that does nothing.
+func (s *KubeconfigService) RestoreContext(id string) ([]kube.File, error) {
+	if id == "" {
+		return s.Files(), errors.New("no context given")
+	}
+	if _, err := s.store.UnexcludeContext(id); err != nil {
+		return s.Files(), err
+	}
+	return s.Sync(), nil
+}
+
 // Excluded returns the files the user has hidden, so the sidebar can say how
 // many a folder is holding back and offer to show them again. Hidden state that
 // cannot be seen anywhere is hidden state nobody can undo.
 func (s *KubeconfigService) Excluded() []string {
 	return s.store.ExcludedFiles()
+}
+
+// RemovedContexts returns the contexts the user has removed one by one, for the
+// same reason Excluded lists the hidden files: it is the only place the removal
+// can be seen, and the only place it can be undone.
+func (s *KubeconfigService) RemovedContexts() []string {
+	return s.store.ExcludedContexts()
 }
 
 // Folders returns the directories being watched, so the sidebar can list them

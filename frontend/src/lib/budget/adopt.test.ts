@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { adoptBudget, barsFor, type BudgetAmount } from './adopt';
+import { adoptBudget, adoptDelay, barsFor, delayTone, type BudgetAmount } from './adopt';
 
 /** An amount with everything filled in, for tests to vary one field of. */
 function amount(over: Partial<BudgetAmount> = {}): BudgetAmount {
@@ -123,4 +123,27 @@ describe('adoptBudget', () => {
         expect(budget.usage.error).toContain('metrics-server');
         expect(budget.usage.source).toBe('');
     });
+});
+
+test('a delay reading fills in for every field Go could leave null', () => {
+    // The bindings type everything as optional, and a missing number rendered
+    // as NaN% would be worse than a missing line.
+    const got = adoptDelay({} as never);
+
+    expect(got).toEqual({
+        source: '', error: '',
+        throttled: 0, stalled: 0, limited: false,
+        pressure: 0, hasPressure: false,
+        nodes: 0, sampled: 0, waiting: false,
+    });
+});
+
+test('throttling is toned by how much of it there is', () => {
+    // A container clipped in one period in a hundred is fine; one clipped in a
+    // quarter of them is spending real time stopped, and somebody should look
+    // at its limit.
+    expect(delayTone({ throttled: 0 } as never)).toBe('ok');
+    expect(delayTone({ throttled: 0.04 } as never)).toBe('ok');
+    expect(delayTone({ throttled: 0.05 } as never)).toBe('warn');
+    expect(delayTone({ throttled: 0.25 } as never)).toBe('bad');
 });

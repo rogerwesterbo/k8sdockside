@@ -7,6 +7,7 @@
   to the pane holding it, which is why nothing here sets one.
 -->
 <script lang="ts">
+    import { splitContextId } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
     import ContextSettings from './ContextSettings.svelte';
     import ContextTree from './ContextTree.svelte';
@@ -175,7 +176,7 @@
         {/if}
     </div>
 
-    {#if workspace.folders.length > 0 || workspace.excluded.length > 0}
+    {#if workspace.folders.length > 0 || workspace.excluded.length > 0 || workspace.removedContexts.length > 0}
         <div class="sources">
             {#if workspace.folders.length > 0}
                 <p class="group">Watched folders</p>
@@ -195,11 +196,12 @@
                 {/each}
             {/if}
 
-            <!-- A discovered file cannot be forgotten, only hidden -- so the
-                 hiding has to be visible, or it is state nobody can undo. A
-                 context removed from its row is not listed: it is gone from
-                 the app, and comes back only by being added again. -->
-            {#if workspace.excluded.length > 0}
+            <!-- Neither a discovered file nor a context in one can be
+                 forgotten -- the next scan finds both again -- so refusing
+                 either is remembered, and the remembering has to be visible or
+                 it is state nobody can undo. Both are listed here, under one
+                 heading: from the user's side they are the same act. -->
+            {#if workspace.excluded.length > 0 || workspace.removedContexts.length > 0}
                 <p class="group">Hidden</p>
                 {#each workspace.excluded as path (path)}
                     <div class="source-row">
@@ -210,6 +212,21 @@
                             onclick={() => workspace.restoreFile(path)}
                             title="Show {path} again"
                             aria-label="Show {basename(path)} again"
+                        >
+                            <Icon name="undo" size={11} />
+                        </button>
+                    </div>
+                {/each}
+                {#each workspace.removedContexts as id (id)}
+                    {@const context = splitContextId(id)}
+                    <div class="source-row">
+                        <Icon name="server" size={12} />
+                        <span class="path" title="{context.name} in {context.file}">{context.name}</span>
+                        <button
+                            class="drop restore"
+                            onclick={() => workspace.restoreContext(id)}
+                            title="Show {context.name} again"
+                            aria-label="Show context {context.name} again"
                         >
                             <Icon name="undo" size={11} />
                         </button>

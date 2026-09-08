@@ -17,18 +17,25 @@ package kube
 
 import "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-// Scope kinds. A budget is always for one of these three.
+// Scope kinds. A budget is always for one of these four.
 const (
 	ScopeCluster   = "cluster"
 	ScopeNode      = "node"
 	ScopeNamespace = "namespace"
+	// ScopePod is one pod's own accounting. It owns no hardware and has no
+	// quota, so what bounds it is its own limits -- which is exactly the
+	// comparison worth having in front of a pod that is being throttled.
+	ScopePod = "pod"
 )
 
 // Scope says which slice of the cluster a budget covers.
 type Scope struct {
 	Kind string `json:"kind"`
-	// Name is the node or namespace. Empty for a whole cluster.
+	// Name is the node, namespace or pod. Empty for a whole cluster.
 	Name string `json:"name"`
+	// Namespace is where the pod is, for ScopePod. Meaningless for the rest,
+	// which are either cluster-scoped or the namespace themselves.
+	Namespace string `json:"namespace,omitzero"`
 }
 
 // Amount is one resource dimension -- CPU, memory, pods -- with every number
@@ -116,9 +123,10 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 	mem := Amount{Label: "Memory", Unit: "GiB", HasDemand: true}
 	pod := Amount{Label: "Pods", HasUsed: true}
 
-	// A namespace holds no hardware, so nodes contribute nothing to it. Its
-	// ceiling, if it has one at all, is a ResourceQuota.
-	if scope.Kind != ScopeNamespace {
+	// A namespace holds no hardware, and neither does a pod. Nodes contribute
+	// nothing to either: a namespace's ceiling, if it has one at all, is a
+	// ResourceQuota, and a pod's is its own limits.
+	if scope.Kind != ScopeNamespace && scope.Kind != ScopePod {
 		counted := 0
 		for i := range nodes {
 			n := &nodes[i]
@@ -163,7 +171,28 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 		mem.Used, mem.HasUsed = measured.Memory, true
 	}
 
+	// What bounds one pod is what it is allowed to grow into. Drawing its usage
+	// against its own limit is the picture behind a throttling reading: a bar
+	// pressed against the end of the track is a container the kernel is
+	// stopping, and no other ceiling in this app says that.
+	if scope.Kind == ScopePod {
+		capLimit(&cpu)
+		capLimit(&mem)
+		// One pod is one pod. A bar saying so would be a bar of nothing.
+		return Budget{Scope: scope, Amounts: []Amount{cpu, mem}, Usage: usage}
+	}
+
 	return Budget{Scope: scope, Amounts: []Amount{cpu, mem, pod}, Usage: usage}
+}
+
+// capLimit makes an amount's own limit its ceiling, for a pod. A pod with no
+// limit set is left unbounded rather than capped at zero -- it may use whatever
+// the node has, which is the truth and also why it is never throttled.
+func capLimit(a *Amount) {
+	if a.Limits <= 0 {
+		return
+	}
+	a.Capacity, a.Allocatable, a.HasCapacity = a.Limits, a.Limits, true
 }
 
 // measure totals the readings that belong to one scope.
@@ -246,6 +275,8 @@ func inScope(pod *unstructured.Unstructured, scope Scope) bool {
 		return nestedString(pod, "spec", "nodeName") == scope.Name
 	case ScopeNamespace:
 		return pod.GetNamespace() == scope.Name
+	case ScopePod:
+		return pod.GetNamespace() == scope.Namespace && pod.GetName() == scope.Name
 	default:
 		return true
 	}

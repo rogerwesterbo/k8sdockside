@@ -272,7 +272,7 @@ function defaultSettings(): Settings {
             helm: { path: '', wait: false, atomic: false, timeoutSeconds: 300 },
         },
         portForwards: [],
-        layout: { detailPane: 'right', sidebarWidth: 260, collapsedGroups: null, zoom: 1 },
+        layout: { detailPane: 'right', sidebarWidth: 320, collapsedGroups: null, zoom: 1 },
     };
 }
 
@@ -460,6 +460,12 @@ class Workspace {
     folders = $derived(this.settings.manualFolders);
     /** Files the user has hidden, so the sidebar can offer to show them again. */
     excluded = $derived(this.settings.excludedFiles);
+    /**
+     * Contexts the user has removed one by one, listed for the same reason the
+     * hidden files are: a rescan finds them and hides them again, so this is
+     * the only place the removal can be seen or undone.
+     */
+    removedContexts = $derived(this.settings.excludedContexts);
     /** Every open tab, in every pane. */
     allTabs = $derived(PANE_IDS.flatMap((pane) => this.panes[pane].tabs));
     /**
@@ -739,12 +745,22 @@ class Workspace {
         }
     }
 
+    /** Shows a removed context again. */
+    async restoreContext(id: string): Promise<void> {
+        try {
+            this.files = adoptFiles(await KubeconfigService.RestoreContext(id));
+            this.settings = adoptSettings(await SettingsService.Get());
+            this.ensureSelection();
+        } catch (err) {
+            this.fail(message(err));
+        }
+    }
+
     /**
      * Asks before dropping a kubeconfig source, when the user has turned that
-     * on. Dropping a file or a folder is undoable -- a hidden file is listed
-     * under Hidden and a folder can be re-added -- and a removed context comes
-     * back by being added again, so this is off by default and exists for
-     * people who would rather not have to undo.
+     * on. Every one of them is undoable -- a hidden file and a removed context
+     * are both listed under Hidden, and a folder can be re-added -- so this is
+     * off by default and exists for people who would rather not have to undo.
      */
     private confirmRemoval(question: string): boolean {
         if (!this.confirmSourceRemoval) return true;
@@ -795,13 +811,13 @@ class Workspace {
 
     /**
      * Removes one context from this app, leaving its file and the rest of the
-     * contexts in it alone. Nothing is written to the kubeconfig, and nothing
-     * is listed to undo it: the context is gone until it is added again,
-     * either to the kubeconfig or by re-adding its file.
+     * contexts in it alone. Nothing is written to the kubeconfig: the removal
+     * is the app's own, and it is listed under Hidden in the sidebar until it
+     * is undone -- see restoreContext.
      */
     async removeContext(contextId: string): Promise<void> {
         const name = this.contexts.find((c) => c.id === contextId)?.name ?? contextId;
-        if (!this.confirmRemoval(`Remove ${name}?\n\nAny tabs open on it will close. The kubeconfig is not changed; the context appears again if it is added again.`)) {
+        if (!this.confirmRemoval(`Remove ${name}?\n\nAny tabs open on it will close. The kubeconfig is not changed, and a rescan will not bring it back — it is listed under Hidden in the sidebar until you show it again.`)) {
             return;
         }
         try {

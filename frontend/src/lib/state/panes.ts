@@ -206,7 +206,7 @@ export function emptyPane(size: number): PaneState {
 
 /** The default sizes, matching appconfig.Defaults on the Go side. */
 export const DEFAULT_PANE_SIZE: Record<PaneId, number> = {
-    left: 260,
+    left: 320,
     main: 0, // fills what is left; never read
     right: 420,
     bottom: 320,

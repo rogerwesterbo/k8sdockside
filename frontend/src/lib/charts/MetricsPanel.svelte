@@ -53,6 +53,20 @@
 
     let range = $derived(workspace.metricsRange);
 
+    /**
+     * The chart whose description is showing, if any.
+     *
+     * One at a time for the whole panel rather than a flag per card: two
+     * descriptions open at once would overlap the charts between them, and only
+     * one pointer can be over a card anyway.
+     */
+    let hint = $state<string | null>(null);
+
+    /** Closes the hint only if it is still the one being left. */
+    function closeHint(id: string): void {
+        if (hint === id) hint = null;
+    }
+
     async function load(): Promise<void> {
         loading = true;
         try {
@@ -162,7 +176,31 @@
                         <header class="card-head">
                             <h3>{chart.label}</h3>
                             {#if chart.description}
-                                <span class="what" title={chart.description}><Icon name="info" size={11} /></span>
+                                <!-- A real popover rather than a `title`: the
+                                     webview does not draw native tooltips, so
+                                     the description behind that attribute was
+                                     unreachable. Hover shows it, focus shows it
+                                     too, and a click pins it open for a reader
+                                     who wants to keep it up. -->
+                                <button
+                                    type="button"
+                                    class="what"
+                                    aria-label="What {chart.label} measures"
+                                    aria-expanded={hint === chart.id}
+                                    onmouseenter={() => (hint = chart.id)}
+                                    onmouseleave={() => closeHint(chart.id)}
+                                    onfocus={() => (hint = chart.id)}
+                                    onblur={() => closeHint(chart.id)}
+                                    onclick={() => (hint = hint === chart.id ? null : chart.id)}
+                                    onkeydown={(e) => {
+                                        if (e.key === 'Escape') hint = null;
+                                    }}
+                                >
+                                    <Icon name="info" size={11} />
+                                </button>
+                                {#if hint === chart.id}
+                                    <span class="hint" role="tooltip">{chart.description}</span>
+                                {/if}
                             {/if}
                         </header>
                         {#if chart.error}
@@ -278,6 +316,7 @@
     }
 
     .card-head {
+        position: relative;
         display: flex;
         align-items: center;
         gap: 5px;
@@ -294,8 +333,35 @@
     .what {
         display: grid;
         place-items: center;
+        padding: 0;
+        border: 0;
+        background: none;
         color: var(--text-faint);
         cursor: help;
+    }
+
+    .what:hover,
+    .what:focus-visible {
+        color: var(--text-dim);
+    }
+
+    /* Over the chart rather than above the card: pushing the card taller would
+       move every other card on the row while a pointer rests on one of them. */
+    .hint {
+        position: absolute;
+        z-index: 2;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        padding: 7px 9px;
+        border-radius: var(--radius);
+        background: var(--bg-raised, var(--bg-panel));
+        box-shadow:
+            inset 0 0 0 1px var(--border-soft),
+            0 6px 18px rgb(0 0 0 / 0.28);
+        color: var(--text-dim);
+        font-size: 11.5px;
+        line-height: 1.55;
     }
 
     .note {

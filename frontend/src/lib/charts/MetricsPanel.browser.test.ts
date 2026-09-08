@@ -186,3 +186,34 @@ test('a chart with no series says so and repeats what the plugin says it needs',
     await expect.element(page.getByText('No data came back', { exact: false })).toBeVisible();
     await expect.element(page.getByText('Needs its ServiceMonitor scraped', { exact: false })).toBeVisible();
 });
+
+// The description behind the ⓘ used to be a `title` attribute, which the
+// webview does not draw: the icon was there, hovering it did nothing, and what
+// a query actually measures was unreachable.
+test('the info button shows what a chart measures', async () => {
+    render(MetricsPanel, { props: { contextId: PROD, attach: 'pods', name: 'p', namespace: 'n' } });
+    await expect.element(page.getByText('CPU')).toBeVisible();
+
+    expect(document.body.textContent).not.toContain('Cores used per container.');
+
+    const info = document.querySelector<HTMLButtonElement>('button.what');
+    expect(info).not.toBeNull();
+    info?.dispatchEvent(new MouseEvent('mouseenter'));
+    await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Cores used per container.'));
+
+    info?.dispatchEvent(new MouseEvent('mouseleave'));
+    await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull());
+});
+
+// A tooltip only a mouse can reach is a tooltip half the readers never see.
+test('the description is reachable by keyboard too', async () => {
+    render(MetricsPanel, { props: { contextId: PROD, attach: 'pods', name: 'p', namespace: 'n' } });
+    await expect.element(page.getByText('CPU')).toBeVisible();
+
+    const info = document.querySelector<HTMLButtonElement>('button.what');
+    info?.focus();
+    await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull());
+
+    info?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull());
+});

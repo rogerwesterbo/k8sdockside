@@ -454,6 +454,67 @@ func TestRemovalSurvivesTheFileBeingUnreadable(t *testing.T) {
 	}
 }
 
+// The removal a rescan cannot undo has to be undoable somewhere, or the only
+// way back is to take the context out of its kubeconfig, sync, and put it back
+// -- which is not a thing anybody would guess.
+func TestARemovedContextCanBeRestored(t *testing.T) {
+	s := service(t)
+	path := write(t, t.TempDir(), "both.config", twoContexts)
+	added, err := s.AddFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := idOf(t, added, "two")
+	if _, err := s.RemoveContext(id); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := s.RestoreContext(id)
+	if err != nil {
+		t.Fatalf("RestoreContext: %v", err)
+	}
+
+	if len(files) != 1 || len(files[0].Contexts) != 2 {
+		t.Errorf("after restoring: %+v, want both contexts back", files)
+	}
+	// And it stays back: the removal is gone from the settings, not merely
+	// skipped once.
+	if got := s.store.ExcludedContexts(); len(got) != 0 {
+		t.Errorf("removals after restoring = %v, want none", got)
+	}
+	if files := s.Sync(); len(files[0].Contexts) != 2 {
+		t.Errorf("a sync hid the restored context again: %+v", files[0].Contexts)
+	}
+}
+
+// The list is the only place a removal can be seen, so it is the only place it
+// can be undone -- the sidebar reads it to offer exactly that.
+func TestRemovedContextsAreListedSoTheyCanBeUndone(t *testing.T) {
+	s := service(t)
+	path := write(t, t.TempDir(), "both.config", twoContexts)
+	added, err := s.AddFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := idOf(t, added, "two")
+	if _, err := s.RemoveContext(id); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.RemovedContexts()
+
+	if len(got) != 1 || got[0] != id {
+		t.Errorf("removed contexts = %v, want just %q", got, id)
+	}
+}
+
+func TestRestoreContextRefusesNothing(t *testing.T) {
+	s := service(t)
+	if _, err := s.RestoreContext(""); err == nil {
+		t.Error("RestoreContext(\"\") = nil error, want a complaint")
+	}
+}
+
 func TestRemoveContextRefusesNothing(t *testing.T) {
 	s := service(t)
 	if _, err := s.RemoveContext(""); err == nil {

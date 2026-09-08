@@ -59,6 +59,13 @@ type clusterClient struct {
 	// the mapper did not know, or filled for the first time. See mappingFor.
 	resetMu sync.Mutex
 	resetAt time.Time
+
+	// delaySamples is the last scrape of each kubelet's counters, keyed by node.
+	// A counter says nothing on its own -- a rate needs the one before it -- so
+	// the previous reading is kept here, beside the connection it was read
+	// through and dropped with it. See cpudelay.go.
+	delayMu      sync.Mutex
+	delaySamples map[string]nodeSample
 }
 
 // resetEvery bounds how often a miss in the mapper may throw the discovery

@@ -16,37 +16,65 @@
 <script lang="ts">
     import { ResourceService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
     import { formatValue, type Unit } from '../charts/format';
-    import { adoptBudget, barsFor, ceilingOf, type Bar, type Budget } from './adopt';
+    import { adoptBudget, adoptDelay, barsFor, ceilingOf, delayTone, type Bar, type Budget, type CPUDelay } from './adopt';
 
     interface Props {
         contextId: string;
-        /** `cluster`, `node` or `namespace`. */
+        /** `cluster`, `node`, `namespace` or `pod`. */
         scope: string;
-        /** The node or namespace. Ignored for a cluster. */
+        /** The node, namespace or pod. Ignored for a cluster. */
         name?: string;
+        /** Where the pod is. Only a pod needs it. */
+        namespace?: string;
         title?: string;
         /** Narrow layout for the detail panel. */
         compact?: boolean;
     }
 
-    let { contextId, scope, name = '', title = 'Resources', compact = false }: Props = $props();
+    let { contextId, scope, name = '', namespace = '', title = 'Resources', compact = false }: Props = $props();
 
     /** Requests move when anything is scheduled, so this does not sit stale. */
     const REFRESH_MS = 30_000;
 
     let budget = $state<Budget | null>(null);
+    let delay = $state<CPUDelay | null>(null);
     let error = $state<string | null>(null);
     let firstLoad = $state(true);
 
-    async function load(): Promise<void> {
+    /**
+     * The throttling reading, or null where it could not be taken at all.
+     *
+     * Never allowed to fail the panel: the bars are the point of it, and a
+     * reading the kubelets would not give up is a line missing rather than a
+     * screen missing. A cluster that refused the request says so through the
+     * reading's own error field; anything worse than that is simply left out.
+     */
+    async function delayReading(): Promise<CPUDelay | null> {
         try {
-            budget = adoptBudget(await ResourceService.Budget(contextId, scope, name));
+            return adoptDelay(await ResourceService.CPUDelay(contextId, scope, namespace, name));
+        } catch {
+            return null;
+        }
+    }
+
+    async function load(): Promise<void> {
+        // Two calls rather than one field on the budget: the delay reading goes
+        // to the kubelets, which is slower than anything the budget does and
+        // needs a permission the budget does not. Started together so a cluster
+        // that refuses it still draws its bars at the usual speed.
+        const bars = ResourceService.Budget(contextId, scope, namespace, name);
+        const throttling = delayReading();
+
+        try {
+            budget = adoptBudget(await bars);
             error = null;
         } catch (err: unknown) {
             error = err instanceof Error ? err.message : String(err);
         } finally {
             firstLoad = false;
         }
+
+        delay = await throttling;
     }
 
     $effect(() => {
@@ -54,6 +82,7 @@
         contextId;
         scope;
         name;
+        namespace;
 
         let live = true;
         void (async () => {
@@ -73,18 +102,41 @@
     let amounts = $derived(budget?.amounts ?? []);
     let usage = $derived(budget?.usage ?? null);
 
+    /**
+     * The line under the throttling bar.
+     *
+     * Built here rather than in the markup so the sentence is one string: an
+     * inline `{#if}` in the middle of a paragraph puts the source file's own
+     * line breaks into the middle of a word.
+     */
+    function delayNote(d: CPUDelay): string {
+        const parts = [`${formatValue(d.stalled, 'seconds')} of CPU time lost per second to limits`];
+        if (d.hasPressure) parts.push(`CPU pressure ${(d.pressure * 100).toFixed(0)}%`);
+        // A cluster wider than the sample cap gets a reading off some of its
+        // nodes, and saying so is the difference between a total and a sample.
+        if (d.sampled < d.nodes) parts.push(`sampled from ${d.sampled} of ${d.nodes} nodes`);
+        parts.push('from the kubelet');
+        return parts.join(' · ');
+    }
+
     /** The ceiling written out, for the line beside each dimension's name. */
     function ceilingText(amount: (typeof amounts)[number], bars: Bar[]): string {
         const ceiling = ceilingOf(amount);
+        const bounded = scope === 'pod' ? 'no limit' : 'no quota';
         if (ceiling <= 0) {
-            // Say which it is. A namespace with no quota is not capped at zero,
-            // and the bars beside this text are proportions of each other
-            // rather than of anything the namespace owns.
-            return bars.some((b) => b.track) ? 'no quota — bars are relative' : 'no quota';
+            // Say which it is. A namespace with no quota — or a pod with no
+            // limit — is not capped at zero, and the bars beside this text are
+            // proportions of each other rather than of anything it owns.
+            return bars.some((b) => b.track) ? `${bounded} — bars are relative` : bounded;
         }
 
         const unit = amount.unit as Unit;
         const written = formatValue(ceiling, unit);
+        // A pod's ceiling is its own limit, which is not a thing anybody
+        // "allocates" to it. Calling it allocatable would read as the node's.
+        if (scope === 'pod') {
+            return `${written} limit`;
+        }
         // Where the two differ, saying so is the point: the gap is what the
         // kubelet keeps back and it is otherwise invisible.
         if (amount.capacity > 0 && amount.allocatable > 0 && amount.capacity !== amount.allocatable) {
@@ -145,6 +197,40 @@
                         </span>
                     </div>
                 {/each}
+
+                <!-- Under the used bar, because it is the reading that explains
+                     it: cores used says how much CPU went in, and this says how
+                     much of the time something was standing still waiting for
+                     it. Read from the kubelets, so it answers on a cluster with
+                     no metrics stack at all. -->
+                {#if amount.label === 'CPU' && delay}
+                    {#if delay.waiting}
+                        <p class="delay quiet">Measuring throttling…</p>
+                    {:else if delay.error}
+                        <p class="delay quiet" title={delay.error}>No throttling reading — {delay.error}</p>
+                    {:else if delay.source && !delay.limited}
+                        <p class="delay quiet">
+                            Nothing here has a CPU limit, so nothing is throttled.
+                        </p>
+                    {:else if delay.source}
+                        <!-- Its own track rather than another of the bars above
+                             it: those are fractions of the ceiling beside the
+                             heading, and this is a fraction of the kernel's
+                             enforcement periods. Same shape, different
+                             denominator, so it is never mistaken for one. -->
+                        <div class="bar">
+                            <span class="bar-label">Throttled</span>
+                            <div class="delay-track">
+                                <div
+                                    class="delay-fill {delayTone(delay)}"
+                                    style:width="{Math.min(100, delay.throttled * 100)}%"
+                                ></div>
+                            </div>
+                            <span class="bar-value">{(delay.throttled * 100).toFixed(delay.throttled < 0.1 ? 1 : 0)}%</span>
+                        </div>
+                        <p class="delay quiet">{delayNote(delay)}</p>
+                    {/if}
+                {/if}
             </article>
         {/each}
     {/if}
@@ -302,5 +388,43 @@
         font-size: 10px;
         text-transform: uppercase;
         letter-spacing: 0.04em;
+    }
+
+    /* Throttling is not a share of the ceiling above it -- it is a share of the
+       kernel's own enforcement periods -- so it gets a track of its own rather
+       than joining the bars it sits under. Never green: a throttled container
+       is never a good state, only a mild one. */
+    .delay-track {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-raised);
+        overflow: hidden;
+    }
+
+    .delay-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 220ms ease;
+        background: var(--text-faint);
+    }
+
+    .delay-fill.warn {
+        background: var(--warn);
+    }
+
+    .delay-fill.bad {
+        background: var(--error, var(--warn));
+    }
+
+    .delay {
+        margin: 2px 0 0;
+        padding-left: 78px;
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text-faint);
+    }
+
+    .compact .delay {
+        padding-left: 68px;
     }
 </style>

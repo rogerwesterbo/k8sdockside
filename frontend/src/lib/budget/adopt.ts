@@ -34,6 +34,61 @@ export interface Budget {
     error: string;
 }
 
+/**
+ * How much of a scope's time went into waiting rather than running.
+ *
+ * Read from the kubelets rather than from a metrics stack, so it answers on a
+ * cluster with nothing installed — see internal/kube/cpudelay.go.
+ */
+export interface CPUDelay {
+    /** `kubelet`, or empty when nothing answered. */
+    source: string;
+    error: string;
+    /** Share of CFS periods that ended with the cgroup stopped, 0-1. */
+    throttled: number;
+    /** Seconds of throttling per second. */
+    stalled: number;
+    /** Whether anything in scope has a CPU limit at all. */
+    limited: boolean;
+    /** PSI: share of time some task was waiting on CPU, 0-1. */
+    pressure: number;
+    hasPressure: boolean;
+    nodes: number;
+    sampled: number;
+    /** The first reading of a counter, with nothing yet to compare it to. */
+    waiting: boolean;
+}
+
+export function adoptDelay(delay: kube.CPUDelay): CPUDelay {
+    return {
+        source: delay.source ?? '',
+        error: delay.error ?? '',
+        throttled: delay.throttled ?? 0,
+        stalled: delay.stalled ?? 0,
+        limited: delay.limited ?? false,
+        pressure: delay.pressure ?? 0,
+        hasPressure: delay.hasPressure ?? false,
+        nodes: delay.nodes ?? 0,
+        sampled: delay.sampled ?? 0,
+        waiting: delay.waiting ?? false,
+    };
+}
+
+/**
+ * How a delay reading should read: the sentence under the used bar, and whether
+ * it is worth colouring as a warning.
+ *
+ * Throttling is a share, so the thresholds are shares. A container clipped in
+ * one period in a hundred is doing fine; one clipped in a quarter of them is
+ * spending real time stopped, and that is the point at which somebody should
+ * look at its limit.
+ */
+export function delayTone(delay: CPUDelay): 'ok' | 'warn' | 'bad' {
+    if (delay.throttled >= 0.25) return 'bad';
+    if (delay.throttled >= 0.05) return 'warn';
+    return 'ok';
+}
+
 export function adoptBudget(budget: kube.Budget): Budget {
     return {
         scope: { kind: budget.scope?.kind ?? '', name: budget.scope?.name ?? '' },

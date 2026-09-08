@@ -292,6 +292,20 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
     };
 }
 
+/**
+ * Splits a context id into the two halves it is made of.
+ *
+ * The id is `<kubeconfig path>::<context name>`, built by kube.ContextID. It is
+ * normally never taken apart on this side -- a context arrives with both fields
+ * already on it -- but a *removed* context is only ever an id in the settings,
+ * and it still has to be shown to somebody as a name and a file.
+ */
+export function splitContextId(id: string): { file: string; name: string } {
+    const at = id.lastIndexOf('::');
+    if (at === -1) return { file: '', name: id };
+    return { file: id.slice(0, at), name: id.slice(at + 2) };
+}
+
 export function adoptFiles(files: kube.File[] | null): ConfigFile[] {
     return (files ?? []).map((file) => ({
         path: file.path,

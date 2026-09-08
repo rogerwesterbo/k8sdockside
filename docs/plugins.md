@@ -212,7 +212,7 @@ code. Those come from the cluster's Prometheus.
 | `label` | required | The chart's title. |
 | `attach` | required | Where it is drawn — see below. |
 | `query` | required | PromQL. |
-| `unit` | optional | `cores`, `bytes`, `bytes/s`, `percent`, `ops/s`, `seconds`, `count`, or omitted for a plain number. It decides only how values are written — 512 MiB rather than 536870912. |
+| `unit` | optional | `cores`, `bytes`, `bytes/s`, `percent`, `ops/s`, `seconds`, `count`, or omitted for a plain number. It decides only how values are written — 512 MiB rather than 536870912. `percent` wants a fraction: a query returning 0.87 is written as 87%, so a ratio goes in as it comes out of PromQL, not multiplied by a hundred. |
 | `legend` | optional | The Prometheus label each series is named by. Omitted, a query returning several series names them by their whole label set. |
 | `description` | optional | A sentence behind the ⓘ next to the title. Worth writing: what a query actually measures is rarely obvious from a word like "CPU". |
 

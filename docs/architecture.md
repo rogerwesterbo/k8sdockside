@@ -62,7 +62,8 @@ internal/services/           the services the frontend calls, wired together in 
   kubeconfigservice.go       discovery, add/remove, the context cache
   settingsservice.go         aliases, colours, tab order, layout, and the version shown
   resourceservice.go         dashboard, resource tables, describe, editing
-  budgetservice.go           what a cluster, node or namespace has, has promised, and is using
+  budgetservice.go           what a cluster, node, namespace or pod has, has promised, and is using,
+                             plus the CPU delay read straight from the kubelets
   actionservice.go           scale, restart, cordon, drain, delete, and the bulk forms of them
   logservice.go              log streams, per container
   helmservice.go             releases read from their Secrets, and the helm binary for the rest
@@ -94,6 +95,7 @@ frontend/src/
   lib/theme/apply.ts         writing a theme's colours onto the document
   lib/plugins/               the plugin catalogue as the sidebar and overview see it
   lib/charts/                the SVG line chart, and the panel that hosts them
+  lib/budget/                the requested/limits/used bars, and the throttling reading under them
   lib/catalogue.ts           the resource kinds the sidebar offers
   lib/colors.ts              the context palette
   lib/components/            sidebar, tab bar, tables, detail panel, dock
