@@ -4,7 +4,7 @@
     "tagline": "monitoring, as the Prometheus Operator installs it",
     "icon": "gauge",
     "docs": "https://prometheus-operator.dev/docs/getting-started/introduction/",
-    "description": "The Prometheus Operator turns monitoring into Kubernetes objects: a Prometheus is a running server, and the ServiceMonitors, PodMonitors and ScrapeConfigs around it are what it has been told to scrape. This plugin also draws the graphs on pods, nodes, namespaces and the cluster dashboard \u2014 those queries assume the metric and label names the kube-prometheus-stack sets up (cAdvisor with a node label, kube-state-metrics, node-exporter). CPU throttling is read from cAdvisor's CFS counters and works on any cluster; pressure (PSI) needs node-exporter on a kernel with PSI for the node charts, and a cgroup v2 kubelet exporting cAdvisor's container_pressure metrics for the pod and namespace ones. If your Prometheus is set up differently, copy this plugin into your own plugins folder under the same id and change the queries.",
+    "description": "The Prometheus Operator turns monitoring into Kubernetes objects: a Prometheus is a running server, and the ServiceMonitors, PodMonitors and ScrapeConfigs around it are what it has been told to scrape. This plugin also draws the graphs on pods, nodes, namespaces and the cluster dashboard — those queries assume the metric and label names the kube-prometheus-stack sets up (cAdvisor with a node label, kube-state-metrics, node-exporter). CPU throttling is read from cAdvisor's CFS counters and works on any cluster; pressure (PSI) needs node-exporter on a kernel with PSI for the node charts, and a cgroup v2 kubelet exporting cAdvisor's container_pressure metrics for the pod and namespace ones. If your Prometheus is set up differently, copy this plugin into your own plugins folder under the same id and change the queries.",
     "requires": [
         {
             "kind": "crd:prometheuses.monitoring.coreos.com",
@@ -150,6 +150,23 @@
             "query": "sum by (alertname) (ALERTS{alertstate=\"firing\"})"
         },
         {
+            "id": "tsdb-disk",
+            "label": "TSDB on disk",
+            "attach": "overview",
+            "unit": "bytes",
+            "description": "How much disk the Prometheus servers' own blocks take. This grows with the series count and the retention, and is the number to check before a Prometheus fills the volume it is running on.",
+            "query": "sum(prometheus_tsdb_storage_blocks_bytes)"
+        },
+        {
+            "id": "tsdb-volume-full",
+            "label": "Prometheus volumes full",
+            "attach": "overview",
+            "unit": "percent",
+            "legend": "persistentvolumeclaim",
+            "description": "How full the volumes holding Prometheus data are. A Prometheus whose disk fills stops ingesting, which takes every other chart in this app with it — so this is the one to watch.",
+            "query": "kubelet_volume_stats_used_bytes{persistentvolumeclaim=~\"prometheus.*\"} / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~\"prometheus.*\"}"
+        },
+        {
             "id": "pod-cpu",
             "label": "CPU",
             "attach": "pods",
@@ -173,7 +190,7 @@
             "attach": "pods",
             "unit": "percent",
             "legend": "container",
-            "description": "Share of CFS periods in which each container was stopped early. A container throttled while using less CPU than it asks for has a limit set below what it actually needs \u2014 the clearest reading in the app that a limit, not the cluster, is the thing slowing it down.",
+            "description": "Share of CFS periods in which each container was stopped early. A container throttled while using less CPU than it asks for has a limit set below what it actually needs — the clearest reading in the app that a limit, not the cluster, is the thing slowing it down.",
             "query": "sum by (container) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])) / sum by (container) (rate(container_cpu_cfs_periods_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m]))"
         },
         {
@@ -191,7 +208,7 @@
             "attach": "pods",
             "unit": "percent",
             "legend": "pressure",
-            "description": "This pod's worst cgroup, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs a cgroup v2 node whose kubelet exports cAdvisor's container_pressure metrics; older clusters draw nothing here and the throttling charts above are the ones to read.",
+            "description": "This pod's worst cgroup, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and — stalled — the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs a cgroup v2 node whose kubelet exports cAdvisor's container_pressure metrics; older clusters draw nothing here and the throttling charts above are the ones to read.",
             "query": "label_replace(max(rate(container_pressure_cpu_waiting_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_waiting_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_stalled_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(max(rate(container_pressure_io_waiting_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_io_stalled_seconds_total{namespace=\"$namespace\",pod=\"$name\"}[5m])), \"pressure\", \"io stalled\", \"\", \"\")"
         },
         {
@@ -200,7 +217,7 @@
             "attach": "pods",
             "unit": "bytes",
             "legend": "container",
-            "description": "Working set per container \u2014 what the kernel would have to reclaim, which is what the OOM killer looks at.",
+            "description": "Working set per container — what the kernel would have to reclaim, which is what the OOM killer looks at.",
             "query": "sum by (container) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"})"
         },
         {
@@ -219,6 +236,33 @@
             "unit": "bytes/s",
             "description": "Bytes received across all of the pod's interfaces.",
             "query": "sum(rate(container_network_receive_bytes_total{namespace=\"$namespace\",pod=\"$name\"}[5m]))"
+        },
+        {
+            "id": "pod-storage",
+            "label": "Disk written",
+            "attach": "pods",
+            "unit": "bytes",
+            "legend": "container",
+            "description": "Ephemeral storage each container is holding: its writable layer, its emptyDirs and its logs. This is what an ephemeral-storage limit bounds, and a container crossing one is evicted rather than throttled.",
+            "query": "sum by (container) (container_fs_usage_bytes{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "pod-volumes",
+            "label": "Volumes",
+            "attach": "pods",
+            "unit": "bytes",
+            "legend": "persistentvolumeclaim",
+            "description": "How much is written in each persistent volume mounted here, as the kubelet on this pod's node reports it. Empty for a pod with no PVCs.",
+            "query": "sum by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=\"$namespace\"} * on (namespace, persistentvolumeclaim) group_left () kube_persistentvolumeclaim_info{namespace=\"$namespace\"})"
+        },
+        {
+            "id": "pod-disk-io",
+            "label": "Disk read and written",
+            "attach": "pods",
+            "unit": "bytes/s",
+            "legend": "series",
+            "description": "Bytes this pod's containers read from and wrote to disk. Read from cAdvisor, so it covers the container filesystem and the volumes mounted into it together.",
+            "query": "label_replace(sum(rate(container_fs_reads_bytes_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])), \"series\", \"read\", \"\", \"\") or label_replace(sum(rate(container_fs_writes_bytes_total{namespace=\"$namespace\",pod=\"$name\",container!=\"\",container!=\"POD\"}[5m])), \"series\", \"written\", \"\", \"\")"
         },
         {
             "id": "node-cpu",
@@ -250,7 +294,7 @@
             "label": "CPU delay",
             "attach": "nodes",
             "unit": "seconds",
-            "description": "Seconds of throttling per second across everything on this node \u2014 the time its containers spent stopped, waiting for the next CFS period.",
+            "description": "Seconds of throttling per second across everything on this node — the time its containers spent stopped, waiting for the next CFS period.",
             "query": "sum(rate(container_cpu_cfs_throttled_seconds_total{node=\"$node\",container!=\"\",container!=\"POD\"}[5m]))"
         },
         {
@@ -259,7 +303,7 @@
             "attach": "nodes",
             "unit": "percent",
             "legend": "pressure",
-            "description": "Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs node-exporter on a kernel with PSI. It reports against its own scrape address rather than a node name, so the node is matched on the hostname it reports in node_uname_info \u2014 a cluster whose node names are not its hostnames draws nothing here.",
+            "description": "Pressure stall information: the share of time some task was waiting on a resource, and — stalled — the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs node-exporter on a kernel with PSI. It reports against its own scrape address rather than a node name, so the node is matched on the hostname it reports in node_uname_info — a cluster whose node names are not its hostnames draws nothing here.",
             "query": "label_replace(sum(rate(node_pressure_cpu_waiting_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(sum(rate(node_pressure_memory_waiting_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(sum(rate(node_pressure_memory_stalled_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(sum(rate(node_pressure_io_waiting_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(sum(rate(node_pressure_io_stalled_seconds_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"pressure\", \"io stalled\", \"\", \"\")"
         },
         {
@@ -288,6 +332,41 @@
             "query": "count(kube_pod_info{node=\"$name\"})"
         },
         {
+            "id": "node-storage",
+            "label": "Disk",
+            "attach": "nodes",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "This node's filesystems: how big they are, and how much is written. Needs node-exporter, matched on the hostname it reports in node_uname_info — a cluster whose node names are not its hostnames draws nothing here.",
+            "query": "label_replace(sum(node_filesystem_size_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"} * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"series\", \"size\", \"\", \"\") or label_replace(sum((node_filesystem_size_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"} - node_filesystem_avail_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"}) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "node-storage-full",
+            "label": "Filesystems full",
+            "attach": "nodes",
+            "unit": "percent",
+            "legend": "mountpoint",
+            "description": "How full each of this node's filesystems is. The root filesystem is the one that matters most: when it fills, the kubelet evicts pods to get it back. Needs node-exporter.",
+            "query": "1 - (sum by (mountpoint) (node_filesystem_avail_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"} * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}) / sum by (mountpoint) (node_filesystem_size_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"} * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}))"
+        },
+        {
+            "id": "node-disk-io",
+            "label": "Disk throughput",
+            "attach": "nodes",
+            "unit": "bytes/s",
+            "legend": "series",
+            "description": "Bytes read from and written to this node's disks. A node whose io pressure is climbing while these lines are flat is waiting on something other than its own disk. Needs node-exporter.",
+            "query": "label_replace(sum(rate(node_disk_read_bytes_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"series\", \"read\", \"\", \"\") or label_replace(sum(rate(node_disk_written_bytes_total[5m]) * on (instance) group_left () node_uname_info{nodename=~\"$node(\\\\..*)?\"}), \"series\", \"written\", \"\", \"\")"
+        },
+        {
+            "id": "node-storage-ephemeral",
+            "label": "Container disk written",
+            "attach": "nodes",
+            "unit": "bytes",
+            "description": "Ephemeral storage held by the containers placed here — writable layers, emptyDirs and logs. The half of this node's disk that Kubernetes itself put there.",
+            "query": "sum(container_fs_usage_bytes{node=\"$node\",container!=\"\",container!=\"POD\"})"
+        },
+        {
             "id": "cluster-cpu",
             "label": "Cluster CPU",
             "attach": "dashboard",
@@ -309,7 +388,7 @@
             "label": "CPU throttling",
             "attach": "dashboard",
             "unit": "percent",
-            "description": "Share of CFS periods in which a container was stopped early because it had spent its slice, across the cluster. Only containers with a CPU limit are ever throttled, so a flat zero means nothing is capped \u2014 not that nothing is busy.",
+            "description": "Share of CFS periods in which a container was stopped early because it had spent its slice, across the cluster. Only containers with a CPU limit are ever throttled, so a flat zero means nothing is capped — not that nothing is busy.",
             "query": "sum(rate(container_cpu_cfs_throttled_periods_total{container!=\"\",container!=\"POD\"}[5m])) / sum(rate(container_cpu_cfs_periods_total{container!=\"\",container!=\"POD\"}[5m]))"
         },
         {
@@ -326,7 +405,7 @@
             "attach": "dashboard",
             "unit": "percent",
             "legend": "pressure",
-            "description": "The busiest node in the cluster, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs node-exporter on a kernel with PSI (cgroup v2).",
+            "description": "The busiest node in the cluster, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and — stalled — the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs node-exporter on a kernel with PSI (cgroup v2).",
             "query": "label_replace(max(rate(node_pressure_cpu_waiting_seconds_total[5m])), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(max(rate(node_pressure_memory_waiting_seconds_total[5m])), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(max(rate(node_pressure_memory_stalled_seconds_total[5m])), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(max(rate(node_pressure_io_waiting_seconds_total[5m])), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(max(rate(node_pressure_io_stalled_seconds_total[5m])), \"pressure\", \"io stalled\", \"\", \"\")"
         },
         {
@@ -365,6 +444,59 @@
             "query": "sum by (code) (rate(apiserver_request_total[5m]))"
         },
         {
+            "id": "cluster-storage",
+            "label": "Node disk",
+            "attach": "dashboard",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "The disks under the cluster: how much the nodes have in total, and how much of it is written. This is the one storage every cluster has — persistent volumes need a StorageClass and a provisioner, node disk needs neither. Needs node-exporter.",
+            "query": "label_replace(sum(node_filesystem_size_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"}), \"series\", \"size\", \"\", \"\") or label_replace(sum(node_filesystem_size_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"} - node_filesystem_avail_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"}), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "cluster-storage-fullest",
+            "label": "Fullest node filesystems",
+            "attach": "dashboard",
+            "unit": "percent",
+            "legend": "instance",
+            "description": "The five filesystems closest to full, anywhere in the cluster. A node whose disk fills stops being able to pull images or write logs, and the kubelet starts evicting pods to get it back. Needs node-exporter.",
+            "query": "topk(5, 1 - (sum by (instance) (node_filesystem_avail_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"}) / sum by (instance) (node_filesystem_size_bytes{fstype!~\"tmpfs|ramfs|squashfs|overlay|autofs|devtmpfs|iso9660\"})))"
+        },
+        {
+            "id": "cluster-storage-ephemeral",
+            "label": "Container disk written",
+            "attach": "dashboard",
+            "unit": "bytes",
+            "description": "Ephemeral storage the containers themselves are holding — writable layers, emptyDirs and logs — across the cluster. This is what an ephemeral-storage limit bounds and what fills a node nobody thought was storing anything.",
+            "query": "sum(container_fs_usage_bytes{container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "cluster-pvc-fullest",
+            "label": "Fullest volumes",
+            "attach": "dashboard",
+            "unit": "percent",
+            "legend": "persistentvolumeclaim",
+            "description": "The five persistent volume claims closest to full. Read from the kubelet's volume stats, so it covers every mounted PVC whatever provisioned it — and covers nothing at all if the cluster has no PVCs.",
+            "query": "topk(5, kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes)"
+        },
+        {
+            "id": "cluster-disk-io",
+            "label": "Disk throughput",
+            "attach": "dashboard",
+            "unit": "bytes/s",
+            "legend": "series",
+            "description": "Bytes read from and written to the cluster's disks. Requests and limits say what was promised; this says what the hardware is actually doing, and it is the line that explains io pressure. Needs node-exporter.",
+            "query": "label_replace(sum(rate(node_disk_read_bytes_total[5m])), \"series\", \"read\", \"\", \"\") or label_replace(sum(rate(node_disk_written_bytes_total[5m])), \"series\", \"written\", \"\", \"\")"
+        },
+        {
+            "id": "cluster-disk-busiest",
+            "label": "Busiest disks",
+            "attach": "dashboard",
+            "unit": "percent",
+            "legend": "instance",
+            "description": "The five devices spending the largest share of their time serving io. A disk near 100% is saturated whatever its throughput reads, and everything waiting on it is slow. Needs node-exporter.",
+            "query": "topk(5, sum by (instance) (rate(node_disk_io_time_seconds_total[5m])))"
+        },
+        {
             "id": "namespace-cpu",
             "label": "CPU",
             "attach": "namespaces",
@@ -396,7 +528,7 @@
             "attach": "namespaces",
             "unit": "percent",
             "legend": "pressure",
-            "description": "The worst-off pod in this namespace, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and \u2014 stalled \u2014 the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs a cgroup v2 node whose kubelet exports cAdvisor's container_pressure metrics.",
+            "description": "The worst-off pod in this namespace, on each of the three pressures. Pressure stall information: the share of time some task was waiting on a resource, and — stalled — the share where every task was. Waiting rising under load is ordinary; stalled is work standing still. Needs a cgroup v2 node whose kubelet exports cAdvisor's container_pressure metrics.",
             "query": "label_replace(max(rate(container_pressure_cpu_waiting_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"cpu waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_waiting_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"memory waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_memory_stalled_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"memory stalled\", \"\", \"\") or label_replace(max(rate(container_pressure_io_waiting_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"io waiting\", \"\", \"\") or label_replace(max(rate(container_pressure_io_stalled_seconds_total{namespace=\"$name\"}[5m])), \"pressure\", \"io stalled\", \"\", \"\")"
         },
         {
@@ -405,8 +537,204 @@
             "attach": "namespaces",
             "unit": "bytes",
             "legend": "pod",
-            "description": "Working set of the eight largest pods in this namespace \u2014 what the kernel would have to reclaim, which is what the OOM killer looks at.",
+            "description": "Working set of the eight largest pods in this namespace — what the kernel would have to reclaim, which is what the OOM killer looks at.",
             "query": "topk(8, sum by (pod) (container_memory_working_set_bytes{namespace=\"$name\",container!=\"\",container!=\"POD\"}))"
+        },
+        {
+            "id": "namespace-storage",
+            "label": "Disk written",
+            "attach": "namespaces",
+            "unit": "bytes",
+            "legend": "pod",
+            "description": "The eight pods here holding the most ephemeral storage — writable layers, emptyDirs and logs.",
+            "query": "topk(8, sum by (pod) (container_fs_usage_bytes{namespace=\"$name\",container!=\"\",container!=\"POD\"}))"
+        },
+        {
+            "id": "namespace-volumes",
+            "label": "Volumes",
+            "attach": "namespaces",
+            "unit": "bytes",
+            "legend": "persistentvolumeclaim",
+            "description": "How much is written in each persistent volume claimed in this namespace. Empty for a namespace with no PVCs.",
+            "query": "sum by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=\"$name\"})"
+        },
+        {
+            "id": "namespace-disk-io",
+            "label": "Disk written",
+            "attach": "namespaces",
+            "unit": "bytes/s",
+            "legend": "pod",
+            "description": "The five pods here writing the most to disk. A pod writing steadily into an emptyDir is the usual way a node's disk fills without anybody noticing.",
+            "query": "topk(5, sum by (pod) (rate(container_fs_writes_bytes_total{namespace=\"$name\",container!=\"\",container!=\"POD\"}[5m])))"
+        },
+        {
+            "id": "pvc-usage",
+            "label": "Used",
+            "attach": "persistentvolumeclaims",
+            "unit": "bytes",
+            "legend": "series",
+            "description": "What is written in this volume against how big it is, as the kubelet mounting it reports. A claim that is bound but not mounted by a running pod has no reading at all: these come from the kubelet, not from the claim.",
+            "query": "label_replace(sum(kubelet_volume_stats_capacity_bytes{namespace=\"$namespace\",persistentvolumeclaim=\"$name\"}), \"series\", \"capacity\", \"\", \"\") or label_replace(sum(kubelet_volume_stats_used_bytes{namespace=\"$namespace\",persistentvolumeclaim=\"$name\"}), \"series\", \"used\", \"\", \"\")"
+        },
+        {
+            "id": "pvc-full",
+            "label": "Full",
+            "attach": "persistentvolumeclaims",
+            "unit": "percent",
+            "description": "How full the volume is. Where the line is heading matters more than where it is: a volume at 60% and climbing steadily has a date on it, and expanding a PVC is not something to do in a hurry.",
+            "query": "sum(kubelet_volume_stats_used_bytes{namespace=\"$namespace\",persistentvolumeclaim=\"$name\"}) / sum(kubelet_volume_stats_capacity_bytes{namespace=\"$namespace\",persistentvolumeclaim=\"$name\"})"
+        },
+        {
+            "id": "pvc-inodes",
+            "label": "Inodes used",
+            "attach": "persistentvolumeclaims",
+            "unit": "percent",
+            "description": "The share of the volume's inodes in use. A filesystem can run out of these while it still has bytes free — the usual cause is a great many small files — and it fails writes exactly as if it were full, which is why it is worth its own line.",
+            "query": "sum(kubelet_volume_stats_inodes_used{namespace=\"$namespace\",persistentvolumeclaim=\"$name\"}) / sum(kubelet_volume_stats_inodes{namespace=\"$namespace\",persistentvolumeclaim=\"$name\"})"
+        },
+        {
+            "id": "deployment-replicas",
+            "label": "Replicas",
+            "attach": "deployments",
+            "unit": "count",
+            "legend": "series",
+            "description": "Desired is what the spec asks for, ready is how many are passing their probes, available how many have stayed ready long enough to count, and updated how many are on the current template. During a rollout updated climbs to desired; a gap that stays open is a rollout that is stuck. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_deployment_spec_replicas{namespace=\"$namespace\",deployment=\"$name\"}), \"series\", \"desired\", \"\", \"\") or label_replace(sum(kube_deployment_status_replicas_ready{namespace=\"$namespace\",deployment=\"$name\"}), \"series\", \"ready\", \"\", \"\") or label_replace(sum(kube_deployment_status_replicas_available{namespace=\"$namespace\",deployment=\"$name\"}), \"series\", \"available\", \"\", \"\") or label_replace(sum(kube_deployment_status_replicas_updated{namespace=\"$namespace\",deployment=\"$name\"}), \"series\", \"updated\", \"\", \"\")"
+        },
+        {
+            "id": "deployment-cpu",
+            "label": "CPU",
+            "attach": "deployments",
+            "unit": "cores",
+            "legend": "pod",
+            "description": "Cores used by each of this Deployment's pods, averaged over five minutes. Gathered from the names of the pods this Deployment makes (<name>-[a-z0-9]+-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+-[a-z0-9]+\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "deployment-memory",
+            "label": "Memory",
+            "attach": "deployments",
+            "unit": "bytes",
+            "legend": "pod",
+            "description": "Working set of each of this Deployment's pods — what the kernel would have to reclaim, which is what the OOM killer looks at. Gathered from the names of the pods this Deployment makes (<name>-[a-z0-9]+-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+-[a-z0-9]+\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "deployment-restarts",
+            "label": "Restarts",
+            "attach": "deployments",
+            "unit": "count",
+            "legend": "pod",
+            "description": "Restarts per pod over the window. A line that steps up repeatedly is a crash loop; one that steps once is a pod that was moved. Gathered from the names of the pods this Deployment makes (<name>-[a-z0-9]+-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+-[a-z0-9]+\"}[5m]))"
+        },
+        {
+            "id": "replicaset-replicas",
+            "label": "Replicas",
+            "attach": "replicasets",
+            "unit": "count",
+            "legend": "series",
+            "description": "Desired is what the ReplicaSet asks for, replicas how many exist, and ready how many are passing their probes. A ReplicaSet held at zero is an old revision of its Deployment, kept so a rollback has somewhere to go. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_replicaset_spec_replicas{namespace=\"$namespace\",replicaset=\"$name\"}), \"series\", \"desired\", \"\", \"\") or label_replace(sum(kube_replicaset_status_ready_replicas{namespace=\"$namespace\",replicaset=\"$name\"}), \"series\", \"ready\", \"\", \"\") or label_replace(sum(kube_replicaset_status_replicas{namespace=\"$namespace\",replicaset=\"$name\"}), \"series\", \"available\", \"\", \"\")"
+        },
+        {
+            "id": "replicaset-cpu",
+            "label": "CPU",
+            "attach": "replicasets",
+            "unit": "cores",
+            "legend": "pod",
+            "description": "Cores used by each of this ReplicaSet's pods, averaged over five minutes. Gathered from the names of the pods this ReplicaSet makes (<name>-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "replicaset-memory",
+            "label": "Memory",
+            "attach": "replicasets",
+            "unit": "bytes",
+            "legend": "pod",
+            "description": "Working set of each of this ReplicaSet's pods — what the kernel would have to reclaim, which is what the OOM killer looks at. Gathered from the names of the pods this ReplicaSet makes (<name>-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "replicaset-restarts",
+            "label": "Restarts",
+            "attach": "replicasets",
+            "unit": "count",
+            "legend": "pod",
+            "description": "Restarts per pod over the window. A line that steps up repeatedly is a crash loop; one that steps once is a pod that was moved. Gathered from the names of the pods this ReplicaSet makes (<name>-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+\"}[5m]))"
+        },
+        {
+            "id": "daemonset-replicas",
+            "label": "Replicas",
+            "attach": "daemonsets",
+            "unit": "count",
+            "legend": "series",
+            "description": "Desired is how many nodes should be running it, ready how many are, available how many have stayed ready long enough to count, and updated how many are on the current template. Desired climbing on its own is nodes joining the cluster. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_daemonset_status_desired_number_scheduled{namespace=\"$namespace\",daemonset=\"$name\"}), \"series\", \"desired\", \"\", \"\") or label_replace(sum(kube_daemonset_status_number_ready{namespace=\"$namespace\",daemonset=\"$name\"}), \"series\", \"ready\", \"\", \"\") or label_replace(sum(kube_daemonset_status_number_available{namespace=\"$namespace\",daemonset=\"$name\"}), \"series\", \"available\", \"\", \"\") or label_replace(sum(kube_daemonset_status_updated_number_scheduled{namespace=\"$namespace\",daemonset=\"$name\"}), \"series\", \"updated\", \"\", \"\")"
+        },
+        {
+            "id": "daemonset-cpu",
+            "label": "CPU",
+            "attach": "daemonsets",
+            "unit": "cores",
+            "legend": "pod",
+            "description": "Cores used by each of this DaemonSet's pods, averaged over five minutes. Gathered from the names of the pods this DaemonSet makes (<name>-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "daemonset-memory",
+            "label": "Memory",
+            "attach": "daemonsets",
+            "unit": "bytes",
+            "legend": "pod",
+            "description": "Working set of each of this DaemonSet's pods — what the kernel would have to reclaim, which is what the OOM killer looks at. Gathered from the names of the pods this DaemonSet makes (<name>-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "daemonset-restarts",
+            "label": "Restarts",
+            "attach": "daemonsets",
+            "unit": "count",
+            "legend": "pod",
+            "description": "Restarts per pod over the window. A line that steps up repeatedly is a crash loop; one that steps once is a pod that was moved. Gathered from the names of the pods this DaemonSet makes (<name>-[a-z0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\",pod=~\"$name-[a-z0-9]+\"}[5m]))"
+        },
+        {
+            "id": "statefulset-replicas",
+            "label": "Replicas",
+            "attach": "statefulsets",
+            "unit": "count",
+            "legend": "series",
+            "description": "Desired is what the spec asks for, ready how many are passing their probes, current how many are on the revision the controller is serving, and updated how many are on the newest one. A StatefulSet rolls one pod at a time, so updated climbs in single steps. Needs kube-state-metrics.",
+            "query": "label_replace(sum(kube_statefulset_replicas{namespace=\"$namespace\",statefulset=\"$name\"}), \"series\", \"desired\", \"\", \"\") or label_replace(sum(kube_statefulset_status_replicas_ready{namespace=\"$namespace\",statefulset=\"$name\"}), \"series\", \"ready\", \"\", \"\") or label_replace(sum(kube_statefulset_status_replicas_current{namespace=\"$namespace\",statefulset=\"$name\"}), \"series\", \"current\", \"\", \"\") or label_replace(sum(kube_statefulset_status_replicas_updated{namespace=\"$namespace\",statefulset=\"$name\"}), \"series\", \"updated\", \"\", \"\")"
+        },
+        {
+            "id": "statefulset-cpu",
+            "label": "CPU",
+            "attach": "statefulsets",
+            "unit": "cores",
+            "legend": "pod",
+            "description": "Cores used by each of this StatefulSet's pods, averaged over five minutes. Gathered from the names of the pods this StatefulSet makes (<name>-[0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\",pod=~\"$name-[0-9]+\",container!=\"\",container!=\"POD\"}[5m]))"
+        },
+        {
+            "id": "statefulset-memory",
+            "label": "Memory",
+            "attach": "statefulsets",
+            "unit": "bytes",
+            "legend": "pod",
+            "description": "Working set of each of this StatefulSet's pods — what the kernel would have to reclaim, which is what the OOM killer looks at. Gathered from the names of the pods this StatefulSet makes (<name>-[0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\",pod=~\"$name-[0-9]+\",container!=\"\",container!=\"POD\"})"
+        },
+        {
+            "id": "statefulset-restarts",
+            "label": "Restarts",
+            "attach": "statefulsets",
+            "unit": "count",
+            "legend": "pod",
+            "description": "Restarts per pod over the window. A line that steps up repeatedly is a crash loop; one that steps once is a pod that was moved. Gathered from the names of the pods this StatefulSet makes (<name>-[0-9]+), because cAdvisor labels a sample with its pod and not with what created it. That shape is Kubernetes' own and holds in practice; a pod renamed out from under it would be missed.",
+            "query": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\",pod=~\"$name-[0-9]+\"}[5m]))"
         }
     ],
     "usage": {

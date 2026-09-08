@@ -5,8 +5,15 @@
 // chart that makes you count decimal places. Every value on screen -- the axis,
 // the legend, the tooltip -- goes through here so the three always agree.
 
-/** The units a plugin may declare, matching plugins.ChartUnits on the Go side. */
-export type Unit = '' | 'cores' | 'bytes' | 'bytes/s' | 'percent' | 'ops/s' | 'seconds' | 'count';
+/**
+ * The units a value can be written in.
+ *
+ * The first eight are plugins.ChartUnits on the Go side, which is a closed set
+ * checked when a plugin file is read. GiB is not one of them and a plugin may
+ * not declare it: it is the unit the resource budget reports memory and disk
+ * in, and those amounts come from the app itself rather than from a query.
+ */
+export type Unit = '' | 'cores' | 'bytes' | 'bytes/s' | 'percent' | 'ops/s' | 'seconds' | 'count' | 'GiB';
 
 /** Binary prefixes: memory is reported in bytes and read in MiB. */
 const BYTE_STEPS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
@@ -27,6 +34,8 @@ export function formatValue(value: number, unit: Unit): string {
             const { scaled, suffix } = scaleBytes(value);
             return `${trim(scaled)} ${suffix}${unit === 'bytes/s' ? '/s' : ''}`;
         }
+        case 'GiB':
+            return writeGiB(value);
         case 'percent':
             return `${trim(value * 100)}%`;
         case 'cores':
@@ -54,6 +63,8 @@ export function formatTick(value: number, unit: Unit): string {
             const { scaled, suffix } = scaleBytes(value);
             return `${trim(scaled)} ${suffix}`;
         }
+        case 'GiB':
+            return writeGiB(value);
         case 'percent':
             return `${trim(value * 100)}%`;
         case 'seconds':
@@ -61,6 +72,19 @@ export function formatTick(value: number, unit: Unit): string {
         default:
             return trim(value);
     }
+}
+
+/**
+ * A budget amount in gibibytes, written at whatever prefix suits it.
+ *
+ * Scaled rather than printed flat, because the same unit carries a pod's
+ * memory limit and a cluster's total disk: 0.5 GiB reads better as 512 MiB, and
+ * a cluster with a hundred terabytes of it should not read as a six-digit
+ * number of gigabytes.
+ */
+function writeGiB(value: number): string {
+    const { scaled, suffix } = scaleBytes(value * 1024 ** 3);
+    return `${trim(scaled)} ${suffix}`;
 }
 
 function scaleBytes(value: number): { scaled: number; suffix: string } {

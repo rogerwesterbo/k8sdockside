@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"slices"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -504,5 +505,182 @@ func TestAPodWithNoLimitsIsLeftUnbounded(t *testing.T) {
 
 	if cpu := amountFor(t, b, "CPU"); cpu.HasCapacity {
 		t.Errorf("CPU ceiling = %v, want none: the pod has no limit", cpu.Allocatable)
+	}
+}
+
+// ----- ephemeral storage ----------------------------------------------------
+//
+// The one storage dimension every cluster has. Persistent volumes need a
+// StorageClass and a provisioner and a cluster may have neither, but a node
+// always has a disk under it, and that is what container filesystems,
+// emptyDirs and logs are written to.
+
+// nodeWithDisk is node() plus the ephemeral-storage the kubelet reports.
+func nodeWithDisk(name, capCPU, capMem, capDisk, allocDisk string) unstructured.Unstructured {
+	n := node(name, capCPU, capCPU, capMem, capMem, "110", "110")
+	_ = unstructured.SetNestedField(n.Object, capDisk, "status", "capacity", "ephemeral-storage")
+	_ = unstructured.SetNestedField(n.Object, allocDisk, "status", "allocatable", "ephemeral-storage")
+	return n
+}
+
+// amountMissing is amountFor's opposite, for the dimensions that are left out
+// when they would have nothing to say.
+func amountMissing(t *testing.T, b Budget, label string) {
+	t.Helper()
+	for _, a := range b.Amounts {
+		if a.Label == label {
+			t.Fatalf("budget has a %q amount it should have left out: %+v", label, a)
+		}
+	}
+}
+
+func TestClusterStorageComesFromTheNodeDisks(t *testing.T) {
+	nodes := []unstructured.Unstructured{
+		nodeWithDisk("worker-1", "4", "16Gi", "100Gi", "90Gi"),
+		nodeWithDisk("worker-2", "4", "16Gi", "100Gi", "90Gi"),
+	}
+
+	b := Rollup(Scope{Kind: ScopeCluster}, Inventory{Nodes: nodes}, Usage{})
+
+	disk := amountFor(t, b, "Storage")
+	if disk.Capacity != 200 || disk.Allocatable != 180 {
+		t.Errorf("storage = %+v, want 200 GiB capacity and 180 allocatable", disk)
+	}
+	if !disk.HasCapacity {
+		t.Error("storage has no ceiling, so its bar would draw against nothing")
+	}
+	// The disk is not measured: neither metrics-server nor the summary API
+	// reports it through a channel this app speaks. A bar claiming zero used
+	// would read as an empty disk rather than an unmeasured one.
+	if disk.HasUsed {
+		t.Error("storage claims a used reading it does not have")
+	}
+}
+
+func TestNodeStorageIsThatNodesDiskAlone(t *testing.T) {
+	nodes := []unstructured.Unstructured{
+		nodeWithDisk("worker-1", "4", "16Gi", "100Gi", "90Gi"),
+		nodeWithDisk("worker-2", "4", "16Gi", "500Gi", "450Gi"),
+	}
+
+	b := Rollup(Scope{Kind: ScopeNode, Name: "worker-2"}, Inventory{Nodes: nodes}, Usage{})
+
+	if disk := amountFor(t, b, "Storage"); disk.Capacity != 500 {
+		t.Errorf("storage capacity = %v, want the 500 GiB of worker-2 alone", disk.Capacity)
+	}
+}
+
+func TestStorageRequestsAndLimitsAreSummedLikeTheRest(t *testing.T) {
+	nodes := []unstructured.Unstructured{nodeWithDisk("worker-1", "4", "16Gi", "100Gi", "90Gi")}
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running",
+			map[string]any{"ephemeral-storage": "1Gi"},
+			map[string]any{"ephemeral-storage": "4Gi"}),
+		podSpec("prod", "api-1", "worker-1", "Running",
+			map[string]any{"ephemeral-storage": "2Gi"},
+			map[string]any{"ephemeral-storage": "8Gi"}),
+	}
+
+	b := Rollup(Scope{Kind: ScopeCluster}, Inventory{Nodes: nodes, Pods: pods}, Usage{})
+
+	disk := amountFor(t, b, "Storage")
+	if disk.Requested != 3 || disk.Limits != 12 {
+		t.Errorf("storage = %+v, want 3 GiB requested and 12 limits", disk)
+	}
+}
+
+// A kubelet that does not report ephemeral-storage -- some older ones, and some
+// managed distros -- would otherwise leave a bar with a ceiling of zero, which
+// draws as a full disk rather than as one nobody can see.
+func TestAClusterWhoseKubeletsDoNotReportTheDiskHasNoStorageBar(t *testing.T) {
+	nodes := []unstructured.Unstructured{node("worker-1", "4", "4", "16Gi", "16Gi", "110", "110")}
+
+	b := Rollup(Scope{Kind: ScopeCluster}, Inventory{Nodes: nodes}, Usage{})
+
+	amountMissing(t, b, "Storage")
+}
+
+// ephemeral-storage is the resource most manifests never set, so a namespace
+// or pod bar would usually read "0 of nothing" -- an empty track saying only
+// that nobody filled in a field.
+func TestANamespaceThatAsksForNoDiskHasNoStorageBar(t *testing.T) {
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running", map[string]any{"cpu": "1"}, nil),
+	}
+
+	b := Rollup(Scope{Kind: ScopeNamespace, Name: "prod"}, Inventory{Pods: pods}, Usage{})
+
+	amountMissing(t, b, "Storage")
+}
+
+func TestANamespaceThatDoesAskForDiskGetsOne(t *testing.T) {
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running", map[string]any{"ephemeral-storage": "2Gi"}, nil),
+	}
+
+	b := Rollup(Scope{Kind: ScopeNamespace, Name: "prod"}, Inventory{Pods: pods}, Usage{})
+
+	if disk := amountFor(t, b, "Storage"); disk.Requested != 2 {
+		t.Errorf("storage requested = %v, want 2 GiB", disk.Requested)
+	}
+}
+
+// A ResourceQuota on ephemeral-storage is a ceiling in its own right, even
+// before any pod has asked for a byte.
+func TestAStorageQuotaIsTheNamespacesCeiling(t *testing.T) {
+	quota := *obj(map[string]any{
+		"metadata": map[string]any{"name": "team", "namespace": "prod"},
+		"status":   map[string]any{"hard": map[string]any{"requests.ephemeral-storage": "50Gi"}},
+	})
+
+	b := Rollup(Scope{Kind: ScopeNamespace, Name: "prod"}, Inventory{Quotas: []unstructured.Unstructured{quota}}, Usage{})
+
+	disk := amountFor(t, b, "Storage")
+	if !disk.HasCapacity || disk.Allocatable != 50 {
+		t.Errorf("storage = %+v, want a 50 GiB ceiling from the quota", disk)
+	}
+}
+
+// What bounds one pod is what it is allowed to grow into, the same rule CPU
+// and memory follow: a pod pressed against its ephemeral-storage limit is one
+// the kubelet is about to evict.
+func TestAPodsStorageIsBoundedByItsOwnLimit(t *testing.T) {
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running",
+			map[string]any{"ephemeral-storage": "1Gi"},
+			map[string]any{"ephemeral-storage": "4Gi"}),
+	}
+
+	b := Rollup(Scope{Kind: ScopePod, Name: "api-0", Namespace: "prod"}, Inventory{Pods: pods}, Usage{})
+
+	disk := amountFor(t, b, "Storage")
+	if !disk.HasCapacity || disk.Allocatable != 4 {
+		t.Errorf("storage = %+v, want its own 4 GiB limit as the ceiling", disk)
+	}
+}
+
+func TestAPodThatAsksForNoDiskHasNoStorageBar(t *testing.T) {
+	pods := []unstructured.Unstructured{
+		podSpec("prod", "api-0", "worker-1", "Running", map[string]any{"cpu": "1"}, nil),
+	}
+
+	b := Rollup(Scope{Kind: ScopePod, Name: "api-0", Namespace: "prod"}, Inventory{Pods: pods}, Usage{})
+
+	amountMissing(t, b, "Storage")
+}
+
+// The order the bars are drawn in: the three that are sizes of something
+// together, and the pod count -- a different kind of number -- last.
+func TestStorageIsDrawnBetweenMemoryAndTheCount(t *testing.T) {
+	nodes := []unstructured.Unstructured{nodeWithDisk("worker-1", "4", "16Gi", "100Gi", "90Gi")}
+
+	b := Rollup(Scope{Kind: ScopeCluster}, Inventory{Nodes: nodes}, Usage{})
+
+	var labels []string
+	for _, a := range b.Amounts {
+		labels = append(labels, a.Label)
+	}
+	if want := []string{"CPU", "Memory", "Storage", "Pods"}; !slices.Equal(labels, want) {
+		t.Errorf("bars = %v, want %v", labels, want)
 	}
 }

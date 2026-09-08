@@ -84,3 +84,21 @@ describe('ticksFor', () => {
         expect(ticksFor(NaN)).toEqual([0, 1]);
     });
 });
+
+// GiB is the budget's unit, not a chart's: the amounts come from the app itself
+// rather than from a plugin's query, and they arrive in gibibytes.
+describe('gibibytes', () => {
+    test('are scaled the way bytes are, so a big disk is not six digits', () => {
+        expect(formatValue(0.5, 'GiB')).toBe('512 MiB');
+        expect(formatValue(90, 'GiB')).toBe('90 GiB');
+        expect(formatValue(4096, 'GiB')).toBe('4 TiB');
+    });
+
+    test('read the same on an axis tick', () => {
+        expect(formatTick(90, 'GiB')).toBe('90 GiB');
+    });
+
+    test('zero is zero rather than a bare number', () => {
+        expect(formatValue(0, 'GiB')).toBe('0 B');
+    });
+});

@@ -509,15 +509,22 @@ func TestTheBuiltinPrometheusPluginCarriesUsageQueriesAndCommitmentCharts(t *tes
 
 	// One requested/limits/used chart per resource on each of the three
 	// surfaces.
-	byAttach := map[string]int{}
+	//
+	// Checked by id rather than by counting the charts whose legend is
+	// "series". That legend only says a query labels its own lines, which the
+	// storage and disk-throughput charts do too -- counting it made adding any
+	// multi-series chart fail a test about commitment.
+	ids := map[string]bool{}
 	for _, c := range prom.Charts {
-		if c.Legend == "series" {
-			byAttach[c.Attach]++
-		}
+		ids[c.ID] = true
 	}
-	for _, attach := range []string{AttachDashboard, "nodes", "pods"} {
-		if byAttach[attach] != 2 {
-			t.Errorf("%s has %d requested-vs-used charts, want 2 (CPU and memory)", attach, byAttach[attach])
+	for _, id := range []string{
+		"cluster-cpu-commitment", "cluster-memory-commitment",
+		"node-cpu-commitment", "node-memory-commitment",
+		"pod-cpu-commitment", "pod-memory-commitment",
+	} {
+		if !ids[id] {
+			t.Errorf("the prometheus plugin has no %q chart", id)
 		}
 	}
 }
@@ -594,4 +601,104 @@ func TestTheBuiltinPrometheusPluginChartsCPUDelayEverywhereItChartsCPU(t *testin
 			t.Errorf("%s has no pressure (PSI) chart", attach)
 		}
 	}
+}
+
+// Storage was the dimension the app could not draw at all: CPU and memory had
+// charts on every surface and disk had none, on a cluster whose nodes always
+// have one under them whether or not it has a StorageClass.
+func TestTheBuiltinPrometheusPluginChartsStorageEverywhereItChartsCPU(t *testing.T) {
+	prom := builtinPrometheus(t)
+
+	surfaces := map[string][]string{
+		AttachDashboard: {"cluster-storage", "cluster-disk-io"},
+		"nodes":         {"node-storage", "node-disk-io"},
+		"pods":          {"pod-storage", "pod-disk-io"},
+		"namespaces":    {"namespace-storage", "namespace-disk-io"},
+	}
+	ids := chartIDs(prom)
+	for surface, want := range surfaces {
+		for _, id := range want {
+			if !ids[id] {
+				t.Errorf("%s has no %q chart", surface, id)
+			}
+		}
+	}
+}
+
+// The workload kinds had no charts of any sort. A Deployment is the object
+// people actually look at -- "is my rollout healthy" is asked of it far more
+// often than of the pods underneath.
+func TestTheBuiltinPrometheusPluginChartsTheWorkloadKinds(t *testing.T) {
+	prom := builtinPrometheus(t)
+
+	for _, kind := range []string{"deployments", "statefulsets", "daemonsets", "replicasets"} {
+		charts := prom.ChartsFor(kind)
+		if len(charts) == 0 {
+			t.Errorf("%s has no charts at all", kind)
+			continue
+		}
+		// The replica chart is the exact one: kube-state-metrics publishes the
+		// counts under the workload's own name, with nothing to infer.
+		var hasReplicas bool
+		for _, c := range charts {
+			if strings.HasSuffix(c.ID, "-replicas") {
+				hasReplicas = true
+			}
+		}
+		if !hasReplicas {
+			t.Errorf("%s has no replica chart, which is the one reading that needs no guessing", kind)
+		}
+	}
+}
+
+// A PVC is where "how full is it" is actually asked, and the answer is in the
+// kubelet's volume stats rather than in the claim.
+func TestTheBuiltinPrometheusPluginChartsPersistentVolumeClaims(t *testing.T) {
+	prom := builtinPrometheus(t)
+
+	if charts := prom.ChartsFor("persistentvolumeclaims"); len(charts) == 0 {
+		t.Error("persistent volume claims have no charts")
+	}
+	if ids := chartIDs(prom); !ids["pvc-full"] || !ids["pvc-inodes"] {
+		// Inodes get their own line because a volume can run out of them while
+		// it still has bytes free, and it fails writes exactly as if it were full.
+		t.Error("a PVC should chart both how full it is and its inodes")
+	}
+}
+
+// A chart drawn for one object may only ask about that object. The loader
+// enforces it, but the workload charts interpolate $name into a regex rather
+// than into an equality matcher, which is the case worth pinning.
+func TestEveryWorkloadChartAsksOnlyAboutItsOwnObject(t *testing.T) {
+	prom := builtinPrometheus(t)
+
+	for _, kind := range []string{"deployments", "statefulsets", "daemonsets", "replicasets"} {
+		for _, c := range prom.ChartsFor(kind) {
+			if !strings.Contains(c.Query, "$name") {
+				t.Errorf("chart %q is drawn for one %s but its query never names it", c.ID, kind)
+			}
+			if !strings.Contains(c.Query, "$namespace") {
+				t.Errorf("chart %q does not scope to the object's namespace, so it would answer for every namespace at once", c.ID)
+			}
+		}
+	}
+}
+
+func builtinPrometheus(t *testing.T) Plugin {
+	t.Helper()
+	for _, p := range Builtin() {
+		if p.ID == "prometheus" {
+			return p
+		}
+	}
+	t.Fatal("no builtin prometheus plugin")
+	return Plugin{}
+}
+
+func chartIDs(p Plugin) map[string]bool {
+	out := map[string]bool{}
+	for _, c := range p.Charts {
+		out[c.ID] = true
+	}
+	return out
 }

@@ -121,6 +121,24 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 	nodes, pods := inv.Nodes, inv.Pods
 	cpu := Amount{Label: "CPU", Unit: "cores", HasDemand: true}
 	mem := Amount{Label: "Memory", Unit: "GiB", HasDemand: true}
+	// Ephemeral storage: the node disk that container filesystems, emptyDirs
+	// and logs are written to. It is the one storage dimension every cluster
+	// has -- persistent volumes need a StorageClass and a provisioner, and a
+	// cluster may have neither, but a node always has a disk under it.
+	//
+	// Shaped differently from CPU and memory, deliberately. Requests and limits
+	// are real for ephemeral-storage -- the scheduler places on the request,
+	// and the kubelet *evicts* a pod that goes past its limit rather than
+	// throttling it -- but hardly any manifest sets either, so leading with
+	// them would draw two empty rows on almost every cluster. HasDemand is
+	// turned on below only where something actually asked, so the bar reads as
+	// what it usually is: how big the disk is.
+	//
+	// Not measured here either. Disk usage lives in the kubelet or in
+	// Prometheus, not in the API server, so what is actually written is the
+	// filesystem charts' to say. HasUsed staying false is what keeps this from
+	// drawing as a disk using nothing.
+	disk := Amount{Label: "Storage", Unit: "GiB"}
 	pod := Amount{Label: "Pods", HasUsed: true}
 
 	// A namespace holds no hardware, and neither does a pod. Nodes contribute
@@ -138,11 +156,18 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 			cpu.Allocatable += parseCPU(nestedString(n, "status", "allocatable", "cpu"))
 			mem.Capacity += parseMemory(nestedString(n, "status", "capacity", "memory"))
 			mem.Allocatable += parseMemory(nestedString(n, "status", "allocatable", "memory"))
+			disk.Capacity += parseMemory(nestedString(n, "status", "capacity", "ephemeral-storage"))
+			disk.Allocatable += parseMemory(nestedString(n, "status", "allocatable", "ephemeral-storage"))
 			pod.Capacity += parseCount(nestedString(n, "status", "capacity", "pods"))
 			pod.Allocatable += parseCount(nestedString(n, "status", "allocatable", "pods"))
 		}
 		if counted > 0 {
 			cpu.HasCapacity, mem.HasCapacity, pod.HasCapacity = true, true, true
+			// Unlike CPU and memory, this one is conditional. A kubelet that
+			// does not report ephemeral-storage -- some older ones, and some
+			// managed distros -- leaves a bar with a ceiling of zero, which
+			// draws as a full disk rather than as an unknown one.
+			disk.HasCapacity = disk.Capacity > 0 || disk.Allocatable > 0
 		}
 	}
 
@@ -151,6 +176,7 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 	if scope.Kind == ScopeNamespace {
 		applyQuota(&cpu, inv.Quotas, parseCPU, "requests.cpu", "cpu")
 		applyQuota(&mem, inv.Quotas, parseMemory, "requests.memory", "memory")
+		applyQuota(&disk, inv.Quotas, parseMemory, "requests.ephemeral-storage", "ephemeral-storage")
 		applyQuota(&pod, inv.Quotas, parseCount, "pods")
 	}
 
@@ -162,9 +188,16 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 		pod.Used++
 		cpu.Requested += podResource(p, "requests", "cpu", parseCPU)
 		mem.Requested += podResource(p, "requests", "memory", parseMemory)
+		disk.Requested += podResource(p, "requests", "ephemeral-storage", parseMemory)
 		cpu.Limits += podResource(p, "limits", "cpu", parseCPU)
 		mem.Limits += podResource(p, "limits", "memory", parseMemory)
+		disk.Limits += podResource(p, "limits", "ephemeral-storage", parseMemory)
 	}
+
+	// Only once something has asked. See the Amount above: on the ordinary
+	// cluster where nothing sets ephemeral-storage, the bar is a statement of
+	// how much disk there is rather than a demand nobody made.
+	disk.HasDemand = disk.Requested > 0 || disk.Limits > 0
 
 	if measured, ok := usage.measure(scope, pods); ok {
 		cpu.Used, cpu.HasUsed = measured.CPU, true
@@ -178,11 +211,36 @@ func Rollup(scope Scope, inv Inventory, usage Usage) Budget {
 	if scope.Kind == ScopePod {
 		capLimit(&cpu)
 		capLimit(&mem)
+		capLimit(&disk)
 		// One pod is one pod. A bar saying so would be a bar of nothing.
-		return Budget{Scope: scope, Amounts: []Amount{cpu, mem}, Usage: usage}
+		return Budget{Scope: scope, Amounts: withStorage(scope, []Amount{cpu, mem}, disk), Usage: usage}
 	}
 
-	return Budget{Scope: scope, Amounts: []Amount{cpu, mem, pod}, Usage: usage}
+	return Budget{Scope: scope, Amounts: withStorage(scope, []Amount{cpu, mem, pod}, disk), Usage: usage}
+}
+
+// withStorage adds the ephemeral-storage bar where it has something to say.
+//
+// A node reports its disk whether or not anything has asked for it, so the
+// cluster and node bars are always worth drawing. A namespace and a pod are
+// different: ephemeral-storage requests are the one resource most manifests
+// never set, so on most clusters those bars would read "0 of nothing" -- an
+// empty track that says only that nobody filled in a field. Shown once
+// something is actually bounded or booked, and left out otherwise.
+func withStorage(scope Scope, amounts []Amount, disk Amount) []Amount {
+	worthShowing := disk.HasCapacity || disk.Requested > 0 || disk.Limits > 0
+	switch scope.Kind {
+	case ScopeCluster, ScopeNode:
+		// ...but not one invented out of nothing: a cluster whose kubelets do
+		// not report the disk has no ceiling to draw against.
+		worthShowing = disk.HasCapacity
+	}
+	if !worthShowing {
+		return amounts
+	}
+	// After memory and before the pod count: the three that are sizes of
+	// something belong together, and the count is a different kind of number.
+	return append(amounts[:2:2], append([]Amount{disk}, amounts[2:]...)...)
 }
 
 // capLimit makes an amount's own limit its ceiling, for a pod. A pod with no
