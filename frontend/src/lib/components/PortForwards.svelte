@@ -16,6 +16,7 @@
     import { forwards, type Forward } from '../state/forwards.svelte';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
+    import { notices } from '../state/notices.svelte';
 
     interface Props {
         contextId: string;
@@ -36,7 +37,7 @@
         try {
             await forwards.reconnect(forward.id);
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         } finally {
             busy = null;
         }
@@ -46,7 +47,7 @@
         try {
             await forwards.open(forward.id);
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         }
     }
 
@@ -55,7 +56,7 @@
         try {
             await forwards.forget(forward.id);
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         } finally {
             busy = null;
         }

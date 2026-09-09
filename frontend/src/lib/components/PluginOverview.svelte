@@ -17,6 +17,7 @@
     import { adoptPluginSummary } from '../plugins/adopt';
     import type { CardResult, Plugin, PluginSummary } from '../plugins/types';
     import { workspace } from '../state/workspace.svelte';
+    import { clusters } from '../state/health.svelte';
     import MetricsPanel from '../charts/MetricsPanel.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
@@ -55,7 +56,7 @@
                 summary = adoptPluginSummary(result);
                 // A summary that came back is evidence the cluster answered,
                 // whatever it said about the plugin.
-                if (summary.checked) workspace.reportHealth(id, 'connected');
+                if (summary.checked) clusters.report(id, 'connected');
             })
             .catch((err: unknown) => {
                 if (cancelled) return;

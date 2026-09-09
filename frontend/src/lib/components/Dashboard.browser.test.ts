@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { detail } from '../state/detail.svelte';
 
 // What is worth testing in a real browser here is the state the whole feature
 // exists for: the plugin is installed on this machine and the solution is not
@@ -35,7 +36,11 @@ const ARGO = {
     disabled: false,
 };
 
-const Summary = vi.fn();
+// Hoisted, because vi.mock's factory is lifted above everything else in the
+// file: a plain const up here does not exist yet when the factory runs. It got
+// away with it while nothing imported a store at the top of this file, which
+// made the factory resolve late enough not to notice.
+const Summary = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     HelmService: {
@@ -160,7 +165,7 @@ beforeEach(() => {
     style.textContent = TOKENS;
     document.head.appendChild(style);
     workspace.closeAllTabs();
-    workspace.detailTarget = null;
+    detail.target = null;
     vi.mocked(ResourceService.Overview).mockReset().mockResolvedValue(OVERVIEW as never);
 });
 
@@ -179,5 +184,5 @@ test('an event opens its own report', async () => {
 
     await page.getByText('BackOff').click();
 
-    expect(workspace.detailTarget).toEqual({ contextId: PROD, kind: 'events', namespace: 'default', name: 'web.1' });
+    expect(detail.target).toEqual({ contextId: PROD, kind: 'events', namespace: 'default', name: 'web.1' });
 });

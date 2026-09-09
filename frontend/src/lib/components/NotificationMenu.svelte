@@ -15,6 +15,7 @@
     import { updates } from '../state/updates.svelte';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
+    import { notices } from '../state/notices.svelte';
 
     let open = $state(false);
     let panelEl = $state<HTMLElement | null>(null);
@@ -45,7 +46,7 @@
         try {
             await updates.markRead();
         } catch (err) {
-            workspace.fail(`Could not mark the notification as read: ${err instanceof Error ? err.message : String(err)}`);
+            notices.fail(`Could not mark the notification as read: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
@@ -54,7 +55,7 @@
         try {
             await updates.openRelease();
         } catch {
-            workspace.fail('Could not open the release page');
+            notices.fail('Could not open the release page');
         }
     }
 
@@ -63,7 +64,7 @@
         try {
             await updates.openDownload();
         } catch {
-            workspace.fail('Could not open the download');
+            notices.fail('Could not open the download');
         }
     }
 

@@ -19,6 +19,7 @@
     import SegmentedControl from './SegmentedControl.svelte';
     import SettingsRow from './SettingsRow.svelte';
     import SettingsSection from './SettingsSection.svelte';
+    import { notices } from '../../state/notices.svelte';
 
     const MODES = [
         { value: 'app', label: 'In this window', icon: 'terminal' },
@@ -74,7 +75,7 @@
         // An empty list is a shell that can never open. The store would repair
         // it, but saying so here is better than the field silently refilling.
         if (shells.length === 0) {
-            workspace.fail('A terminal needs at least one shell to try');
+            notices.fail('A terminal needs at least one shell to try');
             return;
         }
         workspace.setTerminal({ shells });

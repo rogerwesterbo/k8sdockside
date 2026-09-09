@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { detail } from '../state/detail.svelte';
 
 const KubeVirtDetail = vi.hoisted(() => vi.fn());
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
@@ -51,7 +52,7 @@ const fact = (label: string, value: string, over: Record<string, unknown> = {}) 
 
 beforeEach(() => {
     document.body.innerHTML = '';
-    workspace.closeDetail();
+    detail.close();
     KubeVirtDetail.mockReset();
 });
 
@@ -98,8 +99,8 @@ test('a value that names another object opens it', async () => {
 
     await page.getByRole('button', { name: 'kvw2' }).click();
 
-    await expect.poll(() => workspace.detailTarget?.name).toBe('kvw2');
-    expect(workspace.detailTarget?.kind).toBe('nodes');
+    await expect.poll(() => detail.target?.name).toBe('kvw2');
+    expect(detail.target?.kind).toBe('nodes');
 });
 
 test('a table draws its rows, and a cell can be a link too', async () => {
@@ -130,7 +131,7 @@ test('a table draws its rows, and a cell can be a link too', async () => {
     await expect.element(page.getByText('Backed by')).toBeVisible();
     await page.getByRole('button', { name: 'win11-root' }).click();
 
-    await expect.poll(() => workspace.detailTarget?.kind).toBe('persistentvolumeclaims');
+    await expect.poll(() => detail.target?.kind).toBe('persistentvolumeclaims');
 });
 
 // An absence that is a fact about the machine is worth saying: "not migrated"

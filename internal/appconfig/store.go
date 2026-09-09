@@ -146,6 +146,16 @@ type PaneTabRef struct {
 	Kind      string `json:"kind"`
 	Namespace string `json:"namespace,omitzero"`
 	Name      string `json:"name,omitzero"`
+	// Namespaces is the filter a resource tab was narrowed to, empty for the
+	// whole cluster. It is the one thing about how a table was *left* that is
+	// worth carrying across a restart: which slice of the cluster you work in
+	// is a standing fact about your job, and picking it again in every tab
+	// after every launch is the cost of not writing it down.
+	//
+	// A list rather than a name because the picker takes several, and separate
+	// from Namespace above, which names the object a document tab is open on
+	// and means nothing for a collection.
+	Namespaces []string `json:"namespaces,omitempty"`
 }
 
 // PaneState is one pane: what it holds, whether it is showing it, and how much
@@ -1272,12 +1282,20 @@ func migratePanes(s Settings) Settings {
 		for _, ref := range s.TabOrder {
 			main = append(main, PaneTabRef{Type: ViewResource, ContextID: ref.ContextID, Kind: ref.Kind})
 		}
-		// A straight conversion: a dock tab already named a view onto one
-		// object, which is exactly what a PaneTabRef is. If the two ever stop
-		// agreeing this stops compiling, which is the right way to find out.
+		// This was a straight struct conversion while the two shapes agreed,
+		// and it stopped compiling when PaneTabRef gained Namespaces -- which
+		// is what that arrangement was for. Spelled out now: a dock tab is a
+		// view onto one object and has no namespace filter to carry, so the new
+		// field is simply absent rather than defaulted to something.
 		bottom := make([]PaneTabRef, 0, len(s.Dock.Tabs))
 		for _, ref := range s.Dock.Tabs {
-			bottom = append(bottom, PaneTabRef(ref))
+			bottom = append(bottom, PaneTabRef{
+				Type:      ref.Type,
+				ContextID: ref.ContextID,
+				Kind:      ref.Kind,
+				Namespace: ref.Namespace,
+				Name:      ref.Name,
+			})
 		}
 		s.Panes = &Panes{
 			// The sidebar was a fixed strip with its width in Layout; it is a

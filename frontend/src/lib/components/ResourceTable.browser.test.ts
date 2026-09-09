@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { detail } from '../state/detail.svelte';
 
 // The table's rows arrive through a subscription. Stubbing that is what lets a
 // test say "the cluster holds this" without a cluster.
@@ -142,7 +143,7 @@ function podsTable(pills: { label: string; tone: string; detail: string }[] | nu
 }
 
 beforeEach(() => {
-    workspace.closeDetail();
+    detail.close();
     views.forgetAll();
 });
 
@@ -205,7 +206,7 @@ test('a row in a plugin view opens as the kind the view lists', async () => {
 
     await page.getByText('Synced').click();
 
-    expect(workspace.detailTarget).toEqual({ contextId: PROD, kind: 'crd:applications.argoproj.io', namespace: 'argocd', name: 'web' });
+    expect(detail.target).toEqual({ contextId: PROD, kind: 'crd:applications.argoproj.io', namespace: 'argocd', name: 'web' });
 });
 
 // A CRD is free to declare a printer column called "Name", beside the Name the

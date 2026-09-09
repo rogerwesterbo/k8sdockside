@@ -2,6 +2,8 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import ObjectActions from './ObjectActions.svelte';
+import { notices } from '../state/notices.svelte';
+import { detail } from '../state/detail.svelte';
 
 // Hoisted, because vi.mock's factory is lifted above everything else in the
 // file: a plain `let` up here would not exist yet when the factory runs.
@@ -147,7 +149,7 @@ beforeEach(async () => {
     // VM included: its state says isMachine, and a stale one would give the
     // next object's bar a set of buttons that are not about it.
     for (const ref of [POD, NODE, DEPLOYMENT, SERVICE, RELEASE, VM]) actions.forget(ref);
-    workspace.closeDetail();
+    detail.close();
     // A test that opened something in the dock has to have it taken away again,
     // and the write that goes with it has to land before the next test starts.
     // The store replaces its whole settings object with whatever the backend
@@ -157,7 +159,7 @@ beforeEach(async () => {
         workspace.closeAllDockTabs();
         await new Promise((r) => setTimeout(r, 320));
     }
-    workspace.notice = null;
+    notices.current = null;
     helm.forget(RELEASE);
     // Where helm is, re-answered per test: one of them takes it away.
     helm.probed = false;
@@ -395,7 +397,7 @@ test('Escape cancels the question too', async () => {
 });
 
 test('confirming deletes the object and closes the panel over it', async () => {
-    await workspace.openDetail(POD);
+    await detail.open(POD);
     render(ObjectActions, { object: POD });
     await page.getByRole('button', { name: 'Delete' }).click();
 
@@ -405,19 +407,19 @@ test('confirming deletes the object and closes the panel over it', async () => {
         expect(ActionService.Delete).toHaveBeenCalledWith(PROD, 'pods', 'default', 'web'),
     );
     // Nothing is left to describe, so the panel goes rather than showing a 404.
-    await vi.waitFor(() => expect(workspace.detailTarget).toBeNull());
+    await vi.waitFor(() => expect(detail.target).toBeNull());
 });
 
 test('a refused delete says why and leaves the object alone', async () => {
     vi.mocked(ActionService.Delete).mockRejectedValue(new Error('pods "web" is forbidden'));
-    await workspace.openDetail(POD);
+    await detail.open(POD);
     render(ObjectActions, { object: POD });
     await page.getByRole('button', { name: 'Delete' }).click();
 
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
 
-    await vi.waitFor(() => expect(workspace.notice?.text).toContain('forbidden'));
-    expect(workspace.detailTarget).not.toBeNull();
+    await vi.waitFor(() => expect(notices.current?.text).toContain('forbidden'));
+    expect(detail.target).not.toBeNull();
 });
 
 test('scale opens a field holding the count the workload is at', async () => {

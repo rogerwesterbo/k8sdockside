@@ -182,12 +182,15 @@ describe('saving', () => {
         expect(await editors.save(TAB, TARGET)).toBe(true);
 
         const doc = editors.doc(TAB);
+        // The document as opened goes with the edit, so a save the cluster
+        // refuses can be retried against what it holds now.
         expect(ResourceService.ApplyYAML).toHaveBeenCalledWith(
             'cfg::prod',
             'pods',
             'default',
             'web',
             'apiVersion: v1\nkind: Pod\n',
+            LIVE,
         );
         expect(doc.text).toBe(stored);
         expect(doc.saved).toBe(true);

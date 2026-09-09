@@ -218,12 +218,18 @@ class Editors {
                 // values, so the document is level with the cluster.
                 doc.original = doc.text;
             } else {
+                // The document as it was opened goes with the edit. A cluster
+                // that has moved on since -- a controller writing status, which
+                // for anything reconciled is every few seconds -- would
+                // otherwise refuse the save over a change that touched nothing
+                // this edit did. With it the backend can tell the two apart.
                 const saved = await ResourceService.ApplyYAML(
                     target.contextId,
                     target.kind,
                     target.namespace,
                     target.name,
                     doc.text,
+                    doc.original,
                 );
                 doc.text = saved;
                 doc.original = saved;

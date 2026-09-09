@@ -18,7 +18,9 @@
     import { alpha } from '../colors';
     import { forwards, type Forward } from '../state/forwards.svelte';
     import { workspace, type Health } from '../state/workspace.svelte';
+    import { clusters } from '../state/health.svelte';
     import Icon from './Icon.svelte';
+    import { notices } from '../state/notices.svelte';
 
     interface Props {
         context: kube.Context;
@@ -31,7 +33,7 @@
     let root = $state<HTMLElement>();
 
     let color = $derived(workspace.colorOf(context.id));
-    let health = $derived(workspace.healthOf(context.id));
+    let health = $derived(clusters.of(context.id));
     let expanded = $derived(workspace.isExpanded(context.id));
     let selected = $derived(workspace.selectedContextId === context.id);
     // The focused tab rather than the main pane's: a list dragged into another
@@ -248,7 +250,7 @@
     function visit(forward: Forward): void {
         if (forward.state !== 'active') return;
         void forwards.open(forward.id).catch((err: unknown) => {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         });
     }
 
@@ -259,7 +261,7 @@
             return;
         }
         void forwards.reconnect(forward.id).catch((err: unknown) => {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         });
     }
 

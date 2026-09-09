@@ -15,6 +15,7 @@
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';
     import SettingsSection from './SettingsSection.svelte';
+    import { notices } from '../../state/notices.svelte';
 
     let about = $state<About | null>(null);
     let copied = $state(false);
@@ -40,7 +41,7 @@
             copied = true;
             setTimeout(() => (copied = false), 2000);
         } catch {
-            workspace.inform('Could not copy the path to the clipboard');
+            notices.inform('Could not copy the path to the clipboard');
         }
     }
 
@@ -48,7 +49,7 @@
         try {
             await SettingsService.RevealConfig();
         } catch {
-            workspace.inform('Could not open the settings file');
+            notices.inform('Could not open the settings file');
         }
     }
 
@@ -56,7 +57,7 @@
         try {
             await updates.openRelease();
         } catch {
-            workspace.fail('Could not open the release page');
+            notices.fail('Could not open the release page');
         }
     }
 
@@ -64,7 +65,7 @@
         try {
             await updates.openDownload();
         } catch {
-            workspace.fail('Could not open the download');
+            notices.fail('Could not open the download');
         }
     }
 

@@ -241,7 +241,12 @@ func lastSeen(e *unstructured.Unstructured) string {
 }
 
 // Describe renders the report behind the slide-in panel for one live object.
-func (w *Watcher) Describe(kc Context, kind, namespace, name string) (string, error) {
+//
+// reveal decodes a Secret's values into plain text. It is a parameter rather
+// than something the frontend does to the report it is given, so that the
+// decoded form is produced only when somebody has asked to see it: the panel
+// holds base64 until the button is pressed, and pressing it reads again.
+func (w *Watcher) Describe(kc Context, kind, namespace, name string, reveal bool) (string, error) {
 	var out string
 	err := w.withClient(kc, func(c *clusterClient) error {
 		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
@@ -252,6 +257,13 @@ func (w *Watcher) Describe(kc Context, kind, namespace, name string) (string, er
 			return err
 		}
 
+		if reveal {
+			// The same decoding the editor opens a Secret with, so that the two
+			// views agree about what a revealed value looks like rather than
+			// each having its own idea. Does nothing to anything else.
+			got = got.DeepCopy()
+			readableSecret(got)
+		}
 		out = describeLive(ctx, c, got, mapping.Resource)
 		return nil
 	})
@@ -279,7 +291,10 @@ func describeLive(ctx context.Context, c *clusterClient, u *unstructured.Unstruc
 	d.blank()
 
 	body := map[string]any{}
-	for _, key := range []string{"spec", "status", "data", "type", "subjects", "roleRef", "rules"} {
+	// stringData is here for a revealed Secret: readableSecret moves the
+	// decodable entries there, and a body that listed only `data` would answer
+	// the reveal with an empty report.
+	for _, key := range []string{"spec", "status", "data", "stringData", "type", "subjects", "roleRef", "rules"} {
 		if v, found := u.Object[key]; found {
 			body[key] = v
 		}

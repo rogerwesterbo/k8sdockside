@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import DetailPanel from './DetailPanel.svelte';
+import { detail } from '../state/detail.svelte';
 
 // The real backend answers every settings write with the whole settings file,
 // and the store adopts that answer whole. A mock answering `{}` says instead
@@ -156,7 +157,7 @@ const settle = () => new Promise((r) => setTimeout(r, 150));
 
 beforeEach(() => {
     workspace.closeAllDockTabs();
-    workspace.closeDetail();
+    detail.close();
     vi.mocked(ResourceService.Describe).mockReset().mockResolvedValue('Name: web\nStatus: Running');
     vi.mocked(HelmService.Detail)
         .mockReset()
@@ -165,7 +166,7 @@ beforeEach(() => {
 
 test('the panel offers to edit what it is describing', async () => {
     render(DetailPanel);
-    await workspace.openDetail({ contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' });
+    await detail.open({ contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' });
 
     await page.getByRole('button', { name: 'Edit' }).click();
 
@@ -178,7 +179,7 @@ test('the panel offers to edit what it is describing', async () => {
 // decodes -- so there is nothing here for an editor to open.
 test('a Helm release has no edit button', async () => {
     render(DetailPanel);
-    await workspace.openDetail({
+    await detail.open({
         contextId: PROD,
         kind: 'helmreleases',
         namespace: 'default',
@@ -195,7 +196,7 @@ test('a Helm release has no edit button', async () => {
 // record now, and must not make that call at all.
 test('a Helm release is described by its own record rather than by a describe call', async () => {
     render(DetailPanel);
-    await workspace.openDetail({
+    await detail.open({
         contextId: PROD,
         kind: 'helmreleases',
         namespace: 'default',
@@ -211,7 +212,7 @@ test('a Helm release is described by its own record rather than by a describe ca
 // the second one's name.
 test('opening another release re-reads the drawer', async () => {
     render(DetailPanel);
-    await workspace.openDetail({
+    await detail.open({
         contextId: PROD,
         kind: 'helmreleases',
         namespace: 'default',
@@ -222,7 +223,7 @@ test('opening another release re-reads the drawer', async () => {
     vi.mocked(HelmService.Detail).mockResolvedValue(
         releaseDetail('cert-manager', 'cert-manager-v1.16.1', 'installCRDs: true\n'),
     );
-    await workspace.openDetail({
+    await detail.open({
         contextId: PROD,
         kind: 'helmreleases',
         namespace: 'default',
@@ -239,7 +240,7 @@ test('opening another release re-reads the drawer', async () => {
 // had before the save.
 test('an object written elsewhere brings the report up to date', async () => {
     render(DetailPanel);
-    await workspace.openDetail(WEB);
+    await detail.open(WEB);
     await expect.element(page.getByText('Status: Running')).toBeVisible();
 
     vi.mocked(ResourceService.Describe).mockResolvedValue('Name: web\nStatus: Pending');
@@ -250,7 +251,7 @@ test('an object written elsewhere brings the report up to date', async () => {
 
 test('an object the panel is not describing leaves it alone', async () => {
     render(DetailPanel);
-    await workspace.openDetail(WEB);
+    await detail.open(WEB);
     await expect.element(page.getByText('Status: Running')).toBeVisible();
 
     changes.changed({ ...WEB, name: 'api' });
@@ -263,7 +264,7 @@ test('an object the panel is not describing leaves it alone', async () => {
 // already has is a moment out of date, and blanking it flickers on every save.
 test('the report stays on screen while it is re-read', async () => {
     render(DetailPanel);
-    await workspace.openDetail(WEB);
+    await detail.open(WEB);
 
     let answer: (text: string) => void = () => {};
     vi.mocked(ResourceService.Describe).mockReturnValueOnce(
@@ -279,4 +280,99 @@ test('the report stays on screen while it is re-read', async () => {
 
     answer('Name: web\nStatus: Pending');
     await expect.element(page.getByText('Status: Pending')).toBeVisible();
+});
+
+const CREDS = { contextId: PROD, kind: 'secrets', namespace: 'default', name: 'creds' };
+const HIDDEN = 'Name: creds\ndata:\n  password: aHVudGVyMg==\n  username: YWRtaW4=\n';
+const SHOWN = 'Name: creds\nstringData:\n  password: hunter2\n  username: admin\n';
+
+// A Secret reads back base64, which is exactly as unhelpful on screen as it is
+// in the editor. The values are there to be seen when asked for -- and only
+// when asked for, since a panel is often open while a screen is being shared.
+test('a secret opens hidden and reveals its values on request', async () => {
+    vi.mocked(ResourceService.Describe).mockResolvedValue(HIDDEN);
+    render(DetailPanel);
+    await detail.open(CREDS);
+    await settle();
+
+    expect(ResourceService.Describe).toHaveBeenLastCalledWith(PROD, 'secrets', 'default', 'creds', false);
+
+    vi.mocked(ResourceService.Describe).mockResolvedValue(SHOWN);
+    await page.getByRole('button', { name: 'Show values' }).click();
+    await settle();
+
+    // Read again with reveal set, rather than decoded from the report already
+    // on screen: the plaintext crosses only once somebody has asked for it.
+    expect(ResourceService.Describe).toHaveBeenLastCalledWith(PROD, 'secrets', 'default', 'creds', true);
+    await expect.element(page.getByRole('button', { name: 'Hide values' })).toBeVisible();
+});
+
+// Revealing one secret must not leave the next one revealed: that would put a
+// password on screen because of a button pressed on a different object.
+test('the next object opens hidden again', async () => {
+    vi.mocked(ResourceService.Describe).mockResolvedValue(HIDDEN);
+    render(DetailPanel);
+    await detail.open(CREDS);
+    await settle();
+    await page.getByRole('button', { name: 'Show values' }).click();
+    await settle();
+    expect(detail.revealed).toBe(true);
+
+    await detail.open({ ...CREDS, name: 'other' });
+    await settle();
+
+    expect(detail.revealed).toBe(false);
+    expect(ResourceService.Describe).toHaveBeenLastCalledWith(PROD, 'secrets', 'default', 'other', false);
+});
+
+// Nothing else has values to hide, so nothing else carries the button.
+test('only a secret offers the button', async () => {
+    render(DetailPanel);
+    await detail.open(WEB);
+    await settle();
+
+    await expect.element(page.getByRole('button', { name: 'Show values' })).not.toBeInTheDocument();
+});
+
+test('the report can be searched, and says how many matches there are', async () => {
+    vi.mocked(ResourceService.Describe).mockResolvedValue(HIDDEN);
+    render(DetailPanel);
+    await detail.open(CREDS);
+    await settle();
+
+    await page.getByRole('textbox', { name: 'Find in this report' }).fill('name');
+
+    // Case-insensitive, so "Name:" is found by typing it in lower case.
+    await expect.element(page.getByText('2 matches')).toBeVisible();
+    await expect.poll(() => document.querySelectorAll('.body mark').length).toBe(2);
+});
+
+test('a search with nothing to find says so rather than emptying the report', async () => {
+    vi.mocked(ResourceService.Describe).mockResolvedValue(HIDDEN);
+    render(DetailPanel);
+    await detail.open(CREDS);
+    await settle();
+
+    await page.getByRole('textbox', { name: 'Find in this report' }).fill('nowhere');
+
+    await expect.element(page.getByText('No matches')).toBeVisible();
+    // The report is still whole: highlighting marks matches, it does not filter
+    // lines away, because a YAML line out of its block says much less.
+    await expect.poll(() => document.querySelector('.body pre')?.textContent).toBe(HIDDEN);
+});
+
+test('the query is dropped when the panel moves to another object', async () => {
+    vi.mocked(ResourceService.Describe).mockResolvedValue(HIDDEN);
+    render(DetailPanel);
+    await detail.open(CREDS);
+    await settle();
+    await page.getByRole('textbox', { name: 'Find in this report' }).fill('password');
+    await expect.element(page.getByText('1 match')).toBeVisible();
+
+    await detail.open({ ...CREDS, name: 'other' });
+    await settle();
+
+    await expect.poll(
+        () => (document.querySelector('.find input') as HTMLInputElement | null)?.value,
+    ).toBe('');
 });

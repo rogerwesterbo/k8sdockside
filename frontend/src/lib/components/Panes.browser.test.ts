@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import Pane from './Pane.svelte';
+import { detail } from '../state/detail.svelte';
 
 // A pane renders the view its active tab names, so this mounts real tables.
 // Stubbing the subscription is what lets them exist without a cluster behind
@@ -186,7 +187,7 @@ beforeEach(() => {
     // And the describe tab's home, for the same reason: one of these tests
     // drags it to the foot of the window, and remembering that is the point of
     // it -- so the next test has to be told where it starts.
-    workspace.closeDetail();
+    detail.close();
     workspace.settings.layout.detailPane = 'right';
     withClusters();
 });
@@ -280,7 +281,7 @@ test('the describe panel is drawn by the pane its tab is in', async () => {
     render(Pane, { pane: 'main' });
     render(Pane, { pane: 'right' });
 
-    await workspace.openDetail(HT1);
+    await detail.open(HT1);
 
     await expect.element(page.getByRole('tab', { name: /ht1/ })).toBeVisible();
     // The report itself, in the right panel rather than in a panel of its own.
@@ -292,10 +293,10 @@ test('the describe panel is drawn by the pane its tab is in', async () => {
 test('describing another row retitles the tab instead of adding one', async () => {
     render(Pane, { pane: 'main' });
     render(Pane, { pane: 'right' });
-    await workspace.openDetail(HT1);
+    await detail.open(HT1);
     await expect.element(page.getByRole('tab', { name: /ht1/ })).toBeVisible();
 
-    await workspace.openDetail(HT2);
+    await detail.open(HT2);
 
     await expect.element(page.getByRole('tab', { name: /ht2/ })).toBeVisible();
     expect(page.getByRole('tab', { name: /ht1/ }).elements()).toHaveLength(0);
@@ -306,15 +307,15 @@ test('describing another row retitles the tab instead of adding one', async () =
 test('the describe tab can be dragged to the foot of the window', async () => {
     render(Pane, { pane: 'right' });
     render(Pane, { pane: 'bottom' });
-    await workspace.openDetail(HT1);
+    await detail.open(HT1);
     await expect.element(page.getByRole('tab', { name: /ht1/ })).toBeVisible();
 
     dragOnto(await page.getByRole('tab', { name: /ht1/ }).element(), stripFor('Dock'));
 
     expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
     // And that is where the next row describes itself, not back on the right.
-    workspace.closeDetail();
-    await workspace.openDetail(HT2);
+    detail.close();
+    await detail.open(HT2);
     expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
 });
 
@@ -323,11 +324,11 @@ test('the describe tab can be dragged to the foot of the window', async () => {
 test('the describe tab closes from its own close button', async () => {
     render(Pane, { pane: 'main' });
     render(Pane, { pane: 'right' });
-    await workspace.openDetail(HT1);
+    await detail.open(HT1);
 
     await page.getByRole('button', { name: 'Close ht1' }).click();
 
-    expect(workspace.detailTarget).toBeNull();
+    expect(detail.target).toBeNull();
     expect(workspace.paneOf(DETAILS_TAB_ID)).toBeNull();
 });
 

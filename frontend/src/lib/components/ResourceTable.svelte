@@ -28,9 +28,12 @@
     import SortableTable from './SortableTable.svelte';
     import { alpha } from '../colors';
     import { workspace } from '../state/workspace.svelte';
+    import { clusters } from '../state/health.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
     import NamespacePicker from './NamespacePicker.svelte';
+    import { notices } from '../state/notices.svelte';
+    import { detail } from '../state/detail.svelte';
 
     interface Props {
         contextId: string;
@@ -122,8 +125,8 @@
     let color = $derived(workspace.colorOf(contextId));
     let context = $derived(workspace.contexts.find((c) => c.id === contextId) ?? null);
     let selectedRowId = $derived(
-        workspace.detailTarget
-            ? `${workspace.detailTarget.kind}/${workspace.detailTarget.namespace}/${workspace.detailTarget.name}`
+        detail.target
+            ? `${detail.target.kind}/${detail.target.namespace}/${detail.target.name}`
             : null,
     );
 
@@ -309,7 +312,7 @@
                 if (!refused.has(`${row.namespace}/${row.name}`)) picked.delete(row.id);
             }
 
-            const shown = workspace.detailTarget;
+            const shown = detail.target;
             if (
                 shown &&
                 shown.contextId === contextId &&
@@ -317,16 +320,16 @@
                 !refused.has(`${shown.namespace}/${shown.name}`) &&
                 chosen.some((row) => row.namespace === shown.namespace && row.name === shown.name)
             ) {
-                workspace.closeDetail();
+                detail.close();
             }
 
             if (report.failures.length === 0) {
-                workspace.inform(`${report.done} ${nounFor(report.done)} deleted`);
+                notices.inform(`${report.done} ${nounFor(report.done)} deleted`);
             } else {
-                workspace.fail(refusals(report, chosen.length, 'deleted'));
+                notices.fail(refusals(report, chosen.length, 'deleted'));
             }
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         } finally {
             asking = null;
             busy = false;
@@ -354,7 +357,7 @@
                 body,
             );
             if (report.failures.length === 0) {
-                workspace.inform(`${report.done} ${nounFor(report.done)} patched`);
+                notices.inform(`${report.done} ${nounFor(report.done)} patched`);
                 asking = null;
                 return;
             }
@@ -362,9 +365,9 @@
             for (const row of chosen) {
                 if (!refused.has(`${row.namespace}/${row.name}`)) picked.delete(row.id);
             }
-            workspace.fail(refusals(report, chosen.length, 'patched'));
+            notices.fail(refusals(report, chosen.length, 'patched'));
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         } finally {
             busy = false;
         }
@@ -402,12 +405,12 @@
                 loading = false;
                 // Rows arriving is proof the cluster is reachable, so the
                 // sidebar indicator does not need its own request.
-                workspace.reportHealth(id, 'connected');
+                clusters.report(id, 'connected');
             },
             (message) => {
                 error = message;
                 loading = false;
-                workspace.reportHealth(id, 'error', message);
+                clusters.report(id, 'error', message);
             },
         );
         subscription = sub;
@@ -423,6 +426,10 @@
     $effect(() => {
         const chosen = selected;
         subscription?.setNamespaces(chosen);
+        // ...and write it down, so the tab comes back to this namespace after a
+        // restart rather than to the whole cluster. Unlike the sort and the
+        // search, which stay in views for the session only.
+        workspace.rememberNamespaces();
     });
 
     // The namespace list belongs to the context, not the kind, so it is fetched
@@ -488,7 +495,7 @@
     // Opened as what the row is, not as the tab's kind: a plugin view's rows
     // are the kind the view lists.
     function select(row: Row): void {
-        workspace.openDetail({ contextId, kind: workspace.listedKind(kind), namespace: row.namespace, name: row.name });
+        detail.open({ contextId, kind: workspace.listedKind(kind), namespace: row.namespace, name: row.name });
     }
 
     // ----- columns ---------------------------------------------------------

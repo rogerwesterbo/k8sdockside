@@ -34,6 +34,7 @@
     import { workspace, type DockTab } from '../state/workspace.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
+    import { notices } from '../state/notices.svelte';
 
     interface Props {
         tab: DockTab;
@@ -100,10 +101,10 @@
             const found = await helm.versions(chart);
             versions = found.map((v) => v.version);
             if (versions.length === 0) {
-                workspace.inform(`No repository on this machine offers ${chart}`);
+                notices.inform(`No repository on this machine offers ${chart}`);
             }
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         } finally {
             lookingUp = false;
         }
@@ -180,7 +181,7 @@
     async function save(): Promise<void> {
         if (!canSave) return;
         if (await editors.save(tab.id, tab)) {
-            workspace.inform(
+            notices.inform(
                 isRelease
                     ? `${tab.name} upgraded to ${doc.chart}${doc.version ? ` ${doc.version}` : ''}`
                     : `${singularFor(tab.kind)} ${tab.name} saved`,

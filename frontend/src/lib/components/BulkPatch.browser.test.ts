@@ -2,6 +2,8 @@ import { EditorView } from '@codemirror/view';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { notices } from '../state/notices.svelte';
+import { detail } from '../state/detail.svelte';
 
 // The table's rows arrive through a subscription. Stubbing that is what lets a
 // test say "the cluster holds this" without a cluster.
@@ -144,8 +146,8 @@ function sent(): string {
 }
 
 beforeEach(() => {
-    workspace.closeDetail();
-    workspace.dismissNotice();
+    detail.close();
+    notices.dismiss();
     vi.mocked(ActionService.PatchMany).mockReset().mockResolvedValue({ done: 2, failures: [] });
     vi.mocked(ActionService.PreviewPatch).mockReset().mockResolvedValue({ json: '', empty: true, error: '', line: 0 });
 });
@@ -200,7 +202,7 @@ test('setting a label sends one merge patch carrying every ticked row, and keeps
         ],
         '{"metadata":{"labels":{"team":"platform"}}}',
     );
-    expect(workspace.notice?.text).toBe('2 pods patched');
+    expect(notices.current?.text).toBe('2 pods patched');
     await expect.element(page.getByText('2 selected')).toBeVisible();
 });
 
@@ -271,8 +273,8 @@ test('a refusal leaves only the refused row ticked, with the reason', async () =
 
     await expect.element(page.getByRole('checkbox', { name: 'Select web-1' })).not.toBeChecked();
     await expect.element(page.getByRole('checkbox', { name: 'Select web-2' })).toBeChecked();
-    expect(workspace.notice?.tone).toBe('error');
-    expect(workspace.notice?.text).toContain('web-2');
+    expect(notices.current?.tone).toBe('error');
+    expect(notices.current?.text).toContain('web-2');
 });
 
 // The YAML mode: a whole merge patch, for several fields at once. The text is
@@ -291,7 +293,7 @@ test('the YAML mode sends the document as typed, previewed by the backend', asyn
 
     await expect.poll(() => vi.mocked(ActionService.PatchMany).mock.calls.length).toBe(1);
     expect(sent()).toBe('spec:\n  replicas: 2\n');
-    expect(workspace.notice?.text).toBe('2 pods patched');
+    expect(notices.current?.text).toBe('2 pods patched');
 });
 
 test('the YAML mode starts as a commented example, with nothing to apply', async () => {

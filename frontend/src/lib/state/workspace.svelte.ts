@@ -79,6 +79,9 @@ import {
     pluginKindFor,
     registerPluginViews,
 } from '../catalogue';
+import { clusters } from './health.svelte';
+import { notices } from './notices.svelte';
+import { detail, type DetailTarget } from './detail.svelte';
 import { defaultColorFor } from '../colors';
 import { adoptPluginCatalogue } from '../plugins/adopt';
 import { emptyPluginCatalogue, type Plugin, type PluginCatalogue } from '../plugins/types';
@@ -111,6 +114,11 @@ export {
 export type { PaneId, PaneState, Tab, TabTarget, TabView } from './panes';
 export { beginTabDrag, currentTabDrag, endTabDrag } from './tabdrag.svelte';
 export type { TabDrag } from './tabdrag.svelte';
+// Reachability moved to its own store; re-exported so the components drawing an
+// indicator import the type from beside the thing they are drawing.
+export type { Health, HealthStatus } from './health.svelte';
+export type { Notice } from './notices.svelte';
+export type { DetailTarget } from './detail.svelte';
 
 /**
  * One tab in a pane, under the name the document views knew it by.
@@ -121,34 +129,6 @@ export type { TabDrag } from './tabdrag.svelte';
  * something that can sit anywhere.
  */
 export type DockTab = Tab;
-
-/** What a dock tab shows. The document views, under their old name. */
-export type DockView = TabView;
-
-/** The object the detail panel is describing. */
-export interface DetailTarget {
-    contextId: string;
-    kind: string;
-    namespace: string;
-    name: string;
-}
-
-/**
- * Whether a cluster can be reached, as shown by the sidebar indicator.
- *
- * `unknown` is the resting state and is not a failure: contexts are only
- * probed when you touch them, so most of a long list has simply never been
- * asked. It has to read as "not checked", never as "broken".
- */
-export type HealthStatus = 'unknown' | 'checking' | 'connected' | 'error';
-
-/** One context's reachability, with the reason when it failed. */
-export interface Health {
-    status: HealthStatus;
-    message: string;
-}
-
-const UNCHECKED: Health = { status: 'unknown', message: '' };
 
 /**
  * A request to bring one context into view in the sidebar.
@@ -183,12 +163,6 @@ export interface CustomKinds {
 
 const NOT_LOADED: CustomKinds = { status: 'idle', groups: [], message: '' };
 
-/** A transient message shown in the status bar. */
-export interface Notice {
-    text: string;
-    tone: 'info' | 'error';
-}
-
 /**
  * Whether one saved tab can come back.
  *
@@ -219,6 +193,7 @@ function tabFromRef(ref: {
     kind: string;
     namespace: string;
     name: string;
+    namespaces?: string[];
 }): Tab {
     const view = ref.type as TabView;
     if (view === 'clusters') return clustersTab();
@@ -228,8 +203,23 @@ function tabFromRef(ref: {
                 ? 'Dashboard'
                 : labelFor(ref.kind)
             : ref.name;
+    const id = tabIdFor(view, ref);
+    // Seeded into views rather than carried on the tab, because views is where
+    // the table looks as it mounts -- and a restored tab has to find its filter
+    // there just as a tab brought forward again does. Only the filter is
+    // restored; the sort and the search are not written down at all, for the
+    // reasons in views.ts.
+    if (view === 'resource' && ref.namespaces?.length) {
+        views.remember(id, {
+            sortColumn: null,
+            sortDescending: false,
+            namespaces: [...ref.namespaces],
+            query: '',
+            node: '',
+        });
+    }
     return {
-        id: tabIdFor(view, ref),
+        id,
         view,
         contextId: ref.contextId,
         kind: ref.kind,
@@ -243,7 +233,11 @@ function tabFromRef(ref: {
 function defaultPaneSettings(): Settings['panes'] {
     return {
         left: {
-            tabs: [{ type: 'clusters', contextId: '', kind: 'clusters', namespace: '', name: '' }],
+            tabs: [
+                // The cluster tree, which is not a collection and so has no
+                // namespace filter to carry.
+                { type: 'clusters', contextId: '', kind: 'clusters', namespace: '', name: '', namespaces: [] },
+            ],
             open: true,
             size: 260,
         },
@@ -383,6 +377,21 @@ function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (.
 type Section = 'contexts' | 'panes' | 'layout' | 'preferences';
 
 class Workspace {
+    /**
+     * Tells the detail store how to put its report on screen.
+     *
+     * Done here rather than in the store because these two operations are the
+     * only thing it needs from the tab machinery, and handing them over is what
+     * lets the two modules stay pointed one way: this one knows about the
+     * report, the report knows nothing about panes.
+     */
+    constructor() {
+        detail.connect({
+            show: (target) => this.showDetailsTab(target),
+            hide: () => this.hideDetailsTab(),
+        });
+    }
+
     /** Kubeconfig files from the last sync, each with its parsed contexts. */
     files = $state<ConfigFile[]>([]);
     /** Persisted user preferences, replaced wholesale by every backend write. */
@@ -401,25 +410,18 @@ class Workspace {
     /** Contexts whose resource tree is expanded in the sidebar. */
     expanded = $state<string[]>([]);
 
-    detailTarget = $state<DetailTarget | null>(null);
-    detailText = $state('');
-    detailLoading = $state(false);
-    detailError = $state<string | null>(null);
     /**
      * The object's revision the report on screen was read at. The panel
      * compares it against the object's revision now: when they differ, the
      * object has been written since and the report is out of date.
      */
-    detailRevision = $state(0);
     /**
      * Which describe the panel is waiting for. Two can be in flight at once --
      * a save starts one while an open one is still out -- and closing the panel
      * must leave neither able to land.
      */
-    private detailLoad = 0;
 
     /** Reachability per context, written by both probes and tab outcomes. */
-    health = $state<Record<string, Health>>({});
     /** Custom resource definitions per context, loaded on demand. */
     customKinds = $state<Record<string, CustomKinds>>({});
     /**
@@ -464,7 +466,6 @@ class Workspace {
 
     syncing = $state(false);
     loaded = $state(false);
-    notice = $state<Notice | null>(null);
     configPath = $state('');
 
     contexts = $derived(this.files.flatMap((f) => f.contexts));
@@ -649,7 +650,7 @@ class Workspace {
             this.settings = adoptSettings(await SettingsService.Get());
             this.configPath = await SettingsService.ConfigPath();
         } catch (err) {
-            this.fail(`Could not read settings: ${message(err)}`);
+            notices.fail(`Could not read settings: ${message(err)}`);
         }
         // Before the kubeconfig sync, which talks to clusters and can take a
         // while: the theme is what the user sees first, and waiting on a
@@ -666,7 +667,7 @@ class Workspace {
         // reported as an error against whatever happens to be running, and the
         // user is told nothing about the one read that actually failed.
         void forwards.load().catch((err: unknown) => {
-            this.fail(`Could not read the port forwards: ${message(err)}`);
+            notices.fail(`Could not read the port forwards: ${message(err)}`);
         });
         await this.sync({ restoreTabs: true });
         this.loaded = true;
@@ -684,7 +685,7 @@ class Workspace {
                 this.themeTokens = adoptTokens(await ThemeService.Tokens());
             }
         } catch (err) {
-            this.fail(`Could not read themes: ${message(err)}`);
+            notices.fail(`Could not read themes: ${message(err)}`);
         }
     }
 
@@ -697,24 +698,24 @@ class Workspace {
         this.syncing = true;
         try {
             this.files = adoptFiles(await KubeconfigService.Sync());
-            this.pruneHealth();
+            clusters.prune(this.contexts.map((c) => c.id));
             this.pruneCustomKinds();
             if (restoreTabs) {
                 this.restorePanes();
             } else {
                 this.dropTabsForMissingContexts();
-                this.recheckHealth();
+                clusters.recheck();
                 this.recheckCustomKinds();
                 // Only for a sync the user asked for: a rescan that finds
                 // nothing new looks identical to one that did not run.
-                this.inform(
+                notices.inform(
                     `${this.contexts.length} context${this.contexts.length === 1 ? '' : 's'} ` +
                         `in ${this.files.length} file${this.files.length === 1 ? '' : 's'}`,
                 );
             }
             this.ensureSelection();
         } catch (err) {
-            this.fail(`Sync failed: ${message(err)}`);
+            notices.fail(`Sync failed: ${message(err)}`);
         } finally {
             this.syncing = false;
         }
@@ -730,7 +731,7 @@ class Workspace {
             // Picking several files at once can partly succeed. The message
             // names what failed, but the ones that worked are already stored,
             // so the sidebar has to be brought up to date regardless.
-            this.fail(message(err));
+            notices.fail(message(err));
             await this.reload();
         }
     }
@@ -742,7 +743,7 @@ class Workspace {
             this.settings = adoptSettings(await SettingsService.Get());
             this.ensureSelection();
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -753,7 +754,7 @@ class Workspace {
             this.settings = adoptSettings(await SettingsService.Get());
             this.ensureSelection();
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -764,7 +765,7 @@ class Workspace {
             this.settings = adoptSettings(await SettingsService.Get());
             this.ensureSelection();
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -791,7 +792,7 @@ class Workspace {
             this.dropTabsForMissingContexts();
             this.ensureSelection();
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -817,7 +818,7 @@ class Workspace {
             this.dropTabsForMissingContexts();
             this.ensureSelection();
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -838,7 +839,7 @@ class Workspace {
             this.dropTabsForMissingContexts();
             this.ensureSelection();
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -1056,7 +1057,7 @@ class Workspace {
         if (!this.expanded.includes(contextId)) {
             this.expanded = [...this.expanded, contextId];
         }
-        void this.probe(contextId);
+        void clusters.probe(contextId);
     }
 
     /**
@@ -1085,7 +1086,7 @@ class Workspace {
             : this.expanded.filter((id) => id !== contextId);
         // Opening a context is a reason to know whether it answers; collapsing
         // one is not.
-        if (opening) void this.probe(contextId);
+        if (opening) void clusters.probe(contextId);
     }
 
     isExpanded(contextId: string): boolean {
@@ -1297,8 +1298,8 @@ class Workspace {
         // back to the list the object came from is not leaving it, which is a
         // round trip you can make now that the report is a tab beside it.
         // Bringing an editor forward is not leaving the list either.
-        if (changed && tab.view === 'resource' && !this.describesTheListIn(tab)) {
-            this.closeDetail();
+        if (changed && tab.view === 'resource' && !detail.describesTheListIn(tab)) {
+            detail.close();
         }
     }
 
@@ -1440,8 +1441,8 @@ class Workspace {
             // editor leaves the object it was editing on screen above it, and
             // taking the description away with it would be gratuitous -- and so
             // would taking it away because some other list was closed.
-            if (active && active.view === 'resource' && this.describesTheListIn(active)) {
-                this.closeDetail();
+            if (active && active.view === 'resource' && detail.describesTheListIn(active)) {
+                detail.close();
             }
         }
         // A pane showing nothing is a blank panel taking up a third of the
@@ -1459,12 +1460,6 @@ class Workspace {
      * list, or closing it. Neither should fire for some other list that
      * happens to be in the way.
      */
-    private describesTheListIn(tab: Tab): boolean {
-        const target = this.detailTarget;
-        if (!target) return false;
-        return tab.contextId === target.contextId && tab.kind === target.kind;
-    }
-
     /**
      * Drops whatever a closed tab was holding: an editor's buffer, a log
      * stream's scrollback, a shell, a list's sort and filter.
@@ -1477,7 +1472,7 @@ class Workspace {
     private forget(tab: Tab): void {
         if (tab.view === 'logs') logs.forget(tab.id);
         else if (tab.view === 'shell') terminals.forget(tab.id);
-        else if (tab.view === 'details') this.clearDetail();
+        else if (tab.view === 'details') detail.clear();
         else if (isDocumentView(tab.view)) editors.forget(tab.id);
         else if (tab.view === 'resource') views.forget(tab.id);
     }
@@ -1608,7 +1603,7 @@ class Workspace {
         this.focusedTabId = null;
         this.rememberDetailPane(defaultPaneFor('details'));
         this.persistPanes();
-        this.inform('Layout reset');
+        notices.inform('Layout reset');
     }
 
     // ----- the bottom pane, under the names the dock had ------------------
@@ -1673,9 +1668,9 @@ class Workspace {
                     '',
                 );
             }
-            this.inform(`Opened a shell on ${target.name} in your terminal`);
+            notices.inform(`Opened a shell on ${target.name} in your terminal`);
         } catch (err) {
-            this.fail(message(err));
+            notices.fail(message(err));
         }
     }
 
@@ -1780,6 +1775,24 @@ class Workspace {
         250,
     );
 
+    /**
+     * Writes a resource tab's namespace filter to the settings file.
+     *
+     * Called by the table when the picker changes. The filter itself is already
+     * in views by then -- this only asks for the disk write, which the pane
+     * writer debounces, so the redundant call every table makes as it mounts
+     * costs nothing.
+     *
+     * It is the one part of how a table was left that survives a restart. Which
+     * namespaces you work in is a standing fact about your job rather than
+     * something about this session, and choosing them again in every tab after
+     * every launch is the cost of not writing them down. The sort and the
+     * search stay in memory -- see views.ts for why.
+     */
+    rememberNamespaces(): void {
+        this.persistPanes();
+    }
+
     private persistPanes(): void {
         this.savePanes(
             $state.snapshot({
@@ -1811,6 +1824,10 @@ class Workspace {
                     kind: t.kind,
                     namespace: t.namespace,
                     name: t.name,
+                    // Read out of views rather than held here as well: the
+                    // table is what knows its filter, and a second copy on the
+                    // tab would be the one that went stale.
+                    namespaces: views.recall(t.id)?.namespaces ?? [],
                 })),
         } as appconfig.PaneState;
     }
@@ -2049,92 +2066,12 @@ class Workspace {
         this.customKinds = kept;
     }
 
-    // ----- health --------------------------------------------------------
-
-    /** How a context last responded. Never probed is `unknown`, not an error. */
-    healthOf(contextId: string): Health {
-        return this.health[contextId] ?? UNCHECKED;
-    }
-
-    /**
-     * Records what we now know about a cluster.
-     *
-     * Tabs call this as well as probes, and that is the point: a dashboard that
-     * has just failed to load is better evidence than any ping, and routing
-     * both through one map is what stops the sidebar indicator and the error
-     * page in the tab from disagreeing.
-     */
-    reportHealth(contextId: string, status: HealthStatus, detail = ''): void {
-        this.health[contextId] = { status, message: detail };
-    }
-
-    /**
-     * Checks whether a cluster answers, for the sidebar indicator.
-     *
-     * Probing is lazy and deliberately so: building a client can run an exec
-     * credential plugin, and a kubeconfig with twenty contexts would otherwise
-     * launch twenty subprocesses at startup for clusters the user never asked
-     * about. So a context is probed when it is touched -- selected, expanded or
-     * opened in a tab -- and not again unless something asks it to be.
-     */
-    async probe(contextId: string, { force = false } = {}): Promise<void> {
-        const status = this.healthOf(contextId).status;
-        // A probe already in flight will report for both callers.
-        if (status === 'checking') return;
-        if (!force && status !== 'unknown') return;
-
-        this.reportHealth(contextId, 'checking');
-        try {
-            await ResourceService.Ping(contextId);
-            this.reportHealth(contextId, 'connected');
-        } catch (err) {
-            this.reportHealth(contextId, 'error', message(err));
-        }
-    }
-
-    /** Forgets the status of contexts that are no longer in any kubeconfig. */
-    private pruneHealth(): void {
-        const known = new Set(this.contexts.map((c) => c.id));
-        const kept: Record<string, Health> = {};
-        for (const [id, health] of Object.entries(this.health)) {
-            if (known.has(id)) kept[id] = health;
-        }
-        this.health = kept;
-    }
-
-    /**
-     * Re-probes the contexts already carrying a status, so that the sync button
-     * refreshes what is on screen. Contexts never checked stay unchecked: a
-     * rescan is not a reason to start waking clusters the user has not asked
-     * about.
-     */
-    private recheckHealth(): void {
-        for (const id of Object.keys(this.health)) {
-            void this.probe(id, { force: true });
-        }
-    }
-
-    // ----- the describe tab ----------------------------------------------
-
-    /**
-     * Describes one object, in the pane the describe tab lives in.
-     *
-     * One tab for the window rather than one per object: clicking row after row
-     * refills it, which is what the panel did before it was a tab and what
-     * anyone reading down a list actually wants. What it costs is the ability
-     * to hold two reports open at once, which is the editor's job anyway.
-     *
-     * A tab already open stays where the user put it; a new one opens in the
-     * pane they last put one in -- see detailPane.
-     */
-    async openDetail(target: DetailTarget): Promise<void> {
-        this.detailTarget = target;
-        this.detailRevision = changes.revision(target);
-        this.detailLoading = true;
-        this.detailError = null;
-        this.showDetailsTab(target);
-        await this.describeInto(target);
-    }
+    // ----- the describe tab's place among the panes -----------------------
+    //
+    // The report itself lives in ./detail.svelte.ts. What stays here is the
+    // half that is about tabs: where the report opens, which pane it was
+    // dragged into, and closing it. The store is handed these two operations
+    // in the constructor.
 
     /**
      * Puts the describe tab on screen, titled with what it is describing.
@@ -2163,89 +2100,11 @@ class Workspace {
     }
 
     /**
-     * Re-reads what the panel is describing, after the object has been written.
-     *
-     * It does not go through openDetail because it must not raise
-     * detailLoading: the report on screen is a moment out of date, which is
-     * better than blanking the panel to "Describing…" on every save.
+     * Takes the describe tab away. The pane it was in goes with it if it held
+     * nothing else, the way any pane does.
      */
-    async refreshDetail(): Promise<void> {
-        const target = this.detailTarget;
-        if (!target) return;
-        this.detailRevision = changes.revision(target);
-        await this.describeInto(target);
-    }
-
-    /**
-     * Reads one object's describe report into the panel.
-     *
-     * Every read takes a number and only the newest may land, so that a slow
-     * one answering late cannot put the panel back to what it said before -- or
-     * fill in a panel the user has since closed.
-     */
-    private async describeInto(target: DetailTarget): Promise<void> {
-        const attempt = ++this.detailLoad;
-
-        // A Helm release has no Kubernetes kind, so there is nothing here for
-        // the REST mapper to resolve and Describe can only answer "unknown
-        // resource kind: helmreleases" -- correctly, since there is no such
-        // kind. The drawer renders the release's own record instead, read by
-        // HelmRelease.svelte, so this leaves the report empty rather than
-        // filling the panel with a complaint about a call that should not have
-        // been made.
-        if (target.kind === HELM_RELEASES) {
-            this.detailText = '';
-            this.detailError = null;
-            this.detailLoading = false;
-            return;
-        }
-
-        try {
-            const text = await ResourceService.Describe(
-                target.contextId,
-                target.kind,
-                target.namespace,
-                target.name,
-            );
-            if (this.detailLoad !== attempt) return;
-            this.detailText = text;
-            this.detailError = null;
-        } catch (err) {
-            if (this.detailLoad !== attempt) return;
-            this.detailText = '';
-            this.detailError = message(err);
-        } finally {
-            if (this.detailLoad === attempt) this.detailLoading = false;
-        }
-    }
-
-    /**
-     * Puts the describe tab away and forgets what it held.
-     *
-     * Called by the tab's own close button, by Escape, and by the store itself
-     * when the list the report belonged to is left or closed. The pane it was
-     * in goes with it if it held nothing else, the way any pane does.
-     */
-    closeDetail(): void {
-        this.clearDetail();
+    private hideDetailsTab(): void {
         if (this.paneOf(DETAILS_TAB_ID) !== null) this.closeTab(DETAILS_TAB_ID);
-    }
-
-    /**
-     * Drops the report without touching the tab.
-     *
-     * The half of closing that `forget` needs: the tab is already on its way
-     * out by the time it is called, and going back through closeDetail from
-     * there would send it round the houses to close a tab that has gone.
-     */
-    private clearDetail(): void {
-        // Takes the number with it, so whatever is in flight has already lost.
-        this.detailLoad++;
-        this.detailTarget = null;
-        this.detailText = '';
-        this.detailError = null;
-        this.detailRevision = 0;
-        this.detailLoading = false;
     }
 
     /**
@@ -2261,6 +2120,14 @@ class Workspace {
         this.settings.layout.detailPane = pane;
         this.persistLayout();
     }
+
+    // ----- folding the sidebar's resource groups --------------------------
+    //
+    // Folding is per context with a shared default behind it: a cluster either
+    // has its own list of shut sections or follows the global one, and
+    // collapsedGroupsFor is where that fallback happens. Everything below reads
+    // through it rather than at settings.contexts directly, so the two cannot
+    // disagree about what an absent list means.
 
     /** The groups folded for one context: its own list, or the shared default. */
     collapsedGroupsFor(contextId: string): string[] {
@@ -2338,6 +2205,11 @@ class Workspace {
         this.setFoldingOverride(contextId, []);
     }
 
+    // ----- zoom and the sidebar's width ----------------------------------
+    //
+    // Both are window-wide rather than per context, and both are persisted, so
+    // they sit together rather than beside the panes they happen to resize.
+
     /** Returns a context to following the shared default folding. */
     clearFoldingOverride(contextId: string): void {
         this.setFoldingOverride(contextId, null);
@@ -2391,7 +2263,7 @@ class Workspace {
             this.pluginCatalogue = adoptPluginCatalogue(await PluginService.List());
             this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
         } catch (err) {
-            this.fail(`Could not read plugins: ${message(err)}`);
+            notices.fail(`Could not read plugins: ${message(err)}`);
             return;
         }
         this.registerViews();
@@ -2424,9 +2296,9 @@ class Workspace {
             this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
             this.registerViews();
             const count = this.plugins.length;
-            this.inform(`${count} plugin${count === 1 ? '' : 's'} available`);
+            notices.inform(`${count} plugin${count === 1 ? '' : 's'} available`);
         } catch (err) {
-            this.fail(`Could not read plugins: ${message(err)}`);
+            notices.fail(`Could not read plugins: ${message(err)}`);
         }
     }
 
@@ -2446,7 +2318,7 @@ class Workspace {
             this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
             this.registerViews();
         } catch (err) {
-            this.fail(`Could not ${enabled ? 'enable' : 'disable'} the plugin: ${message(err)}`);
+            notices.fail(`Could not ${enabled ? 'enable' : 'disable'} the plugin: ${message(err)}`);
         }
     }
 
@@ -2455,7 +2327,7 @@ class Workspace {
         try {
             await PluginService.RevealDir();
         } catch (err) {
-            this.fail(`Could not open the plugins folder: ${message(err)}`);
+            notices.fail(`Could not open the plugins folder: ${message(err)}`);
         }
     }
 
@@ -2464,9 +2336,9 @@ class Workspace {
         try {
             const path = await PluginService.CreateExample();
             await this.loadPlugins();
-            this.inform(`Wrote ${path}`);
+            notices.inform(`Wrote ${path}`);
         } catch (err) {
-            this.fail(`Could not write a starter plugin: ${message(err)}`);
+            notices.fail(`Could not write a starter plugin: ${message(err)}`);
         }
     }
 
@@ -2477,7 +2349,7 @@ class Workspace {
             this.registerViews();
             this.settings = adoptSettings(await SettingsService.Get());
         } catch (err) {
-            this.fail(`Could not add the folder: ${message(err)}`);
+            notices.fail(`Could not add the folder: ${message(err)}`);
         }
     }
 
@@ -2488,7 +2360,7 @@ class Workspace {
             this.registerViews();
             this.settings = adoptSettings(await SettingsService.Get());
         } catch (err) {
-            this.fail(`Could not drop the folder: ${message(err)}`);
+            notices.fail(`Could not drop the folder: ${message(err)}`);
         }
     }
 
@@ -2503,7 +2375,7 @@ class Workspace {
     async reloadThemes(): Promise<void> {
         await this.loadThemes();
         const count = this.themes.length;
-        this.inform(`${count} theme${count === 1 ? '' : 's'} available`);
+        notices.inform(`${count} theme${count === 1 ? '' : 's'} available`);
     }
 
     /** Opens the themes folder in the file manager, creating it if need be. */
@@ -2511,7 +2383,7 @@ class Workspace {
         try {
             await ThemeService.RevealDir();
         } catch (err) {
-            this.fail(`Could not open the themes folder: ${message(err)}`);
+            notices.fail(`Could not open the themes folder: ${message(err)}`);
         }
     }
 
@@ -2523,9 +2395,9 @@ class Workspace {
         try {
             const path = await ThemeService.CreateExample();
             await this.loadThemes();
-            this.inform(`Wrote ${path}`);
+            notices.inform(`Wrote ${path}`);
         } catch (err) {
-            this.fail(`Could not write a starter theme: ${message(err)}`);
+            notices.fail(`Could not write a starter theme: ${message(err)}`);
         }
     }
 
@@ -2535,7 +2407,7 @@ class Workspace {
             this.themeCatalogue = adoptCatalogue(await ThemeService.BrowseForFolder());
             this.settings = adoptSettings(await SettingsService.Get());
         } catch (err) {
-            this.fail(`Could not add the folder: ${message(err)}`);
+            notices.fail(`Could not add the folder: ${message(err)}`);
         }
     }
 
@@ -2545,7 +2417,7 @@ class Workspace {
             this.themeCatalogue = adoptCatalogue(await ThemeService.RemoveFolder(path));
             this.settings = adoptSettings(await SettingsService.Get());
         } catch (err) {
-            this.fail(`Could not drop the folder: ${message(err)}`);
+            notices.fail(`Could not drop the folder: ${message(err)}`);
         }
     }
 
@@ -2743,11 +2615,11 @@ class Workspace {
                 saved = await SettingsService.SetContextPrefs(id, cleared);
             }
             if (saved) this.settings = adoptSettings(saved);
-            this.inform(
+            notices.inform(
                 `${entries.length} context${entries.length === 1 ? '' : 's'} now follow the default folding`,
             );
         } catch (err) {
-            this.fail(`Could not clear the folding overrides: ${message(err)}`);
+            notices.fail(`Could not clear the folding overrides: ${message(err)}`);
             await this.reloadSettings();
         }
     }
@@ -2816,7 +2688,7 @@ class Workspace {
                 .then((saved) => this.adopt(saved, section, id))
                 .catch((err: unknown) => {
                     this.settle(section, id);
-                    this.fail(`${failure}: ${message(err)}`);
+                    notices.fail(`${failure}: ${message(err)}`);
                 });
         }, ms);
 
@@ -2852,24 +2724,6 @@ class Workspace {
         if (write) this.writes.set(section, { ...write, answered: Math.max(write.answered, id) });
     }
 
-    // ----- notices -------------------------------------------------------
-
-    /**
-     * Reports something that went wrong, in the words of whatever refused it.
-     * Public because an action's refusal -- an API server saying which verb on
-     * which resource was denied -- is reported by the component that asked.
-     */
-    fail(text: string): void {
-        this.notice = { text, tone: 'error' };
-    }
-
-    inform(text: string): void {
-        this.notice = { text, tone: 'info' };
-    }
-
-    dismissNotice(): void {
-        this.notice = null;
-    }
 }
 
 export const workspace = new Workspace();

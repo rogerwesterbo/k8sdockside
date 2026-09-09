@@ -17,7 +17,15 @@ import type { PaneId } from './panes';
 
 /** One pane as the settings file holds it. See ./panes.ts for what a pane is. */
 export interface SavedPane {
-    tabs: { type: string; contextId: string; kind: string; namespace: string; name: string }[];
+    tabs: {
+        type: string;
+        contextId: string;
+        kind: string;
+        namespace: string;
+        name: string;
+        /** A resource tab's namespace filter; empty for the whole cluster. */
+        namespaces: string[];
+    }[];
     open: boolean;
     size: number;
 }
@@ -37,6 +45,7 @@ function adoptPane(pane: appconfig.PaneState | undefined | null, open: boolean, 
             kind: tab.kind,
             namespace: tab.namespace ?? '',
             name: tab.name ?? '',
+            namespaces: [...(tab.namespaces ?? [])],
         })),
         open: pane?.open ?? open,
         size: pane?.size || size,

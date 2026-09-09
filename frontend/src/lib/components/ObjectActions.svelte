@@ -18,6 +18,8 @@
     import { helm } from '../state/helm.svelte';
     import { workspace, type DetailTarget } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
+    import { notices } from '../state/notices.svelte';
+    import { detail } from '../state/detail.svelte';
 
     // Named `object` rather than `target`: `target` is one of Svelte's own
     // mount options, and a prop by that name is taken for the element to mount
@@ -212,21 +214,21 @@
             switch (id) {
                 case 'delete':
                     await actions.remove(object);
-                    workspace.inform(`${subject} deleted`);
+                    notices.inform(`${subject} deleted`);
                     // Nothing is left to describe.
-                    workspace.closeDetail();
+                    detail.close();
                     return;
                 case 'scale':
                     await actions.scale(object, value);
-                    workspace.inform(`${subject} scaled to ${value}`);
+                    notices.inform(`${subject} scaled to ${value}`);
                     break;
                 case 'restart':
                     await actions.restart(object);
-                    workspace.inform(`${subject} restarting`);
+                    notices.inform(`${subject} restarting`);
                     break;
                 case 'cordon':
                     await actions.cordon(object, !facts.cordoned);
-                    workspace.inform(`${subject} ${facts.cordoned ? 'cordoned' : 'uncordoned'}`);
+                    notices.inform(`${subject} ${facts.cordoned ? 'cordoned' : 'uncordoned'}`);
                     break;
                 case 'drain':
                     await actions.drain(object);
@@ -243,23 +245,23 @@
                     // ids apart from a workload's Restart.
                     const op = id.slice('vm'.length);
                     await actions.vmOperation(object, op);
-                    workspace.inform(`${subject} ${VM_DONE[id]}`);
+                    notices.inform(`${subject} ${VM_DONE[id]}`);
                     break;
                 }
                 case 'rollback':
                     await helm.rollback(object, value);
-                    workspace.inform(`${object.name} rolled back to revision ${value}`);
+                    notices.inform(`${object.name} rolled back to revision ${value}`);
                     break;
                 case 'uninstall':
                     await helm.uninstall(object, keepHistory);
-                    workspace.inform(`${object.name} uninstalled`);
+                    notices.inform(`${object.name} uninstalled`);
                     // Nothing is left to describe, exactly as after a delete.
-                    workspace.closeDetail();
+                    detail.close();
                     return;
             }
             asking = null;
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
             asking = null;
         } finally {
             busy = false;
@@ -304,23 +306,23 @@
         // allowed to be empty.
         const local = localPort ?? 0;
         if (remote <= 0 || remote > 65535) {
-            workspace.fail(`${remote} is not a port`);
+            notices.fail(`${remote} is not a port`);
             return;
         }
         if (local < 0 || local > 65535) {
-            workspace.fail(`${local} is not a port`);
+            notices.fail(`${local} is not a port`);
             return;
         }
 
         busy = true;
         try {
             const opened = await forwards.start(object, remote, local, openBrowser);
-            workspace.inform(
+            notices.inform(
                 `Forwarding localhost:${opened.localPort} to ${object.name} on ${remote}`,
             );
             asking = null;
         } catch (err) {
-            workspace.fail(err instanceof Error ? err.message : String(err));
+            notices.fail(err instanceof Error ? err.message : String(err));
         } finally {
             busy = false;
         }

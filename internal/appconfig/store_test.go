@@ -1241,3 +1241,65 @@ func TestAFileFromBeforeColumnsCouldBeChanged(t *testing.T) {
 		t.Errorf("prefs = %+v, want the alias read and no column settings invented", got)
 	}
 }
+
+// The thing the feature promises: the namespace a tab was narrowed to is still
+// there after quitting and reopening the app. Everything else about how a table
+// was left stays in memory, so this is the one part that has to reach the file.
+func TestATabsNamespaceFilterSurvivesAReopen(t *testing.T) {
+	path := tempSettings(t)
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetPanes(Panes{
+		Main: PaneState{
+			Open: true,
+			Tabs: []PaneTabRef{
+				{Type: ViewResource, ContextID: "cfg::prod", Kind: "pods", Namespaces: []string{"team-a", "kube-system"}},
+				// Narrowed to nothing: the whole cluster, which has to stay
+				// distinguishable from a filter that was never set.
+				{Type: ViewResource, ContextID: "cfg::prod", Kind: "services"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SetPanes: %v", err)
+	}
+
+	reopened, err := openAt(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tabs := reopened.Get().Panes.Main.Tabs
+	if len(tabs) != 2 {
+		t.Fatalf("main pane tabs = %d, want 2", len(tabs))
+	}
+	if got := tabs[0].Namespaces; len(got) != 2 || got[0] != "team-a" || got[1] != "kube-system" {
+		t.Errorf("namespaces = %v, want the two it was narrowed to, in order", got)
+	}
+	if got := tabs[1].Namespaces; len(got) != 0 {
+		t.Errorf("namespaces = %v, want none for the tab showing the whole cluster", got)
+	}
+}
+
+// A file written before tabs carried a filter has to open on the whole cluster
+// rather than fail to read.
+func TestASettingsFileFromBeforeNamespaceFiltersStillOpens(t *testing.T) {
+	path := tempSettings(t)
+	legacy := `{"panes":{"main":{"open":true,"tabs":[{"type":"resource","contextId":"cfg::prod","kind":"pods"}]}}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := openAt(path)
+	if err != nil {
+		t.Fatalf("opening a file written before this field: %v", err)
+	}
+	tabs := store.Get().Panes.Main.Tabs
+	if len(tabs) != 1 {
+		t.Fatalf("main pane tabs = %d, want the one it holds", len(tabs))
+	}
+	if len(tabs[0].Namespaces) != 0 {
+		t.Errorf("namespaces = %v, want none", tabs[0].Namespaces)
+	}
+}

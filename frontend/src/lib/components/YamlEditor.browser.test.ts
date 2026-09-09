@@ -239,12 +239,15 @@ test('saving sends what is in the editor and takes back what was stored', async 
     await page.getByRole('button', { name: 'Save' }).click();
 
     await vi.waitFor(() => expect(text()).toBe(stored));
+    // Last argument is the document as opened, which is what lets a save the
+    // cluster refuses be replayed against what it holds now.
     expect(ResourceService.ApplyYAML).toHaveBeenCalledWith(
         PROD,
         'pods',
         'default',
         'web',
         'apiVersion: v1\nkind: Pod\n',
+        LIVE,
     );
     await expect.element(page.getByText('Saved')).toBeVisible();
 });

@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { detail } from '../state/detail.svelte';
 
 // The sidebar's width is a decision, not a suggestion.
 //
@@ -70,7 +71,7 @@ async function crowdTheWindow(): Promise<void> {
     await page.viewport(1440, 900);
     workspace.settings.layout.detailPane = 'right';
     workspace.setPaneSize('right', 929);
-    await workspace.openDetail({
+    await detail.open({
         contextId: PROD,
         kind: 'pods',
         namespace: 'kube-system',

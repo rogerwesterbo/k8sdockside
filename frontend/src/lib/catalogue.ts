@@ -6,12 +6,15 @@
 export const DASHBOARD = 'dashboard';
 
 /**
- * The two kinds this app names in code rather than only in the nav list: a node
- * drills through to the pods placed on it, so both ends of that need saying.
- * The strings are kube.KindNodes and kube.KindPods on the Go side.
+ * The two kinds this app names in code rather than only in the nav list.
+ *
+ * A node drills through to the pods placed on it, and that drill-through has to
+ * say what it is opening. A Secret is the one kind whose values are hidden
+ * until asked for, so the detail panel has to recognise one to offer the
+ * button. The strings are kube.KindPods and kube.KindSecrets on the Go side.
  */
-export const NODES = 'nodes';
 export const PODS = 'pods';
+export const SECRETS = 'secrets';
 
 /**
  * The app-wide settings view, which opens as a tab like any other but belongs

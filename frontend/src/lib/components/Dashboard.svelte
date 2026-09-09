@@ -4,10 +4,12 @@
     import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
     import { adoptOverview, type Overview } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
+    import { clusters } from '../state/health.svelte';
     import MetricsPanel from '../charts/MetricsPanel.svelte';
     import ResourceBudget from '../budget/ResourceBudget.svelte';
     import ErrorState from './ErrorState.svelte';
     import SortableTable from './SortableTable.svelte';
+    import { detail } from '../state/detail.svelte';
 
     interface Props {
         contextId: string;
@@ -37,12 +39,12 @@
                 overview = adoptOverview(result);
                 // A dashboard that loaded is better evidence than any ping, so
                 // it settles the sidebar indicator for this context.
-                workspace.reportHealth(id, 'connected');
+                clusters.report(id, 'connected');
             })
             .catch((err: unknown) => {
                 if (cancelled) return;
                 error = err instanceof Error ? err.message : String(err);
-                workspace.reportHealth(id, 'error', error);
+                clusters.report(id, 'error', error);
             })
             .finally(() => {
                 if (!cancelled) loading = false;
@@ -119,7 +121,7 @@
                         rows={overview.events.rows}
                         empty="Nothing to report."
                         onselect={(row) =>
-                            void workspace.openDetail({ contextId, kind: 'events', namespace: row.namespace, name: row.name })}
+                            void detail.open({ contextId, kind: 'events', namespace: row.namespace, name: row.name })}
                     />
                 </div>
             {/if}

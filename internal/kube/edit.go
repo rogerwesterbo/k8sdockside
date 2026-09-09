@@ -12,12 +12,15 @@ package kube
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -116,7 +119,12 @@ func (w *Watcher) ResourceYAML(kc Context, kind, namespace, name string) (string
 // defaulting or admission control did to the object on the way in. Keeping the
 // sent text would leave the editor holding a stale version, and the next save
 // would be rejected as a conflict against an object nobody else had touched.
-func (w *Watcher) ApplyYAML(kc Context, kind, namespace, name, text string) (string, error) {
+//
+// opened is the document the editor started from, and is what makes a rejected
+// save recoverable: with it, a conflict can be told apart from a collision --
+// see replay. Passing it empty is allowed and simply gives up the retry, which
+// is the behaviour this had before.
+func (w *Watcher) ApplyYAML(kc Context, kind, namespace, name, text, opened string) (string, error) {
 	var out string
 	err := w.withClient(kc, func(c *clusterClient) error {
 		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
@@ -135,7 +143,11 @@ func (w *Watcher) ApplyYAML(kc Context, kind, namespace, name, text string) (str
 			return err
 		}
 
-		saved, err := resourceFor(c.dynamic, mapping, namespace).Update(ctx, obj, metav1.UpdateOptions{})
+		client := resourceFor(c.dynamic, mapping, namespace)
+		saved, err := client.Update(ctx, obj, metav1.UpdateOptions{})
+		if apierrors.IsConflict(err) && opened != "" {
+			saved, err = w.replay(ctx, client, kind, namespace, name, c, obj, opened)
+		}
 		if err != nil {
 			return err
 		}
@@ -143,6 +155,77 @@ func (w *Watcher) ApplyYAML(kc Context, kind, namespace, name, text string) (str
 		return err
 	})
 	return out, err
+}
+
+// replay sends a rejected edit again against the object as the cluster now has
+// it, when nothing the edit touched has moved underneath it.
+//
+// This is what stops a controller from making its own resources uneditable. An
+// object with something reconciling it gets a new resourceVersion every few
+// seconds -- a status condition, an observedGeneration -- so by the time anyone
+// has finished typing, the version the editor opened with is old and the save
+// is refused. Nothing about that refusal concerns the person editing: they
+// changed spec, the controller changed status.
+//
+// So the object is read again and the edit is compared against what actually
+// changed. Where the two are disjoint the edit is replayed onto the current
+// object, which is the save the user asked for. Where they overlap it is
+// refused, and the message names the fields rather than talking about versions:
+// a genuine second editor is exactly what the resourceVersion guard is for, and
+// this keeps it.
+func (w *Watcher) replay(
+	ctx context.Context,
+	client dynamic.ResourceInterface,
+	kind, namespace, name string,
+	c *clusterClient,
+	edited *unstructured.Unstructured,
+	opened string,
+) (*unstructured.Unstructured, error) {
+	before, err := parseObject(opened)
+	if err != nil {
+		// The editor sent something that is not the document it opened with.
+		// Nothing can be worked out from it, so the conflict stands.
+		return nil, conflictError(name)
+	}
+
+	current, _, err := c.get(ctx, kind, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	fresh := forEditing(current)
+
+	mine := diffFields(before.Object, edited.Object)
+	// The cluster's own bookkeeping is not a change anyone has to defend
+	// against, and on a live object it is usually all that moved.
+	theirs := withoutFields(diffFields(before.Object, fresh.Object), serverFields)
+
+	if clashes := conflictingPaths(mine, theirs); len(clashes) > 0 {
+		return nil, fmt.Errorf(
+			"%s was changed in the cluster while you were editing it, in the same place you changed: %s. "+
+				"Reload it to see what it says now",
+			name, listPaths(clashes),
+		)
+	}
+
+	// Onto the current object rather than the edited one, so the save carries
+	// the cluster's resourceVersion and whatever else moved while typing.
+	//
+	// Onto `fresh` specifically, not the raw object it came from: the edit was
+	// made against a document that had been through forEditing, so that is the
+	// only shape it can be replayed onto. Against the raw object a Secret would
+	// go quietly wrong -- the edit speaks of stringData, the raw object holds
+	// data, and removing a key would land on a field that is not there while
+	// the base64 it was meant to remove stayed put.
+	//
+	// Copied because `theirs` still holds references into fresh.
+	merged := fresh.DeepCopy()
+	applyFields(merged.Object, mine)
+	return client.Update(ctx, merged, metav1.UpdateOptions{})
+}
+
+// conflictError is the plain version, for when a retry could not be attempted.
+func conflictError(name string) error {
+	return fmt.Errorf("%s was changed in the cluster while you were editing it. Reload it to see what it says now", name)
 }
 
 // get reads one object, whether or not its kind is namespaced. It reports the
@@ -262,7 +345,68 @@ func forEditing(u *unstructured.Unstructured) *unstructured.Unstructured {
 	} else {
 		out.SetAnnotations(nil)
 	}
+	readableSecret(out)
 	return out
+}
+
+// readableSecret rewrites a Secret's base64 payload into the plaintext field
+// Kubernetes already has for writing one.
+//
+// A Secret read back from the API server carries `data`, whose values are
+// base64. That is what the object is, and it is also unreadable and worse than
+// unreadable to edit: changing one character of a password means decoding it by
+// hand, editing, re-encoding, and pasting it back, with no way to see whether
+// you got it right until something fails to start.
+//
+// So the decodable entries are moved to `stringData` in plain text. This is not
+// a display trick invented here -- `stringData` is a real field, write-only by
+// design, and the API server base64s it back into `data` on the way in. That
+// matters more than legibility: the document stays a valid Secret that can be
+// copied out and applied with kubectl, and a save round-trips through the
+// server's own conversion rather than through an encoder of ours.
+//
+// Entries that are not text are left in `data` exactly as they were. A TLS
+// keystore or a binary token has no plaintext form to offer, and turning one
+// into a string would corrupt it on the way back.
+func readableSecret(u *unstructured.Unstructured) {
+	if u.GetKind() != "Secret" || u.GetAPIVersion() != "v1" {
+		return
+	}
+	data, found, err := unstructured.NestedMap(u.Object, "data")
+	if err != nil || !found || len(data) == 0 {
+		return
+	}
+
+	text := map[string]any{}
+	binary := map[string]any{}
+	for key, value := range data {
+		encoded, ok := value.(string)
+		if !ok {
+			binary[key] = value
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		// Not text is not a failure: it is a keystore, a DER certificate, a
+		// gzipped blob. It stays base64 because that is the only honest way to
+		// show it.
+		if err != nil || !utf8.Valid(decoded) {
+			binary[key] = value
+			continue
+		}
+		text[key] = string(decoded)
+	}
+
+	if len(text) == 0 {
+		return
+	}
+	if len(binary) > 0 {
+		_ = unstructured.SetNestedMap(u.Object, binary, "data")
+	} else {
+		unstructured.RemoveNestedField(u.Object, "data")
+	}
+	// Written after data, so a Secret that is entirely text reads as one field
+	// rather than as an empty map beside a full one.
+	_ = unstructured.SetNestedMap(u.Object, text, "stringData")
 }
 
 // toYAML renders an object the way kubectl does: through JSON, so that the

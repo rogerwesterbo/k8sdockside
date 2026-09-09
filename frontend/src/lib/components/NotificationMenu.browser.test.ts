@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import NotificationMenu from './NotificationMenu.svelte';
+import { notices } from '../state/notices.svelte';
 
 // The bell asks the backend what it knows the moment it mounts, and every
 // button on it is a call: what is under test is what the window shows for each
@@ -145,7 +146,7 @@ beforeEach(() => {
     OpenDownload.mockReset().mockResolvedValue(undefined);
     updates.status = status({ current: '' });
     workspace.settings.preferences.checkForUpdates = true;
-    workspace.dismissNotice();
+    notices.dismiss();
 });
 
 test('the bell is always there, and quiet when there is nothing unread', async () => {

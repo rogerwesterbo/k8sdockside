@@ -1,6 +1,8 @@
 package kube
 
 import (
+	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -195,5 +197,164 @@ func TestToYAMLReadsLikeKubectl(t *testing.T) {
 	}
 	if back.GetName() != "settings" {
 		t.Errorf("name = %q, want settings", back.GetName())
+	}
+}
+
+// Secrets are read back base64-encoded, which is unreadable and close to
+// uneditable: changing one character of a password means decoding by hand,
+// editing, re-encoding and pasting back. These pin the plaintext form the
+// editor is given instead, and the line it does not cross.
+
+func secret(data map[string]any) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]any{"name": "creds", "namespace": "default"},
+		"type":       "Opaque",
+		"data":       data,
+	}}
+}
+
+func TestASecretIsOpenedInPlainText(t *testing.T) {
+	out := forEditing(secret(map[string]any{
+		"username": base64.StdEncoding.EncodeToString([]byte("admin")),
+		"password": base64.StdEncoding.EncodeToString([]byte("hunter2")),
+	}))
+
+	text, found, _ := unstructured.NestedStringMap(out.Object, "stringData")
+	if !found {
+		t.Fatal("no stringData: the values are still base64 and still uneditable")
+	}
+	if text["username"] != "admin" || text["password"] != "hunter2" {
+		t.Errorf("stringData = %v, want the decoded values", text)
+	}
+	// data and stringData naming the same key would leave which one wins to the
+	// API server's merge rules rather than to the document.
+	if _, still, _ := unstructured.NestedMap(out.Object, "data"); still {
+		t.Error("data survived beside stringData; the same key is now written twice")
+	}
+}
+
+// stringData is not a display trick: it is a real write-only field the API
+// server base64s back into data. That is what keeps the document applicable
+// with kubectl and the save a round trip through the server's own conversion.
+func TestTheDecodedFormIsStillAValidSecret(t *testing.T) {
+	out := forEditing(secret(map[string]any{
+		"token": base64.StdEncoding.EncodeToString([]byte("s3cr3t")),
+	}))
+	rendered, err := toYAML(out)
+	if err != nil {
+		t.Fatalf("rendering: %v", err)
+	}
+	back, err := parseObject(rendered)
+	if err != nil {
+		t.Fatalf("the document the editor shows does not parse back: %v", err)
+	}
+	if got := back.GetKind(); got != "Secret" {
+		t.Errorf("kind = %q", got)
+	}
+	text, _, _ := unstructured.NestedStringMap(back.Object, "stringData")
+	if text["token"] != "s3cr3t" {
+		t.Errorf("stringData = %v, want the plaintext to survive the round trip", text)
+	}
+}
+
+// A keystore or a DER certificate has no plaintext form. Turning one into a
+// string would corrupt it on the way back, so it stays base64.
+func TestBinaryValuesStayEncoded(t *testing.T) {
+	binary := base64.StdEncoding.EncodeToString([]byte{0xff, 0xfe, 0x00, 0x01})
+	out := forEditing(secret(map[string]any{
+		"keystore.p12": binary,
+		"username":     base64.StdEncoding.EncodeToString([]byte("admin")),
+	}))
+
+	data, found, _ := unstructured.NestedStringMap(out.Object, "data")
+	if !found || data["keystore.p12"] != binary {
+		t.Errorf("data = %v, want the binary entry left exactly as it was", data)
+	}
+	if _, leaked := data["username"]; leaked {
+		t.Error("the text entry was left in data as well as decoded")
+	}
+	text, _, _ := unstructured.NestedStringMap(out.Object, "stringData")
+	if text["username"] != "admin" {
+		t.Errorf("stringData = %v, want the text entry decoded beside the binary one", text)
+	}
+}
+
+// A value that is not base64 at all is somebody's hand-edited object. It is
+// left alone rather than guessed at.
+func TestAValueThatIsNotBase64IsLeftAlone(t *testing.T) {
+	out := forEditing(secret(map[string]any{"broken": "not base64!!"}))
+
+	data, found, _ := unstructured.NestedStringMap(out.Object, "data")
+	if !found || data["broken"] != "not base64!!" {
+		t.Errorf("data = %v, want the value untouched", data)
+	}
+	if _, invented := out.Object["stringData"]; invented {
+		t.Error("stringData was invented for a value that could not be decoded")
+	}
+}
+
+// Only Secrets. Anything else with a data map -- a ConfigMap, a custom resource
+// -- means something entirely different by it.
+func TestOnlySecretsAreDecoded(t *testing.T) {
+	cm := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "settings"},
+		"data":       map[string]any{"greeting": "aGVsbG8="},
+	}}
+
+	out := forEditing(cm)
+	if _, decoded := out.Object["stringData"]; decoded {
+		t.Error("a ConfigMap's data was treated as base64")
+	}
+	data, _, _ := unstructured.NestedStringMap(out.Object, "data")
+	if data["greeting"] != "aGVsbG8=" {
+		t.Errorf("data = %v, want it untouched", data)
+	}
+}
+
+// An empty value is a real thing to store, and decodes to an empty string
+// rather than being mistaken for an absent one.
+func TestAnEmptyValueDecodesRatherThanVanishing(t *testing.T) {
+	out := forEditing(secret(map[string]any{"optional": ""}))
+
+	text, found, _ := unstructured.NestedStringMap(out.Object, "stringData")
+	if !found {
+		t.Fatal("no stringData for an empty value")
+	}
+	if got, present := text["optional"]; !present || got != "" {
+		t.Errorf("stringData[optional] = %q (present %v), want an empty string", got, present)
+	}
+}
+
+// The report the detail panel shows is built from a fixed list of top-level
+// fields. A revealed Secret's values move to stringData, so a list naming only
+// `data` would answer the reveal button with a report showing nothing -- which
+// is the one way this feature can be wired up and still look broken.
+func TestARevealedSecretRendersItsDecodedValues(t *testing.T) {
+	// Serving no kinds at all means objectEvents takes its early return before
+	// it reaches the dynamic client, which this test does not have.
+	c := &clusterClient{mapper: &countingMapper{}}
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+
+	object := secret(map[string]any{
+		"password": base64.StdEncoding.EncodeToString([]byte("hunter2")),
+	})
+
+	hidden := describeLive(context.Background(), c, object, gvr)
+	if !strings.Contains(hidden, "aHVudGVyMg==") {
+		t.Errorf("the unrevealed report does not show the encoded value:\n%s", hidden)
+	}
+	if strings.Contains(hidden, "hunter2") {
+		t.Errorf("the unrevealed report leaked the plaintext:\n%s", hidden)
+	}
+
+	revealed := object.DeepCopy()
+	readableSecret(revealed)
+	shown := describeLive(context.Background(), c, revealed, gvr)
+	if !strings.Contains(shown, "hunter2") {
+		t.Errorf("the revealed report does not show the decoded value:\n%s", shown)
 	}
 }

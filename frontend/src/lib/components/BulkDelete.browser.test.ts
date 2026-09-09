@@ -1,6 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
+import { notices } from '../state/notices.svelte';
+import { detail } from '../state/detail.svelte';
 
 // The table's rows arrive through a subscription. Stubbing that is what lets a
 // test say "the cluster holds this" without a cluster.
@@ -141,8 +143,8 @@ function pods() {
 }
 
 beforeEach(() => {
-    workspace.closeDetail();
-    workspace.dismissNotice();
+    detail.close();
+    notices.dismiss();
     // A table remembers its filter for the tab's lifetime, and these tables
     // are never closed through the workspace: one test's search must not
     // hide the rows the next one clicks.
@@ -202,7 +204,7 @@ test('deleting asks first, naming the count, then sends the whole selection in o
         { namespace: 'default', name: 'web-2' },
     ]);
     await expect.poll(() => page.getByText(/selected/).elements().length).toBe(0);
-    expect(workspace.notice?.text).toBe('2 pods deleted');
+    expect(notices.current?.text).toBe('2 pods deleted');
 });
 
 test('cancelling deletes nothing and keeps the selection', async () => {
@@ -233,8 +235,8 @@ test('a refusal keeps that row ticked and says why', async () => {
     await expect.element(page.getByText('1 selected')).toBeVisible();
     await expect.element(page.getByRole('checkbox', { name: 'Select web-2' })).toBeChecked();
     await expect.element(page.getByRole('checkbox', { name: 'Select web-1' })).not.toBeChecked();
-    expect(workspace.notice?.tone).toBe('error');
-    expect(workspace.notice?.text).toContain('web-2');
+    expect(notices.current?.tone).toBe('error');
+    expect(notices.current?.text).toContain('web-2');
 });
 
 test('a listing whose rows cannot be deleted grows no checkboxes', async () => {

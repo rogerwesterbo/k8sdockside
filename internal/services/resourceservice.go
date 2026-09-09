@@ -170,12 +170,16 @@ func (s *ResourceService) CustomResourceKinds(contextID string) ([]kube.CustomRe
 }
 
 // Describe renders the detail report shown in the slide-in panel.
-func (s *ResourceService) Describe(contextID, kind, namespace, name string) (string, error) {
+//
+// reveal decodes a Secret's values into plain text, and does nothing to any
+// other kind. It is asked for per read rather than applied to a report already
+// on screen, so the values cross only when somebody has pressed the button.
+func (s *ResourceService) Describe(contextID, kind, namespace, name string, reveal bool) (string, error) {
 	ctx, err := s.resolve(contextID)
 	if err != nil {
 		return "", err
 	}
-	return s.watcher.Describe(ctx, kind, namespace, name)
+	return s.watcher.Describe(ctx, kind, namespace, name, reveal)
 }
 
 // ResourceYAML returns one object as the YAML the editor opens with. It is a
@@ -211,12 +215,17 @@ func (s *ResourceService) ResourceYAML(contextID, kind, namespace, name string) 
 // against, and whatever defaulting and admission control did to it on the way
 // in. The editor replaces its contents with the result, which is what makes a
 // second save work rather than fail as a conflict.
-func (s *ResourceService) ApplyYAML(contextID, kind, namespace, name, yaml string) (string, error) {
+//
+// opened is the document the editor started from. It is what lets a save the
+// cluster refuses be retried against the object's current state when nothing
+// the edit touched has moved -- the ordinary case for anything with a
+// controller writing its status. See kube.ApplyYAML.
+func (s *ResourceService) ApplyYAML(contextID, kind, namespace, name, yaml, opened string) (string, error) {
 	ctx, err := s.resolve(contextID)
 	if err != nil {
 		return "", err
 	}
-	return s.watcher.ApplyYAML(ctx, kind, namespace, name, yaml)
+	return s.watcher.ApplyYAML(ctx, kind, namespace, name, yaml, opened)
 }
 
 // CheckYAML reports whether what is in the editor is still YAML. It touches no

@@ -35,6 +35,9 @@
         globe: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M3 12h18', 'M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z'],
         sliders: ['M4 7h10', 'M18 7h2', 'M4 17h4', 'M12 17h8', 'M16 5v4', 'M8 15v4'],
         lock: ['M6 10h12v10H6z', 'M9 10V7a3 3 0 0 1 6 0v3'],
+        // The same padlock with the shackle swung open, so the pair reads as
+        // one control in two states rather than as two different icons.
+        unlock: ['M6 10h12v10H6z', 'M9 10V7a3 3 0 0 1 6 0'],
         drive: ['M5 12l2-6h10l2 6v6H5v-6z', 'M5 12h14', 'M8 15.5h.01', 'M11 15.5h.01'],
         // A gateway: two posts with traffic passing between them.
         gateway: ['M5 4v16', 'M19 4v16', 'M9 12h6', 'M12.5 9l3 3-3 3'],

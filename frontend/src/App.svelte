@@ -19,6 +19,7 @@
     import Pane from './lib/components/Pane.svelte';
     import TopBar from './lib/components/TopBar.svelte';
     import { workspace } from './lib/state/workspace.svelte';
+    import { notices } from './lib/state/notices.svelte';
     import { rowMetrics } from './lib/density';
     import { applyTheme } from './lib/theme/apply';
 
@@ -124,8 +125,8 @@
 
     // Notices are informational; they should not need dismissing by hand.
     $effect(() => {
-        if (!workspace.notice) return;
-        const timer = setTimeout(() => workspace.dismissNotice(), 6000);
+        if (!notices.current) return;
+        const timer = setTimeout(() => notices.dismiss(), 6000);
         return () => clearTimeout(timer);
     });
 
@@ -186,12 +187,12 @@
     {/snippet}
 
     <footer class="statusbar">
-        {#if workspace.notice}
-            <span class="notice" class:error={workspace.notice.tone === 'error'}>
-                {#if workspace.notice.tone === 'error'}<Icon name="alert" size={12} />{/if}
-                {workspace.notice.text}
+        {#if notices.current}
+            <span class="notice" class:error={notices.current.tone === 'error'}>
+                {#if notices.current.tone === 'error'}<Icon name="alert" size={12} />{/if}
+                {notices.current.text}
             </span>
-            <button class="dismiss" onclick={() => workspace.dismissNotice()} aria-label="Dismiss message">
+            <button class="dismiss" onclick={() => notices.dismiss()} aria-label="Dismiss message">
                 <Icon name="close" size={11} />
             </button>
         {:else if workspace.selectedContext}

@@ -19,6 +19,7 @@
     import { adoptKubeVirtDetail, type Fact, type KubeVirtDetail } from './adopt';
     import { workspace } from '../state/workspace.svelte';
     import Icon from '../components/Icon.svelte';
+    import { detail as describe } from '../state/detail.svelte';
 
     interface Props {
         contextId: string;
@@ -65,7 +66,7 @@
     /** Opens what a value names: a node, the instance, the launcher pod. */
     function open(fact: Fact): void {
         if (!fact.ref) return;
-        workspace.openDetail({
+        describe.open({
             contextId,
             kind: fact.ref.kind,
             namespace: fact.ref.namespace,

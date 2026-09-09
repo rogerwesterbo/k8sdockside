@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { detail } from './detail.svelte';
 
 // The workspace talks to the Go side the moment it does anything, so the
 // bindings are stubbed. What is under test is which tabs survive a close and
@@ -96,6 +97,7 @@ const {
     DETAILS_TAB_ID,
     clustersTab,
 } = await import('./workspace.svelte');
+const { clusters } = await import('./health.svelte');
 const { DEFAULT_PANE_SIZE } = await import('./panes');
 const { columnKeys, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH } = await import('../columns');
 const { labelFor, iconFor } = await import('../catalogue');
@@ -110,13 +112,14 @@ const PROD = '/home/u/.kube/prod::admin@prod';
 const STAGING = '/home/u/.kube/staging::admin@staging';
 
 /** One saved collection tab, as the settings file holds it. */
-function resource(contextId: string, kind: string) {
-    return { type: 'resource', contextId, kind, namespace: '', name: '' };
+function resource(contextId: string, kind: string, namespaces: string[] = []) {
+    return { type: 'resource', contextId, kind, namespace: '', name: '', namespaces };
 }
 
-/** One saved editor tab, as the settings file holds it. */
+/** One saved editor tab, as the settings file holds it. A document tab is a
+ *  view onto one object and carries no namespace filter. */
 function document(contextId: string, name: string, namespace = 'default', kind = 'pods') {
-    return { type: 'edit', contextId, kind, namespace, name };
+    return { type: 'edit', contextId, kind, namespace, name, namespaces: [] };
 }
 
 /** Opens tabs in order and returns their ids. */
@@ -129,7 +132,7 @@ function open(...pairs: [string, string][]): string[] {
 
 beforeEach(() => {
     workspace.closeAllTabs();
-    workspace.health = {};
+    clusters.prune([]);
     vi.mocked(ResourceService.Ping).mockReset().mockResolvedValue(undefined);
     expect(workspace.tabs).toHaveLength(0);
 });
@@ -324,46 +327,46 @@ describe('health', () => {
     }
 
     test('a context nobody has looked at has no status', () => {
-        expect(workspace.healthOf(PROD).status).toBe('unknown');
+        expect(clusters.of(PROD).status).toBe('unknown');
     });
 
     test('a probe in flight reads as checking', async () => {
         const gate = withheld();
         vi.mocked(ResourceService.Ping).mockReturnValueOnce(gate.promise as never);
 
-        const probing = workspace.probe(PROD);
-        expect(workspace.healthOf(PROD).status).toBe('checking');
+        const probing = clusters.probe(PROD);
+        expect(clusters.of(PROD).status).toBe('checking');
 
         gate.settle(undefined);
         await probing;
     });
 
     test('a cluster that answers is connected', async () => {
-        await workspace.probe(PROD);
+        await clusters.probe(PROD);
 
-        expect(workspace.healthOf(PROD).status).toBe('connected');
-        expect(workspace.healthOf(PROD).message).toBe('');
+        expect(clusters.of(PROD).status).toBe('connected');
+        expect(clusters.of(PROD).message).toBe('');
     });
 
     test('a cluster that refuses is in error, and keeps the reason', async () => {
         vi.mocked(ResourceService.Ping).mockRejectedValueOnce(new Error('dial tcp: connection refused'));
 
-        await workspace.probe(PROD);
+        await clusters.probe(PROD);
 
-        expect(workspace.healthOf(PROD).status).toBe('error');
-        expect(workspace.healthOf(PROD).message).toBe('dial tcp: connection refused');
+        expect(clusters.of(PROD).status).toBe('error');
+        expect(clusters.of(PROD).message).toBe('dial tcp: connection refused');
     });
 
     test('probing a context whose status is already known does not ask again', async () => {
-        await workspace.probe(PROD);
-        await workspace.probe(PROD);
+        await clusters.probe(PROD);
+        await clusters.probe(PROD);
 
         expect(ResourceService.Ping).toHaveBeenCalledTimes(1);
     });
 
     test('a forced probe asks again, so refresh can recheck', async () => {
-        await workspace.probe(PROD);
-        await workspace.probe(PROD, { force: true });
+        await clusters.probe(PROD);
+        await clusters.probe(PROD, { force: true });
 
         expect(ResourceService.Ping).toHaveBeenCalledTimes(2);
     });
@@ -372,8 +375,8 @@ describe('health', () => {
         const gate = withheld();
         vi.mocked(ResourceService.Ping).mockReturnValueOnce(gate.promise as never);
 
-        const first = workspace.probe(PROD);
-        const second = workspace.probe(PROD);
+        const first = clusters.probe(PROD);
+        const second = clusters.probe(PROD);
         gate.settle(undefined);
         await Promise.all([first, second]);
 
@@ -381,26 +384,26 @@ describe('health', () => {
     });
 
     test('a tab reporting a failure turns the indicator red without a second request', () => {
-        workspace.reportHealth(PROD, 'error', 'the server could not find the requested resource');
+        clusters.report(PROD, 'error', 'the server could not find the requested resource');
 
-        expect(workspace.healthOf(PROD).status).toBe('error');
-        expect(workspace.healthOf(PROD).message).toBe('the server could not find the requested resource');
+        expect(clusters.of(PROD).status).toBe('error');
+        expect(clusters.of(PROD).message).toBe('the server could not find the requested resource');
         expect(ResourceService.Ping).not.toHaveBeenCalled();
     });
 
     test('a tab that loads reports the context as connected', () => {
-        workspace.reportHealth(PROD, 'connected');
+        clusters.report(PROD, 'connected');
 
-        expect(workspace.healthOf(PROD).status).toBe('connected');
+        expect(clusters.of(PROD).status).toBe('connected');
     });
 
     test('a tab outcome overrides an earlier probe, being the newer evidence', async () => {
-        await workspace.probe(PROD);
-        expect(workspace.healthOf(PROD).status).toBe('connected');
+        await clusters.probe(PROD);
+        expect(clusters.of(PROD).status).toBe('connected');
 
-        workspace.reportHealth(PROD, 'error', 'connection refused');
+        clusters.report(PROD, 'error', 'connection refused');
 
-        expect(workspace.healthOf(PROD).status).toBe('error');
+        expect(clusters.of(PROD).status).toBe('error');
     });
 
     test('opening a tab probes the cluster it belongs to', () => {
@@ -416,13 +419,13 @@ describe('health', () => {
     });
 
     test('a context that leaves the kubeconfig loses its status', async () => {
-        await workspace.probe(PROD);
-        expect(workspace.healthOf(PROD).status).toBe('connected');
+        await clusters.probe(PROD);
+        expect(clusters.of(PROD).status).toBe('connected');
 
         // Sync is mocked to find nothing, so every context has gone.
         await workspace.sync();
 
-        expect(workspace.health).toEqual({});
+        expect(clusters.of(PROD).status).toBe('unknown');
     });
 });
 
@@ -1397,6 +1400,96 @@ describe('the dock', () => {
     });
 });
 
+// Which namespaces you work in is a standing fact about your job rather than
+// something about this session, so it is the one part of how a table was left
+// that survives a restart. The sort and the search deliberately do not -- see
+// views.ts for why.
+describe('a tab\'s namespace filter', () => {
+    beforeEach(() => {
+        views.forgetAll();
+        workspace.files = [
+            {
+                path: '/home/u/.kube/prod',
+                source: 'manual',
+                error: '',
+                contexts: [{
+                    id: PROD, name: 'admin@prod', cluster: 'prod', user: 'admin',
+                    namespace: '', server: '', file: '/home/u/.kube/prod', current: false,
+                }],
+            },
+        ];
+        vi.mocked(KubeconfigService.Sync).mockResolvedValue(workspace.files);
+        workspace.settings.preferences.restoreTabs = true;
+    });
+
+    test('comes back on the tab it was set on', async () => {
+        workspace.settings.panes.main.tabs = [resource(PROD, 'pods', ['team-a', 'kube-system'])];
+
+        await workspace.sync({ restoreTabs: true });
+
+        const tab = workspace.tabs.find((t) => t.kind === 'pods');
+        expect(tab).toBeTruthy();
+        // Seeded into views, which is where the table looks as it mounts.
+        expect(views.recall(tab!.id)?.namespaces).toEqual(['team-a', 'kube-system']);
+    });
+
+    test('is per tab, not shared between them', async () => {
+        workspace.settings.panes.main.tabs = [
+            resource(PROD, 'pods', ['team-a']),
+            resource(PROD, 'services', ['team-b']),
+        ];
+
+        await workspace.sync({ restoreTabs: true });
+
+        const pods = workspace.tabs.find((t) => t.kind === 'pods')!;
+        const services = workspace.tabs.find((t) => t.kind === 'services')!;
+        expect(views.recall(pods.id)?.namespaces).toEqual(['team-a']);
+        expect(views.recall(services.id)?.namespaces).toEqual(['team-b']);
+    });
+
+    // A tab saved before this existed, or one genuinely showing everything,
+    // must open on the whole cluster rather than on a filter of nothing.
+    test('a tab saved without one opens on the whole cluster', async () => {
+        workspace.settings.panes.main.tabs = [resource(PROD, 'pods')];
+
+        await workspace.sync({ restoreTabs: true });
+
+        const tab = workspace.tabs.find((t) => t.kind === 'pods')!;
+        expect(views.recall(tab.id)?.namespaces ?? []).toEqual([]);
+    });
+
+    // Only the filter. A sort is a column index, and a file older than a change
+    // to a kind's columns would sort by the wrong one.
+    test('the sort and the search are not restored with it', async () => {
+        workspace.settings.panes.main.tabs = [resource(PROD, 'pods', ['team-a'])];
+
+        await workspace.sync({ restoreTabs: true });
+
+        const view = views.recall(workspace.tabs.find((t) => t.kind === 'pods')!.id);
+        expect(view?.sortColumn).toBeNull();
+        expect(view?.query).toBe('');
+    });
+
+    test('is written back to the settings file as the table sets it', async () => {
+        workspace.settings.panes.main.tabs = [];
+        await workspace.sync({ restoreTabs: true });
+        workspace.openTab(PROD, 'pods');
+        const tab = workspace.tabs.find((t) => t.kind === 'pods')!;
+
+        // What the table does when the picker changes.
+        views.remember(tab.id, {
+            sortColumn: null, sortDescending: false,
+            namespaces: ['team-a'], query: '', node: '',
+        });
+        workspace.rememberNamespaces();
+        await vi.waitFor(() => expect(SettingsService.SetPanes).toHaveBeenCalled());
+
+        const written = vi.mocked(SettingsService.SetPanes).mock.calls.at(-1)![0];
+        const saved = written.main?.tabs?.find((t) => t?.kind === 'pods');
+        expect(saved?.namespaces).toEqual(['team-a']);
+    });
+});
+
 describe('restoring the dock at launch', () => {
     beforeEach(() => {
         workspace.closeAllDockTabs();
@@ -1519,38 +1612,38 @@ describe('the detail panel', () => {
     }
 
     beforeEach(() => {
-        workspace.closeDetail();
+        detail.close();
         vi.mocked(ResourceService.Describe).mockReset().mockResolvedValue('Name: web\nStatus: Running');
     });
 
     test('re-reading swaps the report for what the cluster has now', async () => {
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
         vi.mocked(ResourceService.Describe).mockResolvedValue('Name: web\nStatus: Pending');
 
-        await workspace.refreshDetail();
+        await detail.refresh();
 
-        expect(workspace.detailText).toBe('Name: web\nStatus: Pending');
+        expect(detail.text).toBe('Name: web\nStatus: Pending');
     });
 
     // Blanking to "Describing…" every time the object is saved makes the panel
     // flicker for as long as the cluster takes to answer. The report it already
     // has is a moment out of date, which is better than nothing at all.
     test('re-reading keeps the old report on screen until the new one lands', async () => {
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
         const answer = heldDescribe();
 
-        const done = workspace.refreshDetail();
+        const done = detail.refresh();
 
-        expect(workspace.detailLoading).toBe(false);
-        expect(workspace.detailText).toBe('Name: web\nStatus: Running');
+        expect(detail.loading).toBe(false);
+        expect(detail.text).toBe('Name: web\nStatus: Running');
 
         answer('Name: web\nStatus: Pending');
         await done;
-        expect(workspace.detailText).toBe('Name: web\nStatus: Pending');
+        expect(detail.text).toBe('Name: web\nStatus: Pending');
     });
 
     test('re-reading a closed panel touches no cluster', async () => {
-        await workspace.refreshDetail();
+        await detail.refresh();
 
         expect(ResourceService.Describe).not.toHaveBeenCalled();
     });
@@ -1558,54 +1651,54 @@ describe('the detail panel', () => {
     // Two reads can be in flight at once now that a save can start one: the
     // slower must not be allowed to put the panel back to what it said before.
     test('a slow read overtaken by a newer one does not win', async () => {
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
         const slow = heldDescribe();
 
-        const first = workspace.refreshDetail();
+        const first = detail.refresh();
         vi.mocked(ResourceService.Describe).mockResolvedValue('Name: web\nStatus: Pending');
-        await workspace.refreshDetail();
+        await detail.refresh();
         slow('Name: web\nStatus: Running');
         await first;
 
-        expect(workspace.detailText).toBe('Name: web\nStatus: Pending');
+        expect(detail.text).toBe('Name: web\nStatus: Pending');
     });
 
     test('a read still in flight does not reopen a closed panel', async () => {
         const answer = heldDescribe();
-        const opening = workspace.openDetail(WEB);
+        const opening = detail.open(WEB);
 
-        workspace.closeDetail();
+        detail.close();
         answer('Name: web\nStatus: Running');
         await opening;
 
-        expect(workspace.detailTarget).toBeNull();
-        expect(workspace.detailText).toBe('');
+        expect(detail.target).toBeNull();
+        expect(detail.text).toBe('');
     });
 
     // What the panel's report was read at. The panel compares it against the
     // object's revision to notice that a save has made it stale.
     test('opening it records the revision its report was read at', async () => {
         changes.changed(WEB);
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
 
-        expect(workspace.detailRevision).toBe(changes.revision(WEB));
+        expect(detail.revision).toBe(changes.revision(WEB));
     });
 
     test('a save leaves the panel behind the object', async () => {
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
 
         changes.changed(WEB);
 
-        expect(workspace.detailRevision).not.toBe(changes.revision(WEB));
+        expect(detail.revision).not.toBe(changes.revision(WEB));
     });
 
     test('re-reading catches it up', async () => {
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
         changes.changed(WEB);
 
-        await workspace.refreshDetail();
+        await detail.refresh();
 
-        expect(workspace.detailRevision).toBe(changes.revision(WEB));
+        expect(detail.revision).toBe(changes.revision(WEB));
     });
 });
 
@@ -2278,49 +2371,49 @@ describe('the describe tab', () => {
     const WEB = { contextId: PROD, kind: 'pods', namespace: 'default', name: 'web' };
 
     beforeEach(() => {
-        workspace.closeDetail();
+        detail.close();
         for (const pane of ['main', 'right', 'bottom'] as const) workspace.closeAllTabsIn(pane);
         workspace.settings.layout.detailPane = 'right';
     });
 
     test('opens beside the list rather than under it', async () => {
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
 
         expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('right');
         expect(workspace.isPaneOpen('right')).toBe(true);
     });
 
     test('describing a second row refills the tab rather than opening another', async () => {
-        await workspace.openDetail(HT1);
-        await workspace.openDetail(HT2);
+        await detail.open(HT1);
+        await detail.open(HT2);
 
         expect(workspace.allTabs.filter((t) => t.view === 'details')).toHaveLength(1);
-        expect(workspace.detailTarget?.name).toBe('ht2');
+        expect(detail.target?.name).toBe('ht2');
     });
 
     test('wears the name of what it is describing', async () => {
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
 
         expect(workspace.tabFor(DETAILS_TAB_ID)?.title).toBe('ht1');
     });
 
     // The gesture that replaces the three dock buttons.
     test('stays where it was dragged, and the next selection opens it there', async () => {
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
         workspace.moveTabToPane(DETAILS_TAB_ID, 'bottom');
-        workspace.closeDetail();
+        detail.close();
 
-        await workspace.openDetail(HT2);
+        await detail.open(HT2);
 
         expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('bottom');
     });
 
     test('closing it and selecting again brings it back', async () => {
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
         workspace.closeTab(DETAILS_TAB_ID);
-        expect(workspace.detailTarget).toBeNull();
+        expect(detail.target).toBeNull();
 
-        await workspace.openDetail(HT2);
+        await detail.open(HT2);
 
         expect(workspace.paneOf(DETAILS_TAB_ID)).toBe('right');
     });
@@ -2331,11 +2424,11 @@ describe('the describe tab', () => {
         workspace.openTab(PROD, 'pods');
         // On the nodes list, describing a node in it.
         workspace.activateTab(resourceTabId(PROD, 'nodes'));
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
 
         workspace.activateTab(resourceTabId(PROD, 'pods'));
 
-        expect(workspace.detailTarget).toBeNull();
+        expect(detail.target).toBeNull();
         expect(workspace.paneOf(DETAILS_TAB_ID)).toBeNull();
     });
 
@@ -2343,32 +2436,32 @@ describe('the describe tab', () => {
     // clicking back to the very list the object came from is not leaving it.
     test('survives going back to the list the object came from', async () => {
         workspace.openTab(PROD, 'nodes');
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
         workspace.moveTabToPane(DETAILS_TAB_ID, 'main');
 
         workspace.activateTab(resourceTabId(PROD, 'nodes'));
 
-        expect(workspace.detailTarget?.name).toBe('ht1');
+        expect(detail.target?.name).toBe('ht1');
     });
 
     test('closes when the list it was read from is closed', async () => {
         workspace.openTab(PROD, 'nodes');
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
 
         workspace.closeTab(resourceTabId(PROD, 'nodes'));
 
-        expect(workspace.detailTarget).toBeNull();
+        expect(detail.target).toBeNull();
     });
 
     test('is left alone when some other list is closed', async () => {
         workspace.openTab(PROD, 'nodes');
         workspace.openTab(PROD, 'pods');
-        await workspace.openDetail(WEB);
+        await detail.open(WEB);
         workspace.activateTab(resourceTabId(PROD, 'pods'));
 
         workspace.closeTab(resourceTabId(PROD, 'nodes'));
 
-        expect(workspace.detailTarget?.name).toBe('web');
+        expect(detail.target?.name).toBe('web');
     });
 
     // It comes and goes with the selection, so there is nothing to restore it
@@ -2376,7 +2469,7 @@ describe('the describe tab', () => {
     test('is never written to the settings file', async () => {
         vi.mocked(SettingsService.SetPanes).mockClear();
         workspace.openTab(PROD, 'nodes');
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
         // The panes are written on a 250ms debounce, so the assertion has to
         // wait for the write it is about rather than race it.
         await new Promise((r) => setTimeout(r, 400));
@@ -2393,7 +2486,7 @@ describe('the describe tab', () => {
     });
 
     test('goes back to the pane it opens in when the layout is reset', async () => {
-        await workspace.openDetail(HT1);
+        await detail.open(HT1);
         workspace.moveTabToPane(DETAILS_TAB_ID, 'bottom');
 
         workspace.resetLayout();
