@@ -1,8 +1,8 @@
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 import Sidebar from './Sidebar.svelte';
-import { NAV_GROUPS } from '../catalogue';
+import { DEFINITIONS_GROUP, NAV_GROUPS } from '../catalogue';
 import { resourceTabId, workspace } from '../state/workspace.svelte';
 
 vi.mock('@wailsio/runtime', async (importOriginal) => {
@@ -22,6 +22,21 @@ input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(-
 
 const CTX = { id: 'c0', name: 'admin@prod', cluster: 'c0', user: 'admin',
     namespace: '', server: '', file: '/c', current: false };
+
+// A custom resource sits two folds deep -- its API group, inside the
+// definitions section -- which is what makes it different from every other row.
+const API_GROUP = 'vitistack.io';
+const CRD_KIND = 'crd:kubernetesclusters.vitistack.io';
+const CRD_LABEL = 'KubernetesClusters';
+const CUSTOM_KINDS = {
+    status: 'ready' as const,
+    message: '',
+    groups: [{
+        group: API_GROUP,
+        kinds: [{ kind: CRD_KIND, label: CRD_LABEL, group: API_GROUP,
+            plural: 'kubernetesclusters', scoped: false }],
+    }],
+};
 
 const settle = () => new Promise((r) => setTimeout(r, 700));
 const scroller = () => document.querySelector('.scroll') as HTMLElement;
@@ -80,4 +95,62 @@ test('activating a tab brings its own row into view', async () => {
     await settle();
 
     expect(inView(rowFor('All definitions')!)).toBe(true);
+});
+
+// Reaching a custom resource used to leave the sidebar on the cluster's name:
+// the row lives inside its API group inside the definitions section, activating
+// the tab opened neither, and with no row rendered there was nothing to scroll
+// to. These start from both folds shut, which is how a fresh context comes up.
+describe('a custom resource, folded two deep', () => {
+    beforeEach(async () => {
+        workspace.customKinds = { c0: CUSTOM_KINDS };
+        workspace.settings.contexts = {
+            c0: { alias: '', color: '', metrics: '',
+                collapsedGroups: [DEFINITIONS_GROUP], columns: {} },
+        };
+        workspace.expandedApiGroups = [];
+        await settle();
+    });
+
+    test('starts out of the tree entirely, not merely out of view', () => {
+        expect(rowFor(CRD_LABEL)).toBeUndefined();
+    });
+
+    test('activating its tab unfolds its section and its API group', async () => {
+        workspace.openTab(CTX.id, CRD_KIND);
+        await settle();
+
+        expect(workspace.isGroupCollapsed(CTX.id, DEFINITIONS_GROUP)).toBe(false);
+        expect(workspace.isApiGroupExpanded(CTX.id, API_GROUP)).toBe(true);
+    });
+
+    test('activating its tab brings its own row into view', async () => {
+        workspace.openTab(CTX.id, 'pods');
+        workspace.openTab(CTX.id, CRD_KIND);
+        await settle();
+        scroller().scrollTop = 0;
+        await settle();
+
+        workspace.activateTab(resourceTabId(CTX.id, CRD_KIND));
+        await settle();
+
+        const row = rowFor(CRD_LABEL);
+        expect(row).toBeTruthy();
+        expect(inView(row!)).toBe(true);
+    });
+
+    // Coming back to it is the same journey with the folds already open, and it
+    // has to land on the row rather than wherever the previous tab left things.
+    test('coming back to it from another tab finds it again', async () => {
+        workspace.openTab(CTX.id, CRD_KIND);
+        workspace.openTab(CTX.id, 'pods');
+        await settle();
+        workspace.activateTab(resourceTabId(CTX.id, 'pods'));
+        await settle();
+
+        workspace.activateTab(resourceTabId(CTX.id, CRD_KIND));
+        await settle();
+
+        expect(inView(rowFor(CRD_LABEL)!)).toBe(true);
+    });
 });

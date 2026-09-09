@@ -71,8 +71,10 @@ import {
     KUBERNETES,
     APP_KINDS,
     PLUGINS_GROUP,
+    DEFINITIONS_GROUP,
     groupForKind,
     labelFor,
+    parseCustomKind,
     parsePluginKind,
     pluginKindFor,
     registerPluginViews,
@@ -1301,17 +1303,56 @@ class Workspace {
     }
 
     /**
-     * Unfolds the section an activated tab's resource is listed under, so that
-     * the tree shows where the tab you are looking at actually lives.
+     * Unfolds everything an activated tab's row is folded inside, so that the
+     * tree shows where the tab you are looking at actually lives.
      *
-     * It does nothing when the section is already open, which matters: writing
-     * unconditionally would give the context its own folding on every tab
-     * click, pinning it against later changes applied to every cluster.
+     * For most kinds that is one section. Two of them nest a second level, and
+     * a row two levels down is just as hidden as one: a custom resource sits
+     * under its API group under Custom Resource Definitions, and a plugin view
+     * under its plugin under Plugins. Opening only the outer section left the
+     * row unrendered, so the sidebar had nothing to scroll to and fell back to
+     * the cluster's name -- which is what "switching to my CRD tab does not
+     * find it in the tree" looked like.
+     *
+     * Each step does nothing when it is already open, which matters for the
+     * sections: writing unconditionally would give the context its own folding
+     * on every tab click, pinning it against later changes applied to every
+     * cluster. The API group and plugin folds are per context already, so they
+     * carry no such cost.
      */
     private showSectionFor(tab: Tab): void {
+        const custom = parseCustomKind(tab.kind);
+        if (custom) {
+            this.openGroup(tab.contextId, DEFINITIONS_GROUP);
+            if (!this.isApiGroupExpanded(tab.contextId, custom.group)) {
+                this.toggleApiGroup(tab.contextId, custom.group);
+            }
+            // The rows come from the cluster, and the sidebar only asks for
+            // them once its section is showing. Reaching a definition through
+            // a restored tab rather than by opening that section means nothing
+            // has asked yet, and the reveal would arrive before the row exists.
+            void this.loadCustomKinds(tab.contextId);
+            return;
+        }
+
+        const view = parsePluginKind(tab.kind);
+        if (view) {
+            this.openGroup(tab.contextId, PLUGINS_GROUP);
+            if (!this.isPluginExpanded(tab.contextId, view.pluginId)) {
+                this.togglePlugin(tab.contextId, view.pluginId);
+            }
+            return;
+        }
+
         const group = groupForKind(tab.kind);
-        if (group === null || !this.isGroupCollapsed(tab.contextId, group)) return;
-        this.toggleGroup(tab.contextId, group);
+        if (group === null) return;
+        this.openGroup(tab.contextId, group);
+    }
+
+    /** Unfolds one section for a context, leaving an already open one alone. */
+    private openGroup(contextId: string, label: string): void {
+        if (!this.isGroupCollapsed(contextId, label)) return;
+        this.toggleGroup(contextId, label);
     }
 
     /** Closes a tab, moving focus to its neighbour so the pane is never blank. */

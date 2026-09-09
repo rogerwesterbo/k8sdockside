@@ -55,13 +55,18 @@ export function subscribe(
     onTable: Listener,
     onError: (message: string) => void,
 ): Subscription {
-    // Helm releases are not a watchable resource -- they are Secrets the
-    // backend decodes, and their payload is exactly what must not be cached, so
-    // they are fetched once instead. Handled here rather than in the tab so
-    // that a view still just asks for rows and gets them.
-    if (kind === HELM_RELEASES) {
-        return fetchOnce(contextId, namespaces, onTable, onError);
-    }
+    // Helm releases go through their own service. A release is not a kind: the
+    // backend watches the Secrets holding them and re-reads on each change,
+    // because the payload it would otherwise cache is the half that carries
+    // credentials. Everything after this line is the same for both -- the
+    // snapshots arrive on one event and are routed by ID -- so a view still
+    // just asks for rows and gets them.
+    const helm = kind === HELM_RELEASES;
+    const open = helm
+        ? HelmService.Subscribe(contextId, namespaces)
+        : ResourceService.Subscribe(contextId, kind, namespaces);
+    const retarget = helm ? HelmService.SetNamespaces : ResourceService.SetNamespaces;
+    const release = helm ? HelmService.Unsubscribe : ResourceService.Unsubscribe;
 
     let id: string | null = null;
     let closed = false;
@@ -70,13 +75,13 @@ export function subscribe(
     let wanted = namespaces;
     let moved = false;
 
-    ResourceService.Subscribe(contextId, kind, namespaces)
+    open
         .then((subscriptionId) => {
             if (closed) {
                 // A snapshot may already have been buffered under this ID by
                 // the time we learn the tab has gone.
                 pending.delete(subscriptionId);
-                void ResourceService.Unsubscribe(subscriptionId);
+                void release(subscriptionId);
                 return;
             }
             id = subscriptionId;
@@ -88,7 +93,7 @@ export function subscribe(
                 onTable(buffered);
             }
             if (moved) {
-                void ResourceService.SetNamespaces(subscriptionId, wanted);
+                void retarget(subscriptionId, wanted);
             }
         })
         .catch((err: unknown) => {
@@ -99,49 +104,15 @@ export function subscribe(
         setNamespaces(next: string[]): void {
             wanted = next;
             moved = true;
-            if (id) void ResourceService.SetNamespaces(id, next);
+            if (id) void retarget(id, next);
         },
         close(): void {
             closed = true;
             if (id === null) return;
             listeners.delete(id);
             pending.delete(id);
-            void ResourceService.Unsubscribe(id);
+            void release(id);
             id = null;
-        },
-    };
-}
-
-/**
- * A "subscription" that resolves once and never updates, for the kinds that are
- * read rather than watched. Changing the namespace re-reads; closing it stops
- * whatever is in flight from calling back.
- */
-function fetchOnce(
-    contextId: string,
-    namespaces: string[],
-    onTable: Listener,
-    onError: (message: string) => void,
-): Subscription {
-    let closed = false;
-
-    function load(ns: string[]): void {
-        HelmService.Releases(contextId, ns)
-            .then((table) => {
-                if (!closed) onTable(adoptTable(table));
-            })
-            .catch((err: unknown) => {
-                if (!closed) onError(err instanceof Error ? err.message : String(err));
-            });
-    }
-    load(namespaces);
-
-    return {
-        setNamespaces(next: string[]): void {
-            if (!closed) load(next);
-        },
-        close(): void {
-            closed = true;
         },
     };
 }

@@ -3,6 +3,7 @@
   Clicking a resource opens (or focuses) a tab for it.
 -->
 <script lang="ts">
+    import { tick } from 'svelte';
     import type * as kube from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/kube/models.js';
     import {
         DASHBOARD_ITEM,
@@ -45,6 +46,21 @@
     /** How much room to leave above a revealed row, so it is not jammed to the edge. */
     const REVEAL_MARGIN = 8;
 
+    /**
+     * How long to keep waiting for a revealed row that is still being fetched,
+     * and how often to look for it.
+     *
+     * Only a custom resource's row can be late: activating its tab unfolds the
+     * definitions section, and the kinds under it are read from the cluster at
+     * that point. The deadline is for the cluster that answers slowly or not at
+     * all -- past it the reveal settles for the context's header, which is what
+     * it would have done immediately before.
+     */
+    const REVEAL_DEADLINE = 4000;
+    const REVEAL_POLL = 50;
+
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
     /** The nearest ancestor that is actually scrolling, if any. */
     function scrollParent(el: HTMLElement): HTMLElement | null {
         for (let node = el.parentElement; node; node = node.parentElement) {
@@ -73,38 +89,78 @@
         if (!request || request.contextId !== context.id || !head) return;
         request.nonce;
 
-        // The tab's own row where it is showing, and the context's row only as
-        // a fallback. With fifty rows under a context, bringing the cluster's
-        // name into view says nothing about where in them the tab lives -- the
-        // sidebar moves, lands on the wrong thing, and reads as a flicker.
-        const target = rowFor(request.kind) ?? head;
+        // Cancelled rather than awaited: a second reveal arriving while the
+        // first is still waiting for its row must win, and a context scrolled
+        // out of existence must not be scrolled to at all.
+        let stale = false;
+        void reveal(request.kind, () => stale);
+        return () => {
+            stale = true;
+        };
+    });
 
+    /**
+     * Brings one kind's row into view and flashes it, waiting for a row that is
+     * still on its way.
+     *
+     * The tab's own row where it is showing, and the context's row only as a
+     * fallback. With fifty rows under a context, bringing the cluster's name
+     * into view says nothing about where in them the tab lives -- the sidebar
+     * moves, lands on the wrong thing, and reads as a flicker.
+     */
+    async function reveal(kind: string, cancelled: () => boolean): Promise<void> {
+        // Activating a tab unfolds whatever its row is folded inside, which is
+        // state; the row cannot be looked for until that has rendered.
+        await tick();
+        if (cancelled()) return;
+
+        let target = rowFor(kind);
+        // A custom resource's row is the one that can be a fetch away: unfolding
+        // the definitions section is what sends the app to ask the cluster which
+        // kinds it serves. Waiting for that answer is the difference between the
+        // reveal landing on the row and landing on the header a moment before
+        // the row appears. Nothing else is waited for, so a kind that simply is
+        // not in the tree still falls back at once.
+        const until = Date.now() + REVEAL_DEADLINE;
+        while (
+            !target &&
+            !cancelled() &&
+            Date.now() < until &&
+            workspace.customKindsFor(context.id).status === 'loading'
+        ) {
+            await pause(REVEAL_POLL);
+            target = rowFor(kind);
+        }
+        if (cancelled() || !head) return;
+
+        const found = target ?? head;
         const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const behavior: ScrollBehavior = still ? 'auto' : 'smooth';
-        const scroller = scrollParent(target);
+        const scroller = scrollParent(found);
 
         if (scroller) {
             const view = scroller.getBoundingClientRect();
-            const box = target.getBoundingClientRect();
+            const box = found.getBoundingClientRect();
             if (box.top < view.top || box.bottom > view.bottom) {
                 scroller.scrollTo({ top: scroller.scrollTop + (box.top - view.top) - REVEAL_MARGIN, behavior });
             }
         } else {
             // No scrolling ancestor: nothing to move, but still flash.
-            target.scrollIntoView({ block: 'nearest', behavior });
+            found.scrollIntoView({ block: 'nearest', behavior });
         }
 
         // Removed and re-added around a forced reflow, the standard way to
         // restart an animation that may still be running from a prior reveal.
-        target.classList.remove('flash');
-        void target.offsetWidth;
-        target.classList.add('flash');
-    });
+        found.classList.remove('flash');
+        void found.offsetWidth;
+        found.classList.add('flash');
+    }
 
     /**
      * This context's row for one kind, when the tree is showing it. Absent for a
-     * kind whose section is shut, or a custom resource whose API group is -- in
-     * which case the reveal falls back to the context itself.
+     * kind the tree is not drawing -- a section still shut, or definitions not
+     * read yet -- in which case the reveal waits or falls back to the context
+     * itself. See reveal().
      */
     function rowFor(kind: string): HTMLElement | null {
         if (!kind || !root) return null;

@@ -22,15 +22,32 @@ import (
 // already applies to every Secret value. So this reads Secrets and decodes them
 // rather than watching a resource.
 //
-// It is a one-shot read rather than a watch, and deliberately: that payload
-// carries the rendered manifest and the chart values, which routinely hold
-// credentials, and the informer cache is exactly where those must not sit. The
-// decode keeps six summary fields and drops everything else on the floor before
-// returning. Releases change when someone deploys, so nothing is lost by not
-// streaming them.
+// The rows are read rather than taken from a cache, and deliberately: that
+// payload carries the rendered manifest and the chart values, which routinely
+// hold credentials, and the informer cache is exactly where those must not sit.
+// The decode keeps six summary fields and drops everything else on the floor
+// before returning.
+//
+// That is not the same as not being live. SubscribeHelm watches the release
+// Secrets for the one thing the cache may safely hold -- that they changed --
+// and re-reads on each change, so a release upgraded from another machine
+// repaints here the way a pod does. See stripReleasePayload for what the watch
+// is allowed to remember, which is nothing that was in the release.
 
 // HelmReleaseSecretType marks a Secret as one of Helm 3's release records.
 const HelmReleaseSecretType = "helm.sh/release.v1" // #nosec G101 -- a Secret type label, not a credential
+
+// helmReleaseField narrows a listing -- or a watch -- to those records.
+//
+// A *field* selector on the Secret's type, not to be confused with
+// helmReleaseSelector in helmdetail.go, which is a label selector picking out
+// the revisions of one named release.
+//
+// Asking the API server to filter is what keeps the payloads of every unrelated
+// Secret in the cluster from crossing the wire at all, which matters more for
+// the watch than for the read: a watch left unfiltered would stream every
+// Secret change in the cluster for as long as the tab is open.
+const helmReleaseField = "type=" + HelmReleaseSecretType
 
 // maxReleasePayload caps how much a single release may decompress to. A gzip
 // stream can claim to be far larger than it is, and nothing here should be able
@@ -215,16 +232,20 @@ func helmTable(secrets []*unstructured.Unstructured) Table {
 // HelmReleases lists the releases installed in a cluster, in the given
 // namespaces or in all of them when none is named.
 func (w *Watcher) HelmReleases(kc Context, namespaces []string) (Table, error) {
+	return w.helmReleases(kc, namespaceFilter(namespaces))
+}
+
+// helmReleases is the read itself, taking the namespace filter already resolved
+// so that a subscription -- whose filter can change without the tab reopening --
+// can share it with the one-shot call above.
+func (w *Watcher) helmReleases(kc Context, keep map[string]bool) (Table, error) {
 	var table Table
-	keep := namespaceFilter(namespaces)
 	err := w.withClient(kc, func(c *clusterClient) error {
 		ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 		defer cancel()
 
 		items, _, err := c.list(ctx, KindSecrets, metav1.ListOptions{
-			// Asking the API server to filter means the payloads of unrelated
-			// secrets never cross the wire at all.
-			FieldSelector: "type=" + HelmReleaseSecretType,
+			FieldSelector: helmReleaseField,
 		})
 		if err != nil {
 			return err
@@ -241,4 +262,73 @@ func (w *Watcher) HelmReleases(kc Context, namespaces []string) (Table, error) {
 		return nil
 	})
 	return table, err
+}
+
+// SubscribeHelm opens a live view of a cluster's Helm releases and returns its
+// subscription ID, pushing through the same emit as every other subscription.
+//
+// It is the one subscription that does not serve its rows from the cache it
+// watches. A release is a Secret whose payload must not be cached, so the watch
+// is narrowed to release records, stripped of that payload on the way in, and
+// used purely as a signal: when it fires, the releases are read again and
+// decoded down to their summaries. The user sees a live table; the app holds no
+// chart values.
+//
+// The cost of that is one LIST per change, against a field-selected collection,
+// after the pump's coalescing window. A release changes when someone deploys,
+// which is not the rate a pod list changes at.
+func (w *Watcher) SubscribeHelm(kc Context, namespaces []string) (string, error) {
+	cl, err := w.clusterFor(kc)
+	if err != nil {
+		return "", err
+	}
+
+	// Secrets rather than helmreleases: there is no such kind, which is the
+	// whole reason this path exists.
+	mapping, err := cl.client.mappingForKind(KindSecrets)
+	if err != nil {
+		w.releaseCluster(kc.ID)
+		return "", err
+	}
+
+	live := w.informerFor(cl, mapping, helmReleaseField, stripReleasePayload)
+
+	sub := &subscription{
+		id:         fmt.Sprintf("sub-%d", w.nextID.Add(1)),
+		contextID:  kc.ID,
+		kc:         kc,
+		kind:       KindHelmReleases,
+		reread:     true,
+		namespaces: namespaceFilter(namespaces),
+		live:       live,
+		dirty:      make(chan struct{}, 1),
+		done:       make(chan struct{}),
+	}
+
+	w.mu.Lock()
+	w.subs[sub.id] = sub
+	w.mu.Unlock()
+
+	go w.pump(sub)
+	go w.firstSnapshot(sub)
+
+	return sub.id, nil
+}
+
+// stripReleasePayload drops a release Secret's payload before it is cached.
+//
+// stripBulk redacts Secret values too, but only for an object that arrives
+// carrying its kind, and this is not a place to depend on that: what would be
+// retained on a miss is precisely the rendered manifest and the chart values.
+// Here the payload is removed unconditionally, because this watch has no use
+// for it under any circumstances -- it exists to notice that a release changed,
+// and the release itself is then read live. See SubscribeHelm.
+func stripReleasePayload(obj any) (any, error) {
+	u, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return obj, nil
+	}
+	u.SetManagedFields(nil)
+	unstructured.RemoveNestedField(u.Object, "data")
+	return u, nil
 }

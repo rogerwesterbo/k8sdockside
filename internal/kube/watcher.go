@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -77,10 +78,22 @@ func NewWatcher(emit func(Snapshot)) *Watcher {
 	}
 }
 
+// informerKey identifies a watch within a cluster.
+//
+// The field selector is part of the identity, not an afterthought: the Helm
+// view watches the same resource as a Secrets tab but narrowed to release
+// records, and the two must not be handed the same informer -- they hold
+// different objects and strip them differently. Everything else watches a
+// whole collection and so keys on an empty selector.
+type informerKey struct {
+	gvr   schema.GroupVersionResource
+	field string
+}
+
 // cluster is one context's live connection plus the informers opened against it.
 type cluster struct {
 	refs      int
-	informers map[schema.GroupVersionResource]*liveInformer
+	informers map[informerKey]*liveInformer
 
 	// ready closes once client/err are set. Building a client can run an exec
 	// credential plugin, which is slow, so it happens off the watcher's lock
@@ -98,7 +111,7 @@ type cluster struct {
 // in the same cluster, regardless of the namespace each of them is filtering to.
 type liveInformer struct {
 	refs     int
-	gvr      schema.GroupVersionResource
+	key      informerKey
 	informer cache.SharedIndexInformer
 	lister   cache.GenericLister
 	scope    meta.RESTScopeName
@@ -128,6 +141,15 @@ type subscription struct {
 	selector labels.Selector
 	columns  []column
 	live     *liveInformer
+
+	// kc is the context this subscription reads from, kept only for the views
+	// whose rows are read live rather than projected from the informer's cache.
+	// Every other subscription needs nothing beyond contextID.
+	kc Context
+	// live rows rather than cached ones: the informer says *that* something
+	// changed and the rows are fetched again. Helm releases are the only view
+	// that works this way -- see SubscribeHelm.
+	reread bool
 
 	dirty chan struct{} // buffered(1): a pending "something changed"
 	done  chan struct{}
@@ -176,7 +198,7 @@ func (w *Watcher) Subscribe(kc Context, kind string, namespaces []string, select
 		return "", err
 	}
 
-	live := w.informerFor(cl, mapping)
+	live := w.informerFor(cl, mapping, "", stripBulk)
 
 	sub := &subscription{
 		id:         fmt.Sprintf("sub-%d", w.nextID.Add(1)),
@@ -216,7 +238,7 @@ func (w *Watcher) Unsubscribe(id string) {
 	stopInformer := live.refs == 0
 	if stopInformer {
 		if cl, ok := w.clusters[sub.contextID]; ok {
-			delete(cl.informers, live.gvr)
+			delete(cl.informers, live.key)
 		}
 	}
 	w.mu.Unlock()
@@ -278,7 +300,7 @@ func (w *Watcher) clusterFor(kc Context) (*cluster, error) {
 	w.mu.Lock()
 	cl, ok := w.clusters[kc.ID]
 	if !ok {
-		cl = &cluster{informers: map[schema.GroupVersionResource]*liveInformer{}, ready: make(chan struct{})}
+		cl = &cluster{informers: map[informerKey]*liveInformer{}, ready: make(chan struct{})}
 		w.clusters[kc.ID] = cl
 	} else if cl.evict != nil {
 		// Idle, and about to be forgotten: this caller is exactly what the
@@ -344,37 +366,54 @@ func (w *Watcher) evictIdle(contextID string, cl *cluster) {
 
 // informerFor returns the shared informer for a resource, starting it if this
 // is the first subscription, and takes a reference on it.
-func (w *Watcher) informerFor(cl *cluster, mapping *meta.RESTMapping) *liveInformer {
+//
+// field narrows the watch itself, which is different from every other filter
+// here: the namespace and label filters run over the cache so that changing
+// them repaints without reopening anything, while a field selector decides what
+// the cache is allowed to contain at all. Only the Helm view uses one.
+//
+// transform is what each object is put through before it is cached, and belongs
+// to the key rather than to the caller: two subscriptions sharing an informer
+// share its contents, so a second caller asking for the same resource and
+// selector gets the first one's transform. Passing it here rather than reaching
+// for stripBulk inside means a narrowed watch can strip more than a whole one.
+func (w *Watcher) informerFor(cl *cluster, mapping *meta.RESTMapping, field string, transform cache.TransformFunc) *liveInformer {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if live, ok := cl.informers[mapping.Resource]; ok {
+	key := informerKey{gvr: mapping.Resource, field: field}
+	if live, ok := cl.informers[key]; ok {
 		live.refs++
 		return live
+	}
+
+	var tweak dynamicinformer.TweakListOptionsFunc
+	if field != "" {
+		tweak = func(opts *metav1.ListOptions) { opts.FieldSelector = field }
 	}
 
 	// Cluster-scoped, with namespace filtering done against the cache. That
 	// matches how the tables have always filtered, and it means changing the
 	// namespace dropdown is instant instead of reopening a watch.
 	gi := dynamicinformer.NewFilteredDynamicInformer(
-		cl.client.dynamic, mapping.Resource, "", resync, cache.Indexers{}, nil,
+		cl.client.dynamic, mapping.Resource, "", resync, cache.Indexers{}, tweak,
 	)
 	inf := gi.Informer()
 
 	// An informer caches the whole collection. Without this, opening a Secrets
 	// tab would pull every secret value in the cluster into the app's memory;
 	// managed fields are simply bulk we never render.
-	_ = inf.SetTransform(stripBulk)
+	_ = inf.SetTransform(transform)
 
 	live := &liveInformer{
 		refs:     1,
-		gvr:      mapping.Resource,
+		key:      key,
 		informer: inf,
 		lister:   gi.Lister(),
 		scope:    mapping.Scope.Name(),
 		stop:     make(chan struct{}),
 	}
-	cl.informers[mapping.Resource] = live
+	cl.informers[key] = live
 
 	handler := cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(any) { w.markKind(live) },
@@ -482,6 +521,16 @@ func namespaceFilter(names []string) map[string]bool {
 // project turns the informer's cache into the table the UI renders, keeping
 // the rows in the given namespaces -- all of them when keep is nil.
 func (w *Watcher) project(sub *subscription, keep map[string]bool) Table {
+	// A view whose rows are read rather than cached. The informer has already
+	// done its job by waking the pump; what it holds is not the answer.
+	if sub.reread {
+		table, err := w.helmReleases(sub.kc, keep)
+		if err != nil {
+			return Table{Kind: sub.kind, Columns: []string{}, Rows: []Row{}, Error: err.Error()}
+		}
+		return table
+	}
+
 	objs, err := sub.live.lister.List(labels.Everything())
 	if err != nil {
 		return Table{Kind: sub.kind, Columns: []string{}, Rows: []Row{}, Error: err.Error()}

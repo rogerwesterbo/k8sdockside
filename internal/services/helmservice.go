@@ -179,6 +179,41 @@ func (s *HelmService) Releases(contextID string, namespaces []string) (kube.Tabl
 	return s.watcher.HelmReleases(ctx, namespaces)
 }
 
+// Subscribe opens a live view of a cluster's releases and returns the
+// subscription ID its snapshots will carry. Pass no namespaces for all of them.
+//
+// The rows arrive on the same event as every other table's, through the same
+// watcher, so the frontend routes them by ID without knowing that releases are
+// special. What is different is underneath: the watch is on the Secrets holding
+// the releases, and each change re-reads them rather than serving a cache --
+// see kube.SubscribeHelm for why a release payload is never kept.
+func (s *HelmService) Subscribe(contextID string, namespaces []string) (string, error) {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return "", err
+	}
+	return s.watcher.SubscribeHelm(ctx, namespaces)
+}
+
+// Unsubscribe closes a releases view.
+//
+// It goes through this service rather than ResourceService only so that a
+// caller holding a Helm subscription has one place to give it back; the watcher
+// underneath is the same one, and the IDs come from the same sequence.
+func (s *HelmService) Unsubscribe(subscriptionID string) {
+	s.watcher.Unsubscribe(subscriptionID)
+}
+
+// SetNamespaces re-points an open releases view at other namespaces, none
+// meaning all.
+//
+// Unlike a watched kind, this does re-read: the filter is applied to a fresh
+// listing rather than to a cache that already holds every namespace. It is
+// still one call, and still no watch is reopened.
+func (s *HelmService) SetNamespaces(subscriptionID string, namespaces []string) {
+	s.watcher.SetNamespaces(subscriptionID, namespaces)
+}
+
 // Detail reads one release in full: the values it was installed with, the notes
 // it printed, the objects it rendered, and the revisions behind it.
 //
