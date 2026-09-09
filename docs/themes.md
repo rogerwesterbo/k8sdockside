@@ -170,7 +170,7 @@ Two things are worth knowing:
 - **Readability warnings.** The app measures every text colour against every
   surface it is drawn on, and `accent-text` against `accent`, using the WCAG
   contrast ratio. Anything below 4.5:1 is flagged on the theme's card. It is
-  advice, not validation — the theme still loads. All thirteen built-ins clear
+  advice, not validation — the theme still loads. All fourteen built-ins clear
   the bar, and there is a test that keeps it that way.
 - **A theme that is not installed.** If your settings name a theme that is not
   there — you deleted the file, dropped the folder, or opened the same settings
@@ -182,7 +182,7 @@ Two things are worth knowing:
 There is no rule anywhere in the app that names a theme or asks which one is on.
 Every component asks for `var(--token)`; the current theme's colours are written
 onto the document root as custom properties, and that is the whole mechanism.
-Adding a fourteenth theme costs a file and no code, which is the point.
+Adding a fifteenth theme costs a file and no code, which is the point.
 
 - `internal/themes/` — the format, the validator, the loader, and the built-in
   palettes as JSON in exactly the format described above.

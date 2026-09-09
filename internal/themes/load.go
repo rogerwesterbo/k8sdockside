@@ -24,6 +24,7 @@ var builtinOrder = []string{
 	"deep-sea",
 	"midnight-watch",
 	"fjord",
+	"harbour-crane",
 	"rusty-hull",
 	"bioluminescence",
 	"lighthouse",

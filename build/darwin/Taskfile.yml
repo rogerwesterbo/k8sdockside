@@ -50,9 +50,15 @@ tasks:
       GOOS: darwin
       CGO_ENABLED: 1
       GOARCH: '{{.ARCH | default ARCH}}'
-      CGO_CFLAGS: "-mmacosx-version-min=12.0"
-      CGO_LDFLAGS: "-mmacosx-version-min=12.0"
-      MACOSX_DEPLOYMENT_TARGET: "12.0"
+      # macOS 13 is the floor the Go toolchain sets, not a choice: Go 1.26
+      # dropped macOS 12, so the runtime object it emits is built for 13.0.
+      # Linking that against a 12.0 target produced a binary stamped minos 12.0
+      # that already contained 13.0 code -- the linker said so on every build.
+      # Raising these three to match makes the stamp honest; lowering them again
+      # brings the warning back rather than the support.
+      CGO_CFLAGS: "-mmacosx-version-min=13.0"
+      CGO_LDFLAGS: "-mmacosx-version-min=13.0"
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
 
   build:docker:
     summary: Cross-compiles for macOS using Docker (for Linux/Windows hosts)

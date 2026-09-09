@@ -179,7 +179,7 @@ See [docs/development.md](docs/development.md).
 - Graphs where the cluster can answer for them: Prometheus is found
   automatically and reached *through the API server*, no port-forward and no
   second credential. The queries live in the plugin file.
-- 13 built-in themes, from `K8s Dockside Dark` through `Deep Sea` and
+- 14 built-in themes, from `K8s Dockside Dark` through `Deep Sea` and
   `Lighthouse` to ports of Nord and Catppuccin Mocha. A theme is a JSON file of
   colours — it cannot ship CSS or run code —
   [docs/themes.md](docs/themes.md)
