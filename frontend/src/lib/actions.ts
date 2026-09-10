@@ -5,7 +5,7 @@
 // line rather than a branch. Nothing here calls a cluster: it decides which
 // buttons are drawn, and the store beside it does the work.
 
-import { DASHBOARD, HELM_RELEASES, PORT_FORWARDS, SETTINGS } from './catalogue';
+import { ACCESS_OVERVIEW, DASHBOARD, HELM_RELEASES, PORT_FORWARDS, SETTINGS } from './catalogue';
 
 export type ActionId =
     | 'edit'
@@ -253,7 +253,7 @@ const ROLLABLE = ['deployments', 'statefulsets', 'daemonsets'];
  * Secret would leave every object the release installed running, with nothing
  * left that knows they belong together.
  */
-const NOT_AN_OBJECT = [DASHBOARD, SETTINGS, PORT_FORWARDS];
+const NOT_AN_OBJECT = [DASHBOARD, SETTINGS, PORT_FORWARDS, ACCESS_OVERVIEW];
 
 /** The actions offered for one kind, in the order the bar draws them. */
 export function actionsFor(kind: string): Action[] {

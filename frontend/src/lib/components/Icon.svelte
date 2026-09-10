@@ -82,6 +82,23 @@
         policy: ['M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9l-6-6z', 'M13 3v6h6', 'M8.5 15l2.5 2.5 4.5-4.5'],
         // A chain link: a binding tying a policy to what it applies to.
         link: ['M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2', 'M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2'],
+        // Three nodes and the lines between them: the access map, which draws
+        // who holds what as a graph.
+        graph: [
+            'M6 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+            'M6 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+            'M18 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z',
+            'M8.3 7l7.4 4',
+            'M8.3 17l7.4-4',
+        ],
+        // One person, and several: a User and a Group subject.
+        user: ['M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M4.5 20.5a7.5 7.5 0 0 1 15 0'],
+        users: [
+            'M9 5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z',
+            'M2.5 20a6.5 6.5 0 0 1 13 0',
+            'M16 5.3a3.5 3.5 0 0 1 0 6.4',
+            'M18 14.3a6.5 6.5 0 0 1 3.5 5.7',
+        ],
         // A ship's wheel, which is what Helm is named for.
         helm: ['M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z', 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', 'M12 4v5', 'M12 15v5', 'M4 12h5', 'M15 12h5'],
         refresh: ['M20.5 12a8.5 8.5 0 1 1-2.6-6.1', 'M20.5 4v5h-5'],
