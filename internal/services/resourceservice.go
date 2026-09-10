@@ -147,6 +147,29 @@ func (s *ResourceService) Overview(contextID string) (kube.Overview, error) {
 	return s.watcher.Overview(ctx)
 }
 
+// Access is the payload behind the access overview: every role and binding the
+// caller may read, and who the cluster says the caller is. A cluster that lets
+// the caller read only some of it answers with what it could, and says in
+// Unreadable what was missing.
+func (s *ResourceService) Access(contextID string) (kube.AccessModel, error) {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return kube.AccessModel{Error: err.Error()}, err
+	}
+	return s.watcher.Access(ctx)
+}
+
+// MyAccess asks the cluster what the caller may do in one namespace. It works
+// for anybody who can reach the cluster, including somebody who may read no
+// RBAC objects at all.
+func (s *ResourceService) MyAccess(contextID, namespace string) (kube.MyRules, error) {
+	ctx, err := s.resolve(contextID)
+	if err != nil {
+		return kube.MyRules{Namespace: namespace, Error: err.Error()}, err
+	}
+	return s.watcher.MyAccess(ctx, namespace)
+}
+
 // Ping reports whether a context's cluster can be reached, for the sidebar's
 // connection indicator. It returns nil when the cluster answered and an error
 // carrying the reason when it did not; there is no payload because the only
