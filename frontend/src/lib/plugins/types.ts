@@ -16,12 +16,66 @@ export interface PluginViewSpec {
     id: string;
     label: string;
     icon: string;
+    /** `table`, or `custom` for one of the plugin's own pages. */
     type: string;
-    /** The kind this view lists: a built-in name, or a `crd:` custom resource. */
+    /** The kind this view lists: a built-in name, or a `crd:` custom resource. Empty on a custom view. */
     kind: string;
     /** Fixed for this view; the tab's own namespace filter is not offered. */
     namespace: string;
     selector: string;
+    /**
+     * The file a custom view opens, relative to the plugin's UI folder.
+     * Optional only so hand-built fixtures need not spell it out; adopt always
+     * sets it.
+     */
+    entry?: string;
+}
+
+/**
+ * What a plugin's own views may do. Present only for a plugin that ships some;
+ * see PluginFrame for how it is enforced.
+ */
+export interface PluginUI {
+    /** Every kind the views may read -- worked out by the Go loader. Never `secrets`. */
+    readable: string[];
+    /** Whether the views may ask to patch those kinds. Each patch is confirmed by the user. */
+    write: boolean;
+}
+
+/**
+ * A button a plugin puts on the action bar of objects of a kind. Only what the
+ * app needs to know before asking the backend: the request it makes is read
+ * from the manifest in Go, never sent from here.
+ */
+export interface PluginActionSpec {
+    id: string;
+    label: string;
+    kind: string;
+}
+
+/** One of a plugin's own panels in the detail view of objects of a kind. */
+export interface PluginSectionSpec {
+    id: string;
+    label: string;
+    kind: string;
+    /** The file it opens, relative to the plugin's ui folder. */
+    entry: string;
+    /** Pixels, until the page measures itself. */
+    height: number;
+}
+
+/** A plugin action offered on one object right now, as the backend words it. */
+export interface OfferedAction {
+    pluginId: string;
+    pluginName: string;
+    id: string;
+    label: string;
+    icon: string;
+    tone: string;
+    /** The question to ask first, with the object's name in it. Empty runs on click. */
+    confirm: string;
+    /** The notice once it has worked. */
+    done: string;
 }
 
 /** A kind the plugin needs the cluster to serve. */
@@ -41,10 +95,18 @@ export interface Plugin {
     description: string;
     requires: PluginRequirement[];
     views: PluginViewSpec[];
+    /** Null (or absent) unless the plugin ships views of its own. */
+    ui?: PluginUI | null;
+    /** Buttons on objects' action bars. Optional so fixtures need not spell it out. */
+    actions?: PluginActionSpec[];
+    /** Panels in objects' detail views. Optional so fixtures need not spell it out. */
+    sections?: PluginSectionSpec[];
     /** `builtin`, or the path of the file it was read from. */
     origin: string;
     /** The collection it arrived in, empty for one that came on its own. */
     pack: string;
+    /** The git checkout it was read from, empty unless it was installed from a repository. */
+    repo?: string;
     /**
      * Switched off in Settings. A disabled plugin is still in the catalogue --
      * that is where it gets switched back on -- but nothing offers it: no
@@ -114,6 +176,8 @@ export interface ResolvedView {
     label: string;
     icon: string;
     overview: boolean;
+    custom: boolean;
+    entry: string;
 }
 
 /** The catalogue before anything has loaded. */

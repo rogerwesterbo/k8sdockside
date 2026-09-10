@@ -1,16 +1,19 @@
 package services
 
 import (
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/rogerwesterbo/k8sdockside/internal/appconfig"
 	"github.com/rogerwesterbo/k8sdockside/internal/kube"
 	"github.com/rogerwesterbo/k8sdockside/internal/plugins"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // PluginService is how the frontend gets the solution plugins: the ones that
@@ -109,6 +112,185 @@ func (s *PluginService) Summary(contextID, pluginID string) (plugins.Summary, er
 	return plugins.Summarise(plugin, &clusterFor{watcher: s.watcher, ctx: ctx}), nil
 }
 
+// ----- the bridge a plugin's own views reach the cluster through ------------
+//
+// The frame hosting a custom view calls these on the view's behalf, naming the
+// plugin whose view it is. The frame decides which plugin that is, not the
+// view, and the kind check is made here as well as there, so the rule lives
+// in Go whatever the frontend gets wrong.
+
+// Objects lists one kind for a plugin's own view.
+func (s *PluginService) Objects(contextID, pluginID, kind, namespace, selector string) ([]map[string]any, error) {
+	_, ctx, err := s.forView(contextID, pluginID, kind, false)
+	if err != nil {
+		return []map[string]any{}, err
+	}
+	return s.watcher.Objects(ctx, kind, namespace, selector)
+}
+
+// Object reads one object for a plugin's own view.
+func (s *PluginService) Object(contextID, pluginID, kind, namespace, name string) (map[string]any, error) {
+	_, ctx, err := s.forView(contextID, pluginID, kind, false)
+	if err != nil {
+		return nil, err
+	}
+	return s.watcher.Object(ctx, kind, namespace, name)
+}
+
+// Patch applies a merge patch a plugin's own view asked for. By the time it
+// gets here the user has seen the patch and said yes; that is the frame's job,
+// and this only checks the plugin was allowed to ask.
+func (s *PluginService) Patch(contextID, pluginID, kind, namespace, name, patch string) error {
+	_, ctx, err := s.forView(contextID, pluginID, kind, true)
+	if err != nil {
+		return err
+	}
+	report, err := s.watcher.PatchMany(ctx, kind, []kube.ObjectRef{{Namespace: namespace, Name: name}}, patch)
+	if err != nil {
+		return err
+	}
+	if len(report.Failures) > 0 {
+		return errors.New(report.Failures[0].Error)
+	}
+	return nil
+}
+
+// forView checks a plugin's view may touch a kind, and finds the context.
+func (s *PluginService) forView(contextID, pluginID, kind string, write bool) (plugins.Plugin, kube.Context, error) {
+	plugin, ok := s.catalogue().Find(pluginID)
+	if !ok {
+		return plugin, kube.Context{}, fmt.Errorf("no plugin called %q is installed", pluginID)
+	}
+	if plugin.Disabled {
+		return plugin, kube.Context{}, fmt.Errorf("the %s plugin is switched off in Settings", plugin.Name)
+	}
+	if !plugin.CanRead(kind) {
+		return plugin, kube.Context{}, fmt.Errorf("the %s plugin does not declare %q, so its views cannot read it", plugin.Name, kind)
+	}
+	if write && !plugin.CanWrite(kind) {
+		return plugin, kube.Context{}, fmt.Errorf("the %s plugin does not declare \"ui\": {\"write\": true}, so its views cannot change anything", plugin.Name)
+	}
+	ctx, ok := s.configs.lookup(contextID)
+	if !ok {
+		return plugin, kube.Context{}, fmt.Errorf("unknown context %q -- it may have been removed from the kubeconfig", contextID)
+	}
+	return plugin, ctx, nil
+}
+
+// assetMiddleware serves plugins' own views to the webview, and keeps them
+// from calling the app's services directly. See plugins.Middleware.
+//
+// Unexported so it is not bound: it is for main.go, not for the frontend.
+func (s *PluginService) assetMiddleware() application.Middleware {
+	return plugins.Middleware(s.catalogue)
+}
+
+// ----- the buttons plugins put on an object ---------------------------------
+
+// ObjectActions is what every enabled plugin offers on one object right now:
+// its buttons, less those whose conditions the object does not meet.
+//
+// The object is read only when some plugin has actions for its kind, so the
+// action bar of everything else costs nothing.
+func (s *PluginService) ObjectActions(contextID, kind, namespace, name string) ([]plugins.Offered, error) {
+	out := []plugins.Offered{}
+	cat := s.catalogue()
+	if !slices.Contains(cat.ActionKinds(), kind) {
+		return out, nil
+	}
+	ctx, ok := s.configs.lookup(contextID)
+	if !ok {
+		return out, fmt.Errorf("unknown context %q -- it may have been removed from the kubeconfig", contextID)
+	}
+	raw, err := s.watcher.Object(ctx, kind, namespace, name)
+	if err != nil {
+		return out, err
+	}
+	obj := &unstructured.Unstructured{Object: raw}
+	for _, plugin := range cat.Enabled() {
+		for _, action := range plugin.Actions {
+			if action.Kind == kind && action.Offers(obj) {
+				out = append(out, action.Offer(plugin, namespace, name))
+			}
+		}
+	}
+	return out, nil
+}
+
+// RunAction makes the request one of a plugin's actions declares, against one
+// object. The frontend names the action and the object; what is sent is read
+// from the manifest here.
+//
+// The object is read again first, so a button pressed on a state that has
+// since moved on -- Pause, on a machine someone stopped a second ago -- is
+// refused with the reason rather than sent.
+func (s *PluginService) RunAction(contextID, pluginID, actionID, namespace, name string) (string, error) {
+	plugin, ok := s.catalogue().Find(pluginID)
+	if !ok {
+		return "", fmt.Errorf("no plugin called %q is installed", pluginID)
+	}
+	if plugin.Disabled {
+		return "", fmt.Errorf("the %s plugin is switched off in Settings", plugin.Name)
+	}
+	action, ok := plugin.Action(actionID)
+	if !ok {
+		return "", fmt.Errorf("the %s plugin has no action called %q", plugin.Name, actionID)
+	}
+	ctx, ok := s.configs.lookup(contextID)
+	if !ok {
+		return "", fmt.Errorf("unknown context %q -- it may have been removed from the kubeconfig", contextID)
+	}
+
+	raw, err := s.watcher.Object(ctx, action.Kind, namespace, name)
+	if err != nil {
+		return "", err
+	}
+	if !action.Offers(&unstructured.Unstructured{Object: raw}) {
+		return "", fmt.Errorf("%s is not offered on %s as it is now -- it may have changed since the button was drawn", action.Label, name)
+	}
+
+	vars := plugins.Vars(namespace, name)
+	req := action.Request
+	switch req.Type {
+	case plugins.RequestPatch:
+		patch, err := json.Marshal(plugins.Expand(req.Patch, vars))
+		if err != nil {
+			return "", err
+		}
+		report, err := s.watcher.PatchMany(ctx, action.Kind, []kube.ObjectRef{{Namespace: namespace, Name: name}}, string(patch))
+		if err != nil {
+			return "", err
+		}
+		if len(report.Failures) > 0 {
+			return "", errors.New(report.Failures[0].Error)
+		}
+		return "", nil
+
+	case plugins.RequestSubresource:
+		var body []byte
+		if len(req.Body) > 0 {
+			if body, err = json.Marshal(plugins.Expand(req.Body, vars)); err != nil {
+				return "", err
+			}
+		}
+		return "", s.watcher.CallSubresource(ctx, req.Method, req.SubresourcePath(namespace, name), body)
+
+	case plugins.RequestCreate:
+		object, _ := plugins.Expand(req.Object, vars).(map[string]any)
+		// Always the namespace of the object the button is on, whatever the
+		// template says: the button is about this object, and an action is not
+		// a way to put things in other namespaces.
+		meta, _ := object["metadata"].(map[string]any)
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["namespace"] = namespace
+		object["metadata"] = meta
+		return s.watcher.Create(ctx, req.Kind, namespace, object)
+	}
+	return "", fmt.Errorf("the %s plugin's action %q has a request this app cannot make", plugin.Name, actionID)
+}
+
 // clusterFor adapts the watcher to the narrow interface the summary builder
 // wants, so that the wording-and-ordering half of the overview can be tested
 // without a cluster.
@@ -167,6 +349,34 @@ func (s *PluginService) CreateExample() (string, error) {
 	}
 	s.forget()
 	return path, nil
+}
+
+// InstallFromGit clones a plugin repository into the plugins folder and reads
+// it. The repository's plugin.json has to be at its root.
+func (s *PluginService) InstallFromGit(url string) (plugins.Catalogue, error) {
+	if _, err := plugins.Clone(s.store.PluginsDir(), url); err != nil {
+		return s.catalogue(), err
+	}
+	s.forget()
+	return s.catalogue(), nil
+}
+
+// UpdateFromGit pulls the repository a plugin was cloned from and reads it
+// again.
+func (s *PluginService) UpdateFromGit(id string) (plugins.Catalogue, error) {
+	plugin, ok := s.catalogue().Find(id)
+	if !ok {
+		return s.catalogue(), fmt.Errorf("no plugin called %q is installed", id)
+	}
+	repo, ok := plugins.RepoOf(plugin)
+	if !ok {
+		return s.catalogue(), fmt.Errorf("%s was not installed from a repository, so there is nothing to pull", plugin.Name)
+	}
+	if err := plugins.Pull(repo); err != nil {
+		return s.catalogue(), err
+	}
+	s.forget()
+	return s.catalogue(), nil
 }
 
 // AddFolder starts reading plugins from another directory.

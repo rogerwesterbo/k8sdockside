@@ -204,7 +204,20 @@ func jsonFilesIn(dir string) []string {
 }
 
 func isJSON(name string) bool {
-	return strings.EqualFold(filepath.Ext(name), ".json")
+	return strings.EqualFold(filepath.Ext(name), ".json") && !toolingFile(name)
+}
+
+// toolingFile is a JSON file a repository keeps for its tools rather than for
+// us. An add-on kept in a repository of its own -- cloned straight into the
+// folder -- has these beside its manifest, and reading them as add-ons would
+// only fill the settings view with complaints about files nobody meant.
+func toolingFile(name string) bool {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "package.json", "package-lock.json", "jsconfig.json", "deno.json", "renovate.json", "composer.json":
+		return true
+	}
+	return strings.HasPrefix(lower, "tsconfig") || strings.HasPrefix(lower, ".")
 }
 
 // readFile hands one file's bytes to the parser, having first checked it is

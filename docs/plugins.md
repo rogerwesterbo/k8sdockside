@@ -7,11 +7,15 @@ names like `kustomize.toolkit.fluxcd.io`.
 
 Three ship with the app. Anything else is a JSON file you drop in a folder.
 
-Like a theme, a plugin is data and nothing else: it names resource kinds the app
-already knows how to list and says how to arrange and summarise them. It cannot
-ship code, CSS or queries. That is the limit that makes installing a stranger's
-plugin about as risky as installing their wallpaper, and it is why a plugin
-written today keeps working as the app grows.
+Most of a plugin is data and nothing else: it names resource kinds the app
+already knows how to list and says how to arrange and summarise them. That part
+cannot ship code or CSS, which is what makes installing it about as risky as
+installing a stranger's wallpaper, and why it keeps working as the app grows.
+
+A plugin read from a folder may *also* ship [views of its own](#views-of-its-own)
+— an HTML page drawn in a sandboxed frame, for when a solution is better read as
+something other than rows: an Argo CD application's resource tree, a virtual
+machine's console and state. Those are code, and are fenced accordingly.
 
 ## The distinction everything here turns on
 
@@ -99,9 +103,11 @@ working file you can edit a line at a time.
 | `views` | required¹ | The rows under the plugin in the sidebar. |
 | `cards` | optional¹ | The live counts on the overview. |
 | `charts` | optional¹ | Time-series graphs from the cluster's Prometheus. See [Charts](#charts). |
+| `actions` | optional¹ | Buttons on objects' action bars. See [Buttons on an object](#buttons-on-an-object). |
+| `sections` | optional¹ | Panels of the plugin's own in objects' detail views. See [Panels on an object](#panels-on-an-object). |
 
-¹ A plugin needs at least one of `views`, `cards` or `charts` — otherwise there
-would be nothing to show.
+¹ A plugin needs at least one of `views`, `cards`, `charts`, `actions` or
+`sections` — otherwise there would be nothing to show.
 
 ### Kinds
 
@@ -299,11 +305,212 @@ wants a proxy in front of it, or the service form.
 ### Icons
 
 Any of: `alert`, `bell`, `box`, `check`, `chip`, `clock`, `copies`, `dashboard`,
-`database`, `display`, `drive`, `edit`, `file`, `folder`, `gateway`, `gauge`,
-`globe`, `grant`, `helm`, `info`, `layers`, `link`, `lock`, `monitor`, `policy`,
-`priority`, `puzzle`, `refresh`, `repeat`, `rocket`, `route`, `rows`, `scale`,
-`search`, `server`, `settings`, `share`, `shield`, `sliders`, `type`, `webhook`.
+`database`, `display`, `drive`, `edit`, `file`, `folder`, `forward`, `gateway`,
+`gauge`, `globe`, `grant`, `helm`, `info`, `layers`, `link`, `lock`, `monitor`,
+`pause`, `play`, `policy`, `power`, `priority`, `puzzle`, `refresh`, `repeat`,
+`rocket`, `route`, `rows`, `scale`, `search`, `server`, `settings`, `share`,
+`shield`, `sliders`, `stop`, `terminal`, `trash`, `type`, `webhook`.
 An unrecognised name draws a plain box.
+
+## Views of its own
+
+A view with `"type": "custom"` opens a page from a `ui/` folder beside the
+plugin's file instead of a table. It can draw anything, and it reads the cluster
+through a small bridge the app answers:
+
+```
+my-plugin/
+├── plugin.json
+└── ui/
+    ├── index.html
+    └── app.js
+```
+
+```json
+{
+    "id": "acme",
+    "name": "Acme",
+    "requires": [{ "kind": "crd:meshes.acme.io" }],
+    "ui": { "kinds": ["pods"], "write": true },
+    "views": [
+        { "id": "map", "label": "Mesh map", "icon": "share", "type": "custom" },
+        { "id": "meshes", "label": "Meshes", "kind": "crd:meshes.acme.io" }
+    ]
+}
+```
+
+| Field | | |
+| --- | --- | --- |
+| view `type` | | `custom` for a page of the plugin's own; `table`, the default, for a listing. |
+| view `entry` | optional | The file it opens, relative to the ui folder. Defaults to `index.html`. One page can serve several views and tell them apart by `viewId`. A custom view takes no `kind`, `namespace` or `selector`. |
+| `ui.dir` | optional | The folder, relative to the plugin's file. Defaults to `ui`. It may not leave the file's folder. |
+| `ui.kinds` | optional | Kinds the views may read, beyond those the plugin already names in `requires`, `views` and `cards`. |
+| `ui.write` | optional | Lets the views *ask* to merge-patch objects of those kinds. |
+
+A plugin with a custom view and no `ui` block gets the defaults: a `ui/` folder,
+read-only. Only a plugin read from a folder can have one; a built-in has no
+folder to serve.
+
+The page includes the bridge, which the app serves, and uses it:
+
+```html
+<script src="/plugin-ui/_sdk/k8sdockside.js"></script>
+<script>
+    k8sdockside.ready().then(async (ctx) => {
+        // ctx: { pluginId, viewId, contextId, contextName, readable, write, theme }
+        const meshes = await k8sdockside.list({ kind: 'crd:meshes.acme.io', namespace: '' });
+        // ...draw them
+    });
+</script>
+```
+
+| Call | |
+| --- | --- |
+| `ready()` | Resolves with what the view is looking at, once the app has answered. |
+| `list({ kind, namespace?, selector? })` | Objects of a kind, whole — `status` and all. |
+| `get({ kind, namespace, name })` | One object, read live. |
+| `watch(query, onItems, onError?)` | Polls `list` (`query.interval`, default 5 s). Returns a stop function. |
+| `namespaces()` | The cluster's namespace names. |
+| `patch({ kind, namespace, name, patch })` | A merge patch. Needs `ui.write`; the user sees it and confirms first. Rejects if they decline. |
+| `open({ kind, namespace?, name? })` | The object in the details panel, or the kind's own tab. |
+| `openView(viewId)` | Another of this plugin's views, or `overview`. |
+| `edit(ref)`, `logs(ref)` | The YAML editor or the log view, in the app. |
+| `openUrl(url)` | An `http(s)` address in the user's browser. |
+| `on('theme', fn)` | Called when the user changes theme. |
+
+The SDK sets the app's colour tokens on the page's `:root` — `var(--bg)`,
+`var(--text)`, `var(--accent)`, `var(--ok)`, `var(--error)` and the rest — and
+keeps them in step with the app, so a view looks like the app without trying.
+
+`examples/plugins/argocd-ui` is a complete one: every Argo CD Application as a
+card with health and sync, unfolding into its resources, with Sync and Refresh.
+`examples/plugins/README.md` covers building a view with Svelte or Vite.
+
+### What a view can and cannot do
+
+The page runs in an `<iframe sandbox="allow-scripts">` — no same-origin, no
+forms, no popups — and every file served from the ui folder carries a
+Content-Security-Policy that repeats the sandbox, forbids `fetch`, XHR and
+websockets outright, and loads scripts, styles and images only from the plugin's
+own folder and the SDK. The app refuses its own runtime to any request from a
+sandboxed frame. What the page learns about the cluster, it asks the app for.
+
+- It reads **only the kinds the plugin declares**, checked in the frame and
+  again in Go. **Secrets are never readable**, whatever is declared.
+- It **never writes without you**: each patch is shown in a dialog the page
+  cannot reach, with the object and cluster it is for, and applied only on
+  **Apply change**.
+- It sees only the cluster of the tab it is in.
+- **Settings → Plugins** lists, on the plugin's card, how many kinds its views
+  read (hover for which) and whether they may ask to change them.
+
+What it *can* do is read the kinds it declares and, if it navigates its frame
+somewhere else, send what it read there. That is the honest limit of running
+someone's code: install views from people you would trust with read access to
+those kinds.
+
+Switching away from a custom view's tab unloads the page, the way it closes a
+table's watch; keep anything worth keeping in the URL hash, or re-read it.
+
+## Buttons on an object
+
+`actions` put buttons on the action bar of every object of a kind — a virtual
+machine's Start, Pause and Migrate, an application's Sync. They are data, like
+the rest of the manifest, so a built-in plugin can have them too:
+
+```json
+"actions": [
+    {
+        "id": "pause",
+        "label": "Pause",
+        "icon": "pause",
+        "kind": "crd:virtualmachines.kubevirt.io",
+        "done": "{name} paused",
+        "when": [{ "field": "status.printableStatus", "in": ["Running"] }],
+        "request": {
+            "type": "subresource",
+            "apiGroup": "subresources.kubevirt.io",
+            "version": "v1",
+            "resource": "virtualmachineinstances",
+            "subresource": "pause"
+        }
+    }
+]
+```
+
+| Field | | |
+| --- | --- | --- |
+| `id`, `label`, `icon` | | As on a view. |
+| `kind` | required | The objects the button appears on. |
+| `tone` | optional | `danger` colours it apart. |
+| `confirm` | optional | A question asked before it runs. `{name}` and `{namespace}` are filled in. Empty runs on the click. |
+| `done` | optional | The notice once it has worked. |
+| `when` | optional | Conditions on the object, all of which must hold: `{ "field", "in": [...] }`, `{ "field", "notIn": [...] }`, or just `{ "field" }` for "is set". The field is a path as in `cards`. `notIn` also holds when the field is absent. |
+| `request` | required | What pressing it does — one of the three below. |
+
+| `request.type` | |
+| --- | --- |
+| `patch` | Merge-patches the object with `patch`. |
+| `subresource` | Calls `/apis/<apiGroup>/<version>/namespaces/<ns>/<resource>/<name>/<subresource>` with `method` (`PUT`, the default, or `POST`) and an optional JSON `body`. The kind must be a custom resource; `apiGroup` defaults to its group and may only be that group or one under it (`subresources.kubevirt.io` under `kubevirt.io`); `resource` defaults to its plural. |
+| `create` | Creates `object` (with its `apiVersion` and `kind`), of the app kind `kind`, in the object's own namespace. `metadata.generateName` works; the name given is in the notice. |
+
+Strings anywhere in `patch`, `body` and `object` may use `{name}` and
+`{namespace}`.
+
+What the button sends is read from the manifest by the backend: the webview only
+says *which* action on *which* object, so a button does what the file says and
+nothing else. The object is read again when the button is pressed, and an
+action whose `when` no longer holds is refused. No action may write Secrets,
+ServiceAccounts, RBAC, admission webhooks or CRDs, or call anything in those
+API groups or the core group.
+
+The bar reads each object's offered actions when it opens and every few seconds
+after, so a stopped machine offers Start and, a moment after pressing it, Pause.
+A plugin from outside the app that brings actions for a kind the app has its own
+product buttons for — the built-in KubeVirt bar — takes over from them rather
+than adding a second set.
+
+## Panels on an object
+
+`sections` put one of the plugin's own pages in the detail view of every object
+of a kind, above the YAML report. They are custom views in all but where they
+are drawn, so they need a `ui/` folder and the same bridge:
+
+```json
+"sections": [
+    { "id": "machine", "label": "Machine", "kind": "crd:virtualmachines.kubevirt.io", "entry": "vm.html", "height": 260 }
+]
+```
+
+`height` is where the frame starts; the SDK measures the page and resizes it to
+fit. The section's `kind` is readable by the page without declaring it again.
+The page gets these on top of the calls above:
+
+| Call | |
+| --- | --- |
+| `ready()` | As before, with `object: { kind, namespace, name }` and `sectionId`. |
+| `object()` | The object the section is drawn for, read live. |
+| `actions(ref?)` | Which of this plugin's actions are offered on the object right now — for drawing a button group of its own. |
+| `run(actionId, ref?)` | Runs one of the plugin's declared actions on the object. The app asks the user first, **every time**, since the click came from inside the page. |
+| `resize(height)` | Sets the height by hand. |
+
+The panel's page is reloaded when the detail view moves to another object.
+
+`examples/plugins/kubevirt-ui` has both: the seven lifecycle actions on the
+action bar, and a *Machine* panel with the state, the node, the addresses, the
+conditions and recent migrations, and a round icon button group drawn from
+`actions()`.
+
+## Installing from a repository
+
+A plugin can live in a repository of its own. Put `plugin.json` at the root and
+its `ui/` folder beside it, and install it with **Settings → Plugins → From a
+repository**: the app runs `git clone --depth 1` into the plugins folder, and
+the card gets an **Update from repository** button that runs
+`git pull --ff-only`. `https://`, `ssh://` and `git@host:owner/repo` addresses
+are accepted; git never prompts, so a private repository needs credentials git
+can find on its own. `package.json`, `tsconfig*.json` and the like at the root
+are skipped rather than read as plugins.
 
 ## Shipping several at once
 
@@ -368,8 +575,15 @@ plugin view becomes a tab without any of that learning a second shape. It is
 resolved back into a real kind and its filters at the last moment, when the watch
 is opened.
 
+A custom view's tab carries the same kind; `Pane.svelte` sees the view's type
+and hosts it in `PluginFrame.svelte` instead of a table.
+
 - `internal/plugins/` — the format, the validator, the loader, the overview
   builder, and the three built-ins.
+- `internal/plugins/ui.go` — serving custom views, their Content-Security-Policy,
+  and the guard that refuses the runtime to them; `sdk/` is the bridge's client.
+- `frontend/src/lib/components/PluginFrame.svelte` — the frame, and the bridge's
+  host side: what a view may ask for, and the confirmation a patch waits on.
 - `internal/addons/` — the file discovery both plugins and themes share.
 - `internal/kube/tally.go` — counting objects by a field path.
 - `pluginservice.go` — what the frontend calls.

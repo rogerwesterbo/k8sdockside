@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Argo CD map</title>
+        <link rel="stylesheet" href="style.css" />
+        <!-- The bridge to the app. Served by k8sdockside itself, always at this path. -->
+        <script src="/plugin-ui/_sdk/k8sdockside.js"></script>
+    </head>
+    <body>
+        <header>
+            <h1>Applications <span id="context"></span></h1>
+            <label>
+                Namespace
+                <select id="namespace">
+                    <option value="">All namespaces</option>
+                </select>
+            </label>
+            <input id="filter" type="search" placeholder="Filter by name…" />
+        </header>
+        <p id="status" class="status">Loading…</p>
+        <main id="apps"></main>
+
+        <!-- A classic script, not type="module": a sandboxed frame has an opaque
+             origin, so a module would be a cross-origin load. -->
+        <script src="app.js"></script>
+    </body>
+</html>

@@ -176,7 +176,7 @@ export const HELP: Page = {
             blocks: [
                 {
                     type: 'p',
-                    text: 'Argo CD, Flux and Prometheus ship built in. Each unfolds into its own views instead of scattering custom resources through the definitions tree, and each has an overview that says whether this cluster actually has it. A plugin is a JSON file naming kinds the app already knows how to show: it cannot ship code, and it cannot choose where a query goes.',
+                    text: 'Argo CD, Flux and Prometheus ship built in. Each unfolds into its own views instead of scattering custom resources through the definitions tree, and each has an overview that says whether this cluster actually has it. A plugin is a JSON file naming kinds the app already knows how to show, and it cannot choose where a query goes. One installed from a folder may also bring views of its own: a page drawn in a sandboxed frame, which reads only the kinds the plugin declares and never changes anything without asking you first.',
                 },
                 {
                     type: 'note',

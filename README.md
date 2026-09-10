@@ -175,7 +175,10 @@ See [docs/development.md](docs/development.md).
   tree, with an overview of whether the cluster actually has it
 - A plugin is a JSON file naming kinds the app already knows how to show, so
   supporting your own operator is a file, not a fork —
-  [docs/plugins.md](docs/plugins.md)
+  [docs/plugins.md](docs/plugins.md). One kept in its own folder or repository
+  can also bring views of its own: HTML drawn in a sandboxed frame, reading the
+  cluster through a narrow bridge — see
+  [examples/plugins](examples/plugins/README.md)
 - Graphs where the cluster can answer for them: Prometheus is found
   automatically and reached *through the API server*, no port-forward and no
   second credential. The queries live in the plugin file.

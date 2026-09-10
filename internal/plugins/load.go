@@ -6,6 +6,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -57,6 +58,10 @@ var Builtin = sync.OnceValue(func() []Plugin {
 		if err != nil {
 			panic(fmt.Sprintf("plugins: %s: %v", name, err))
 		}
+		// A built-in has no folder on disk to serve views from.
+		if plugin.UI != nil {
+			panic(fmt.Sprintf("plugins: %s: a built-in plugin cannot ship views of its own", name))
+		}
 		plugin.Origin = BuiltinOrigin
 		byID[plugin.ID] = plugin
 	}
@@ -105,6 +110,7 @@ func Load(dir string, extra []string, disabled []string) Catalogue {
 	}
 	for i := range loaded {
 		loaded[i].Disabled = off[loaded[i].ID]
+		loaded[i].Repo, _ = RepoOf(loaded[i])
 	}
 
 	return Catalogue{
@@ -142,12 +148,34 @@ func parseFile(path string, raw []byte) (loaded []Plugin, refused []string, err 
 		}
 		plugin.Origin = path
 		plugin.Pack = pack.Name
+		if err := checkUIDir(plugin); err != nil {
+			refused = append(refused, err.Error())
+			continue
+		}
 		loaded = append(loaded, plugin)
 	}
 	if len(loaded) == 0 && len(refused) > 0 {
 		return nil, nil, errors.New(strings.Join(refused, "; "))
 	}
 	return loaded, refused, nil
+}
+
+// checkUIDir refuses a plugin whose own views have no folder to be served
+// from, when the file is read, rather than leaving it to open onto a blank
+// frame.
+func checkUIDir(p Plugin) error {
+	root, ok := p.UIRoot()
+	if !ok {
+		return nil
+	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("plugin %q ships views of its own, but its ui folder %s cannot be read: %w", p.ID, root, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("plugin %q ships views of its own, but %s is a file, not a folder", p.ID, root)
+	}
+	return nil
 }
 
 // Example is a starter plugin, written into the plugins folder on request. It

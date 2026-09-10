@@ -28,9 +28,22 @@ export function adoptPlugin(plugin: bindings.Plugin): Plugin {
             kind: view.kind ?? '',
             namespace: view.namespace ?? '',
             selector: view.selector ?? '',
+            entry: view.entry ?? '',
+        })),
+        ui: plugin.ui
+            ? { readable: [...(plugin.ui.readable ?? [])], write: plugin.ui.write ?? false }
+            : null,
+        actions: (plugin.actions ?? []).map((a) => ({ id: a.id, label: a.label, kind: a.kind })),
+        sections: (plugin.sections ?? []).map((s) => ({
+            id: s.id,
+            label: s.label,
+            kind: s.kind,
+            entry: s.entry || 'index.html',
+            height: s.height || 240,
         })),
         origin: plugin.origin,
         pack: plugin.pack,
+        repo: plugin.repo ?? '',
         disabled: plugin.disabled ?? false,
     };
 }

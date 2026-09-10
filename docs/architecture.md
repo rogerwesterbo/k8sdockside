@@ -78,7 +78,9 @@ internal/appconfig/          the settings file
 internal/addons/             finding and merging add-on files, shared by the two below
 internal/themes/             the theme format, loader and built-in palettes
 internal/themes/builtin/     the thirteen themes, as JSON in the public format
-internal/plugins/            the plugin format, loader and overview builder
+internal/plugins/            the plugin format, loader and overview builder; object actions and
+                             panels (actions.go); serving plugins' own views (ui.go) with the
+                             bridge's client (sdk/); installing from a repository (git.go)
 internal/plugins/builtin/    Argo CD, Flux and Prometheus, in the public format
 internal/metrics/            PromQL, Prometheus discovery, and reading its answers
 internal/termapp/            the terminal emulators on this machine, and how to run one in it
@@ -94,11 +96,13 @@ frontend/src/
   lib/state/views.ts              how each open list is sorted and filtered, for as long as its tab is
   lib/theme/apply.ts         writing a theme's colours onto the document
   lib/plugins/               the plugin catalogue as the sidebar and overview see it
+  lib/components/PluginFrame.svelte   a plugin's own view or detail panel, sandboxed, and the bridge it talks through
   lib/charts/                the SVG line chart, and the panel that hosts them
   lib/budget/                the requested/limits/used bars, and the throttling reading under them
   lib/catalogue.ts           the resource kinds the sidebar offers
   lib/colors.ts              the context palette
   lib/components/            sidebar, tab bar, tables, detail panel, dock
+examples/plugins/            plugins kept outside the app, as a plugin repository would be
 ```
 
 ## The generated bindings

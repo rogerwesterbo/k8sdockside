@@ -1719,6 +1719,7 @@ describe('themes', () => {
             resolved: { bg: '#000000', text: '#ffffff' },
             origin: 'builtin',
             pack: '',
+            repo: '',
             warnings: [],
             ...extra,
         };
@@ -1834,6 +1835,7 @@ describe('solution plugins', () => {
             views: [{ id: 'things', label: 'Things', icon: 'box', type: 'table', kind: 'pods', namespace: '', selector: '' }],
             origin: 'builtin',
             pack: '',
+            repo: '',
             disabled: false,
         };
     }
@@ -1941,6 +1943,7 @@ describe('solution plugins', () => {
                     ],
                     origin: 'builtin',
                     pack: '',
+                    repo: '',
                     disabled: false,
                 },
             ],
@@ -2543,7 +2546,7 @@ describe('listedKind', () => {
         workspace.pluginCatalogue = {
             plugins: [{
                 id: 'argocd', name: 'Argo CD', tagline: '', icon: 'rocket', author: '', docs: '', description: '',
-                origin: 'builtin', pack: '', disabled: false, requires: [],
+                origin: 'builtin', pack: '', repo: '', disabled: false, requires: [],
                 views: [{ id: 'applications', label: 'Applications', icon: 'rocket', type: 'list', kind: 'crd:applications.argoproj.io', namespace: '', selector: '' }],
             }],
             dir: '', folders: [], problems: [],

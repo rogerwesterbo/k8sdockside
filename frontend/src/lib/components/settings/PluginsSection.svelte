@@ -15,6 +15,41 @@
 
     let showFormat = $state(false);
 
+    /** The repository address being typed, and whether a clone is running. */
+    let repoUrl = $state('');
+    let cloning = $state(false);
+    let updating = $state<string | null>(null);
+
+    async function install(): Promise<void> {
+        const url = repoUrl.trim();
+        if (!url || cloning) return;
+        cloning = true;
+        try {
+            if (await workspace.installPluginFromGit(url)) repoUrl = '';
+        } finally {
+            cloning = false;
+        }
+    }
+
+    async function update(id: string): Promise<void> {
+        updating = id;
+        try {
+            await workspace.updatePluginFromGit(id);
+        } finally {
+            updating = null;
+        }
+    }
+
+    /** "3 actions on VirtualMachines · 1 panel" -- what a plugin adds to objects. */
+    function objectExtras(plugin: import('../../plugins/types').Plugin): string {
+        const parts: string[] = [];
+        const acts = plugin.actions?.length ?? 0;
+        const secs = plugin.sections?.length ?? 0;
+        if (acts > 0) parts.push(`${acts} object action${acts === 1 ? '' : 's'}`);
+        if (secs > 0) parts.push(`${secs} detail panel${secs === 1 ? '' : 's'}`);
+        return parts.join(' · ');
+    }
+
     let builtin = $derived(workspace.plugins.filter((p) => p.origin === 'builtin'));
     let installed = $derived(workspace.plugins.filter((p) => p.origin !== 'builtin'));
 
@@ -30,7 +65,7 @@
 
 <SettingsSection
     title="Plugins"
-    lede="A solution plugin gives something installed in your clusters — Argo CD, Flux, Prometheus — a place of its own in the sidebar, instead of leaving its custom resources scattered through the definitions tree under group names. Like a theme, it is a JSON file that names things the app already knows how to show: it cannot ship code or queries."
+    lede="A solution plugin gives something installed in your clusters — Argo CD, Flux, Prometheus — a place of its own in the sidebar, instead of leaving its custom resources scattered through the definitions tree under group names. Like a theme, it is a JSON file that names things the app already knows how to show. One from a folder may also bring views of its own — a page in a sandboxed frame that reads only the kinds its card lists, and asks before changing anything."
 >
     <h3>Built in</h3>
     <div class="gallery">
@@ -71,6 +106,32 @@
             <Icon name="refresh" size={14} /> Reload
         </button>
     </div>
+
+    <h3>From a repository</h3>
+    <p class="note">
+        A plugin kept in a repository of its own — with <code>plugin.json</code> at its root — is cloned into the
+        plugins folder, and updated from its card. Needs <code>git</code> on this machine.
+    </p>
+    <form
+        class="repo-row"
+        onsubmit={(e) => {
+            e.preventDefault();
+            void install();
+        }}
+    >
+        <input
+            type="text"
+            placeholder="https://github.com/you/k8sdockside-kubevirt.git"
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="Repository address"
+            bind:value={repoUrl}
+        />
+        <button type="submit" disabled={cloning || !repoUrl.trim()}>
+            <Icon name="download" size={13} />
+            {cloning ? 'Cloning…' : 'Install'}
+        </button>
+    </form>
 
     {#if workspace.pluginFolders.length > 0}
         <h3>Extra folders</h3>
@@ -169,10 +230,34 @@
             {plugin.views.length} view{plugin.views.length === 1 ? '' : 's'}
             · {required(plugin)} required kind{required(plugin) === 1 ? '' : 's'}
         </p>
+        <!-- A plugin with views of its own runs code, so what that code can
+             reach is said here, before any of its views is opened. -->
+        {#if plugin.ui}
+            <p class="counts" title={plugin.ui.readable.join(', ')}>
+                Own views · reads {plugin.ui.readable.length} kind{plugin.ui.readable.length === 1 ? '' : 's'}
+                {#if plugin.ui.write}· may ask to change them{/if}
+            </p>
+        {/if}
+        {#if objectExtras(plugin)}
+            <p class="counts" title={(plugin.actions ?? []).map((a) => `${a.label} on ${a.kind}`).join('\n')}>
+                {objectExtras(plugin)}
+            </p>
+        {/if}
         {#if plugin.origin !== 'builtin'}
             <p class="from" title={plugin.origin}>
                 {#if plugin.pack}{plugin.pack} · {/if}{fileOf(plugin.origin)}
             </p>
+        {/if}
+        {#if plugin.repo}
+            <button
+                class="update"
+                disabled={updating === plugin.id}
+                title="git pull in {plugin.repo}"
+                onclick={() => void update(plugin.id)}
+            >
+                <Icon name="refresh" size={11} />
+                {updating === plugin.id ? 'Updating…' : 'Update from repository'}
+            </button>
         {/if}
     </article>
 {/snippet}
@@ -394,6 +479,59 @@
         filter: brightness(1.08);
         background: var(--accent);
         color: var(--accent-text);
+    }
+
+    .repo-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .repo-row input {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 6px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg);
+        box-shadow: inset 0 0 0 1px var(--border);
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 11.5px;
+    }
+
+    .repo-row input:focus {
+        outline: none;
+        box-shadow: inset 0 0 0 1px var(--accent);
+    }
+
+    .repo-row button,
+    .update {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        padding: 6px 11px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        color: var(--text-dim);
+        box-shadow: inset 0 0 0 1px var(--border);
+    }
+
+    .repo-row button:hover:not(:disabled),
+    .update:hover:not(:disabled) {
+        background: var(--bg-hover);
+        color: var(--text);
+    }
+
+    .repo-row button:disabled,
+    .update:disabled {
+        opacity: 0.5;
+    }
+
+    .update {
+        margin-top: 8px;
+        padding: 3px 8px;
+        font-size: 11px;
     }
 
     .paths,

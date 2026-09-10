@@ -4,11 +4,16 @@
 // than leaving its custom resources scattered through the definitions tree
 // under group names.
 //
-// Like a theme, a plugin is a JSON file and nothing else. It cannot ship code
-// or queries; it names resource kinds the app already knows how to list, and
-// says how to arrange and summarise them. What that buys is that installing
-// someone else's plugin is as safe as installing their theme, and that a plugin
-// written today keeps working as the app grows.
+// Most of a plugin is a JSON file and nothing else: it names resource kinds the
+// app already knows how to list, and says how to arrange and summarise them.
+// That part is as safe to install as a theme, and keeps working as the app
+// grows.
+//
+// A plugin read from disk may also ship views of its own -- HTML and script in
+// a folder beside its file, drawn in a sandboxed frame. Those are code, and are
+// treated as such: they reach the cluster only through a narrow bridge the app
+// answers, only for the kinds the plugin declares, and never write without the
+// user saying yes. See ui.go.
 //
 // A plugin is installed on *this machine*. Whether the thing it describes is
 // installed in the cluster in front of you is a separate question, asked per
@@ -18,6 +23,8 @@ package plugins
 
 import (
 	"fmt"
+	"io/fs"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,9 +70,21 @@ const (
 	// one whether or not it asks, because "is this even installed here?" is the
 	// first question and it needs somewhere to be answered.
 	ViewOverview = "overview"
-	// ViewTable is a resource listing, which is every other view.
+	// ViewTable is a resource listing, which is most other views.
 	ViewTable = "table"
+	// ViewCustom is the plugin's own page: a file from its UI folder, drawn in
+	// a sandboxed frame. It is how a plugin shows its solution the way that
+	// solution is best read -- an application's resource tree, a VM's state
+	// -- rather than as rows.
+	ViewCustom = "custom"
 )
+
+// DefaultEntry is the file a custom view opens when it does not name one.
+const DefaultEntry = "index.html"
+
+// DefaultUIDir is the folder, beside the plugin's file, its views are read
+// from when it does not name one.
+const DefaultUIDir = "ui"
 
 // OverviewID is the view id the generated overview takes. It is reserved: a
 // plugin declaring a view of its own by this name is refused rather than
@@ -80,13 +99,16 @@ type View struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Icon  string `json:"icon,omitzero"`
-	// Type is ViewOverview or ViewTable; empty means table, which is what
-	// almost every view is.
+	// Type is ViewTable or ViewCustom; empty means table, which is what most
+	// views are.
 	Type string `json:"type,omitzero"`
 	// Kind is the resource this view lists: a built-in kind name, or a
 	// "crd:<plural>.<group>" custom resource. Required for a table view and
-	// meaningless on the overview.
+	// meaningless on the overview and a custom view.
 	Kind string `json:"kind,omitzero"`
+	// Entry is the file a custom view opens, relative to the plugin's UI
+	// folder. Defaults to DefaultEntry; meaningless on a table view.
+	Entry string `json:"entry,omitzero"`
 	// Namespace pins the view to one namespace. Empty means every namespace and
 	// leaves the tab's own namespace filter free; set, it is where the view
 	// opens and the filter is fixed there, because a view that says
@@ -201,6 +223,27 @@ type UsageQueries struct {
 	Pod  UsagePair `json:"pod,omitzero"`
 }
 
+// UI is what a plugin's own views are allowed: where their files are, what
+// they may read, and whether they may ask to change anything.
+//
+// It is declared rather than inferred so the settings view can say, before a
+// custom view is ever opened, what that code can reach.
+type UI struct {
+	// Dir is the folder the views are read from, relative to the plugin's own
+	// file. It may not leave that file's folder.
+	Dir string `json:"dir,omitzero"`
+	// Kinds are what the views may read beyond the kinds the plugin already
+	// names in its requirements, views and cards.
+	Kinds []string `json:"kinds,omitzero"`
+	// Write lets the views ask to merge-patch objects of those kinds. Every
+	// patch is shown to the user and applied only when they say yes.
+	Write bool `json:"write,omitzero"`
+	// Readable is every kind the views may read, worked out by the loader --
+	// Kinds plus everything else the plugin names -- and ignored on the way
+	// in. Both sides check against this one list.
+	Readable []string `json:"readable"`
+}
+
 // Plugin is one solution the app knows how to show.
 type Plugin struct {
 	ID      string `json:"id"`
@@ -219,12 +262,22 @@ type Plugin struct {
 	// Usage is optional: a plugin that knows a Prometheus can offer it as a
 	// stand-in for metrics-server. Absent for almost every plugin.
 	Usage *UsageQueries `json:"usage,omitzero"`
+	// UI is present when the plugin ships views of its own. See UI.
+	UI *UI `json:"ui,omitzero"`
+	// Actions are buttons on the action bar of objects of a kind. See actions.go.
+	Actions []Action `json:"actions,omitzero"`
+	// Sections are the plugin's own panels in the detail view of objects of a
+	// kind. Like custom views, only a plugin read from a folder can have them.
+	Sections []Section `json:"sections,omitzero"`
 
 	// Origin is filled in by the loader and ignored on the way in: BuiltinOrigin
 	// or the path of the file it was read from.
 	Origin string `json:"origin"`
 	// Pack is the collection it arrived in, empty for one that came on its own.
 	Pack string `json:"pack"`
+	// Repo is the git checkout the file is in, filled in by the loader, so
+	// the settings view can offer to update it. Empty for everything else.
+	Repo string `json:"repo"`
 	// Disabled is set by the loader for a plugin the user has switched off in
 	// settings. A disabled plugin stays in the catalogue rather than being
 	// dropped from it, because the settings view has to list it to offer
@@ -422,8 +475,19 @@ func validate(p Plugin) (Plugin, error) {
 		p.Usage = &usage
 	}
 
-	if len(p.Views) == 0 && len(p.Cards) == 0 && len(p.Charts) == 0 {
-		return p, fmt.Errorf("plugin %q has no views, nothing to summarise and nothing to chart, so there would be nothing to show", p.ID)
+	if err := validateActions(&p); err != nil {
+		return p, err
+	}
+	if err := validateSections(&p); err != nil {
+		return p, err
+	}
+
+	if err := validateUI(&p); err != nil {
+		return p, err
+	}
+
+	if len(p.Views) == 0 && len(p.Cards) == 0 && len(p.Charts) == 0 && len(p.Actions) == 0 && len(p.Sections) == 0 {
+		return p, fmt.Errorf("plugin %q has no views, actions or sections, nothing to summarise and nothing to chart, so there would be nothing to show", p.ID)
 	}
 	return p, nil
 }
@@ -561,11 +625,20 @@ func validateView(pluginID string, v View) (View, error) {
 	if v.Label == "" {
 		v.Label = v.ID
 	}
+	if v.Icon == "" {
+		v.Icon = "puzzle"
+	}
 	if v.Type == "" {
 		v.Type = ViewTable
 	}
+	if v.Type == ViewCustom {
+		return validateCustomView(pluginID, v)
+	}
 	if v.Type != ViewTable {
-		return v, fmt.Errorf("plugin %q has a view of type %q; only %q may be declared", pluginID, v.Type, ViewTable)
+		return v, fmt.Errorf("plugin %q has a view of type %q; only %q or %q may be declared", pluginID, v.Type, ViewTable, ViewCustom)
+	}
+	if v.Entry != "" {
+		return v, fmt.Errorf("plugin %q has a table view %q with an entry file; only a %q view opens one", pluginID, v.ID, ViewCustom)
 	}
 	if v.Kind == "" {
 		return v, fmt.Errorf("plugin %q has a view %q with no kind to list", pluginID, v.ID)
@@ -579,10 +652,119 @@ func validateView(pluginID string, v View) (View, error) {
 	if err := checkFilter(v.Namespace, v.Selector); err != nil {
 		return v, fmt.Errorf("plugin %q, view %q: %w", pluginID, v.ID, err)
 	}
-	if v.Icon == "" {
-		v.Icon = "puzzle"
+	return v, nil
+}
+
+// validateCustomView checks a view that opens one of the plugin's own files.
+// It lists nothing itself, so the fields that narrow a listing are refused
+// rather than silently ignored.
+func validateCustomView(pluginID string, v View) (View, error) {
+	if v.Kind != "" || v.Namespace != "" || v.Selector != "" {
+		return v, fmt.Errorf("plugin %q has a custom view %q with a kind, namespace or selector; a custom view reads what it needs through the bridge instead", pluginID, v.ID)
+	}
+	v.Entry = strings.TrimSpace(v.Entry)
+	if v.Entry == "" {
+		v.Entry = DefaultEntry
+	}
+	if !fs.ValidPath(v.Entry) || v.Entry == "." {
+		return v, fmt.Errorf("plugin %q has a custom view %q opening %q, which is not a file inside its UI folder", pluginID, v.ID, v.Entry)
 	}
 	return v, nil
+}
+
+// validateUI checks what a plugin's own views may do, and works out the one
+// list of kinds they may read.
+//
+// A plugin with a custom view and no ui block gets one with the defaults, so
+// the simplest plugin with a view of its own is still just "type": "custom".
+func validateUI(p *Plugin) error {
+	hasCustom := slices.ContainsFunc(p.Views, func(v View) bool { return v.Type == ViewCustom }) || len(p.Sections) > 0
+	if p.UI == nil {
+		if !hasCustom {
+			return nil
+		}
+		p.UI = &UI{}
+	}
+
+	ui := *p.UI
+	ui.Dir = strings.TrimSpace(ui.Dir)
+	if ui.Dir == "" {
+		ui.Dir = DefaultUIDir
+	}
+	if !fs.ValidPath(ui.Dir) || ui.Dir == "." {
+		return fmt.Errorf("plugin %q has a ui folder %q, which is not a folder beside its file", p.ID, ui.Dir)
+	}
+
+	for i, kind := range ui.Kinds {
+		kind = strings.TrimSpace(kind)
+		if !kube.IsKnownKind(kind) {
+			return fmt.Errorf("plugin %q lets its views read %q, which is not a kind this app can open", p.ID, kind)
+		}
+		if kind == unreadableKind {
+			return fmt.Errorf("plugin %q lets its views read %s, which no plugin view may read", p.ID, unreadableKind)
+		}
+		ui.Kinds[i] = kind
+	}
+
+	ui.Readable = readableKinds(*p, ui.Kinds)
+	p.UI = &ui
+	return nil
+}
+
+// unreadableKind is kept away from plugin views whatever they declare. Secrets
+// are the one kind whose contents are the credential, and a view reading them
+// could hand them anywhere.
+const unreadableKind = "secrets"
+
+// readableKinds is every kind a plugin names anywhere, plus the extras its UI
+// asks for, once each and in the order first named.
+func readableKinds(p Plugin, extra []string) []string {
+	var out []string
+	add := func(kind string) {
+		if kind == "" || kind == unreadableKind || strings.HasPrefix(kind, Prefix) || slices.Contains(out, kind) {
+			return
+		}
+		out = append(out, kind)
+	}
+	for _, req := range p.Requires {
+		add(req.Kind)
+	}
+	for _, view := range p.Views {
+		add(view.Kind)
+	}
+	for _, card := range p.Cards {
+		add(card.Kind)
+	}
+	for _, section := range p.Sections {
+		add(section.Kind)
+	}
+	for _, action := range p.Actions {
+		add(action.Kind)
+		add(action.Request.Kind)
+	}
+	for _, kind := range extra {
+		add(kind)
+	}
+	return out
+}
+
+// CanRead reports whether the plugin's own views may read a kind.
+func (p Plugin) CanRead(kind string) bool {
+	return p.UI != nil && slices.Contains(p.UI.Readable, kind)
+}
+
+// CanWrite reports whether the plugin's own views may ask to patch a kind.
+func (p Plugin) CanWrite(kind string) bool {
+	return p.CanRead(kind) && p.UI.Write
+}
+
+// UIRoot is the folder the plugin's own views are served from. Only a plugin
+// read from a file has one: a built-in has no folder on disk to serve.
+func (p Plugin) UIRoot() (string, bool) {
+	if p.UI == nil || p.Builtin() || p.Origin == "" {
+		return "", false
+	}
+	return filepath.Join(filepath.Dir(p.Origin), filepath.FromSlash(p.UI.Dir)), true
 }
 
 func validateCard(pluginID string, c Card) (Card, error) {
@@ -674,6 +856,10 @@ type Resolved struct {
 	// Overview is true for the plugin's landing page, which is not a listing at
 	// all and has no Kind.
 	Overview bool `json:"overview"`
+	// Custom is true for one of the plugin's own views, which has no Kind
+	// either: it is a file from the plugin's UI folder, named by Entry.
+	Custom bool   `json:"custom"`
+	Entry  string `json:"entry"`
 }
 
 // ResolveKind turns a "plugin:" tab kind into what it names.
@@ -725,5 +911,7 @@ func (c Catalogue) ResolveKind(kind string) (Resolved, error) {
 		ViewID:     view.ID,
 		Label:      view.Label,
 		Icon:       view.Icon,
+		Custom:     view.Type == ViewCustom,
+		Entry:      view.Entry,
 	}, nil
 }

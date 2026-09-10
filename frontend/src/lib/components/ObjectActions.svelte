@@ -20,6 +20,8 @@
     import Icon from './Icon.svelte';
     import { notices } from '../state/notices.svelte';
     import { detail } from '../state/detail.svelte';
+    import { PluginService } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
+    import type { OfferedAction } from '../plugins/types';
 
     // Named `object` rather than `target`: `target` is one of Svelte's own
     // mount options, and a prop by that name is taken for the element to mount
@@ -50,11 +52,87 @@
     };
 
     let facts = $derived(actions.stateOf(object));
+    /**
+     * A plugin from outside the app that brings its own buttons for this kind
+     * takes over from the app's built-in product buttons for it, rather than
+     * the bar carrying two Starts.
+     */
+    let pluginOwnsKind = $derived(workspace.pluginActsOn(object.kind, { external: true }));
     let available = $derived(
-        facts.vm.isMachine
+        facts.vm.isMachine && !pluginOwnsKind
             ? [...actionsForVM(facts.vm), ...actionsFor(object.kind)]
             : actionsFor(object.kind),
     );
+
+    // ----- buttons from plugins ----------------------------------------------
+
+    /**
+     * What plugins offer on this object right now. The backend reads the
+     * object and leaves out any whose conditions it does not meet, so a
+     * stopped machine offers Start and a running one Pause.
+     */
+    let offered = $state<OfferedAction[]>([]);
+    /** The plugin action waiting on its confirmation, if any. */
+    let askingPlugin = $state<OfferedAction | null>(null);
+    let hasPluginActions = $derived(workspace.pluginActsOn(object.kind));
+
+    async function loadOffered(ref: DetailTarget): Promise<void> {
+        try {
+            const got = (await PluginService.ObjectActions(ref.contextId, ref.kind, ref.namespace, ref.name)) ?? [];
+            // The panel may have moved to another object while this was asked.
+            if (ref.contextId !== object.contextId || ref.name !== object.name || ref.kind !== object.kind) return;
+            offered = got as OfferedAction[];
+        } catch {
+            // A read that failed leaves the buttons as they were: the next
+            // poll will try again, and the describe report says what is wrong.
+        }
+    }
+
+    // Read on every new object, and again every few seconds, because what a
+    // plugin offers follows the object's state and that state moves by itself
+    // -- a machine that was Starting is Running a moment later.
+    $effect(() => {
+        const ref = { ...object };
+        offered = [];
+        askingPlugin = null;
+        if (!hasPluginActions) return;
+        void loadOffered(ref);
+        const timer = setInterval(() => void loadOffered(ref), 5000);
+        return () => clearInterval(timer);
+    });
+
+    function choosePlugin(action: OfferedAction): void {
+        if (action.confirm) {
+            askingPlugin = action;
+            return;
+        }
+        void runPlugin(action);
+    }
+
+    async function runPlugin(action: OfferedAction): Promise<void> {
+        busy = true;
+        const ref = { ...object };
+        try {
+            const created = await PluginService.RunAction(
+                ref.contextId,
+                action.pluginId,
+                action.id,
+                ref.namespace,
+                ref.name,
+            );
+            const said = action.done || `${action.label}: ${ref.name}`;
+            notices.inform(created ? `${said} — created ${created}` : said);
+        } catch (err) {
+            notices.fail(err instanceof Error ? err.message : String(err));
+        } finally {
+            askingPlugin = null;
+            busy = false;
+            // Straight away and once more shortly, so the bar moves on as soon
+            // as the cluster does rather than on the next poll.
+            void loadOffered(ref);
+            setTimeout(() => void loadOffered(ref), 1500);
+        }
+    }
     let drain = $derived(actions.drainOf(object));
 
     /**
@@ -160,7 +238,7 @@
 
     // Focus the safe answer as soon as a question appears.
     $effect(() => {
-        if (asking) cancelEl?.focus();
+        if (asking || askingPlugin) cancelEl?.focus();
     });
 
     /**
@@ -434,11 +512,26 @@
     let asked = $derived(available.find((a) => a.id === asking) ?? null);
 </script>
 
-<svelte:document onkeydown={(e) => e.key === 'Escape' && asking && (asking = null)} />
+<svelte:document
+    onkeydown={(e) => {
+        if (e.key !== 'Escape') return;
+        if (asking) asking = null;
+        if (askingPlugin) askingPlugin = null;
+    }}
+/>
 
-{#if available.length > 0}
+{#if available.length > 0 || offered.length > 0}
     <div class="bar" class:stacked={asked?.id === 'drain'}>
-        {#if asked && asked.form === 'confirm'}
+        {#if askingPlugin}
+            {@const a = askingPlugin}
+            <p class="question">{a.confirm}</p>
+            <div class="answers">
+                <button bind:this={cancelEl} class="plain" onclick={() => (askingPlugin = null)}>Cancel</button>
+                <button class="go" class:danger={a.tone === 'danger'} disabled={busy} onclick={() => runPlugin(a)}>
+                    {a.label}
+                </button>
+            </div>
+        {:else if asked && asked.form === 'confirm'}
             <p class="question">{question(asked.id)}</p>
             {#if asked.id === 'uninstall'}
                 <!-- Keeping the history leaves the release listed as
@@ -586,17 +679,27 @@
                 <button class="go" disabled={busy} onclick={() => perform('scale', replicas)}>Apply</button>
             </div>
         {:else}
-            {#each available as action (action.id)}
+            {#each available.filter((a) => a.tone !== 'danger') as action (action.id)}
+                {@render builtinButton(action)}
+            {/each}
+            <!-- A plugin's buttons after the app's own, and before the one that
+                 cannot be undone, each saying which plugin it is from. -->
+            {#if offered.length > 0 && available.some((a) => a.tone !== 'danger')}
+                <span class="sep" aria-hidden="true"></span>
+            {/if}
+            {#each offered as action (action.pluginId + '/' + action.id)}
                 <button
                     class:danger={action.tone === 'danger'}
-                    class:last={action.tone === 'danger'}
-                    disabled={busy || (action.needsHelm === true && helmMissing)}
-                    title={action.needsHelm === true && helmMissing ? helm.tool.reason : labelOf(action)}
-                    onclick={() => choose(action)}
+                    disabled={busy}
+                    title="{action.label} — from the {action.pluginName} plugin"
+                    onclick={() => choosePlugin(action)}
                 >
                     <Icon name={action.icon} size={13} />
-                    {labelOf(action)}
+                    {action.label}
                 </button>
+            {/each}
+            {#each available.filter((a) => a.tone === 'danger') as action (action.id)}
+                {@render builtinButton(action)}
             {/each}
         {/if}
     </div>
@@ -645,7 +748,28 @@
     {/if}
 {/if}
 
+{#snippet builtinButton(action: Action)}
+    <button
+        class:danger={action.tone === 'danger'}
+        class:last={action.tone === 'danger'}
+        disabled={busy || (action.needsHelm === true && helmMissing)}
+        title={action.needsHelm === true && helmMissing ? helm.tool.reason : labelOf(action)}
+        onclick={() => choose(action)}
+    >
+        <Icon name={action.icon} size={13} />
+        {labelOf(action)}
+    </button>
+{/snippet}
+
 <style>
+    .sep {
+        width: 1px;
+        height: 16px;
+        margin: 0 2px;
+        background: var(--border);
+        flex: 0 0 auto;
+    }
+
     .bar {
         display: flex;
         align-items: center;

@@ -85,7 +85,13 @@ import { notices } from './notices.svelte';
 import { detail, type DetailTarget } from './detail.svelte';
 import { defaultColorFor } from '../colors';
 import { adoptPluginCatalogue } from '../plugins/adopt';
-import { emptyPluginCatalogue, type Plugin, type PluginCatalogue } from '../plugins/types';
+import {
+    emptyPluginCatalogue,
+    type Plugin,
+    type PluginCatalogue,
+    type PluginSectionSpec,
+    type PluginViewSpec,
+} from '../plugins/types';
 import { adoptSource, type MetricsSource } from '../charts/adopt';
 import { adoptCatalogue, adoptTokens, emptyCatalogue } from '../theme/adopt';
 import { DEFAULT_THEME_ID, pickTheme, type Theme, type ThemeCatalogue, type ThemeToken } from '../theme/apply';
@@ -2056,6 +2062,37 @@ class Workspace {
     }
 
     /**
+     * The view a `plugin:` tab kind opens, if its plugin is installed and still
+     * declares it. Null for the overview, which no plugin declares.
+     */
+    pluginViewFor(kind: string): PluginViewSpec | null {
+        const view = parsePluginKind(kind);
+        if (!view) return null;
+        return this.pluginFor(kind)?.views.find((v) => v.id === view.viewId) ?? null;
+    }
+
+    /**
+     * The panels enabled plugins draw in the detail view of an object of this
+     * kind, each with the plugin it belongs to.
+     */
+    pluginSectionsFor(kind: string): { plugin: Plugin; section: PluginSectionSpec }[] {
+        return this.enabledPlugins.flatMap((plugin) =>
+            (plugin.sections ?? []).filter((s) => s.kind === kind).map((section) => ({ plugin, section })),
+        );
+    }
+
+    /**
+     * Whether an enabled plugin from outside the app puts buttons on this kind.
+     * One that does takes over from the app's own product-specific buttons for
+     * it -- a VM's lifecycle bar -- rather than drawing a second set beside them.
+     */
+    pluginActsOn(kind: string, opts: { external?: boolean } = {}): boolean {
+        return this.enabledPlugins.some(
+            (p) => (!opts.external || p.origin !== 'builtin') && (p.actions ?? []).some((a) => a.kind === kind),
+        );
+    }
+
+    /**
      * The kind a tab's rows actually are: for a plugin view, the kind the
      * view lists; for anything else, the kind itself.
      *
@@ -2396,6 +2433,35 @@ class Workspace {
             this.settings = adoptSettings(await SettingsService.Get());
         } catch (err) {
             notices.fail(`Could not add the folder: ${message(err)}`);
+        }
+    }
+
+    /**
+     * Clones a plugin repository into the plugins folder and reads it. Returns
+     * whether it worked, so the form can clear itself only then.
+     */
+    async installPluginFromGit(url: string): Promise<boolean> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.InstallFromGit(url));
+            this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
+            this.registerViews();
+            notices.inform(`Installed ${url}`);
+            return true;
+        } catch (err) {
+            notices.fail(`Could not install the plugin: ${message(err)}`);
+            return false;
+        }
+    }
+
+    /** Pulls the repository a plugin was cloned from and reads it again. */
+    async updatePluginFromGit(id: string): Promise<void> {
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.UpdateFromGit(id));
+            this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
+            this.registerViews();
+            notices.inform(`Updated ${id}`);
+        } catch (err) {
+            notices.fail(`Could not update the plugin: ${message(err)}`);
         }
     }
 

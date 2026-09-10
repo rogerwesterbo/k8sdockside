@@ -41,6 +41,7 @@
     import DetailPanel from './DetailPanel.svelte';
     import Icon from './Icon.svelte';
     import LogView from './LogView.svelte';
+    import PluginFrame from './PluginFrame.svelte';
     import PluginOverview from './PluginOverview.svelte';
     import PortForwards from './PortForwards.svelte';
     import ResourceTable from './ResourceTable.svelte';
@@ -372,6 +373,8 @@
                             <PortForwards contextId={active.contextId} />
                         {:else if isPluginOverview(active.kind)}
                             <PluginOverview contextId={active.contextId} kind={active.kind} />
+                        {:else if workspace.pluginViewFor(active.kind)?.type === 'custom'}
+                            <PluginFrame contextId={active.contextId} kind={active.kind} />
                         {:else}
                             <ResourceTable contextId={active.contextId} kind={active.kind} />
                         {/if}
