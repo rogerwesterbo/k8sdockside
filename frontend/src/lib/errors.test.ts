@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { classify } from './errors';
+import { classify, isNotServed, notServedGroup } from './errors';
 
 // The messages below are real client-go output. They are the whole point of
 // this module: what a cluster failure looks like on the wire is not what a
@@ -97,5 +97,25 @@ describe('classify', () => {
 
     test('matches case-insensitively, because client-go is inconsistent about it', () => {
         expect(classify('Connection Refused').headline).toBe('Cannot reach the API server');
+    });
+});
+
+// Worded by kube.notServed on the Go side. An optional API that is not
+// installed is an answer, not a failure, and the view says so differently.
+describe('isNotServed', () => {
+    const GATEWAY = 'this cluster does not serve httproutes -- the gateway.networking.k8s.io API is not installed';
+
+    test('recognises a kind the cluster does not serve', () => {
+        expect(isNotServed(GATEWAY)).toBe(true);
+        expect(isNotServed('this cluster does not serve widgets')).toBe(true);
+    });
+
+    test('leaves a real failure alone', () => {
+        expect(isNotServed('dial tcp 10.0.0.1:6443: connect: connection refused')).toBe(false);
+    });
+
+    test('reads the API group out of the message', () => {
+        expect(notServedGroup(GATEWAY)).toBe('gateway.networking.k8s.io');
+        expect(notServedGroup('this cluster does not serve widgets')).toBe('');
     });
 });

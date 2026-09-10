@@ -30,6 +30,9 @@
     import { workspace } from '../state/workspace.svelte';
     import { clusters } from '../state/health.svelte';
     import ErrorState from './ErrorState.svelte';
+    import NotServed from './NotServed.svelte';
+    import { isNotServed } from '../errors';
+    import { onExternalClick } from '../links';
     import Icon from './Icon.svelte';
     import NamespacePicker from './NamespacePicker.svelte';
     import { notices } from '../state/notices.svelte';
@@ -410,7 +413,11 @@
             (message) => {
                 error = message;
                 loading = false;
-                clusters.report(id, 'error', message);
+                // A kind the cluster does not serve is an answer from a cluster
+                // that is reachable, and must not paint it as failing in the
+                // sidebar because its Gateway API is not installed.
+                if (isNotServed(message)) clusters.report(id, 'connected');
+                else clusters.report(id, 'error', message);
             },
         );
         subscription = sub;
@@ -545,12 +552,18 @@
         event.stopPropagation();
         workspace.showPodsOnNode(contextId, name);
     }
+
+    function openLink(url: string, event: MouseEvent): void {
+        event.stopPropagation();
+        onExternalClick(url)(event);
+    }
 </script>
 
-<!-- Most cells are their text. Two are not: a CustomResourceDefinition's name
-     opens a tab of its objects, and a cell carrying containers is drawn as
-     rectangles. The rectangles stay pictures here -- a press anywhere in the
-     row, this column included, selects the row. -->
+<!-- Most cells are their text. A few are not: a CustomResourceDefinition's name
+     opens a tab of its objects, a cell carrying containers is drawn as
+     rectangles, and hostnames open in the browser. The rectangles stay
+     pictures here -- a press anywhere in the row, this column included,
+     selects the row. -->
 {#snippet bodyCell(row: Row, index: number)}
     {@const value = row.cells[index]}
     {#if drillable && index === 0}
@@ -574,6 +587,20 @@
                 <span class="tag {tag.tone}">{tag.text}</span>
             {/each}
         </span>
+    {:else if value?.links?.length}
+        <!-- The hosts an Ingress or an HTTPRoute answers on. A press on one
+             opens it rather than selecting the row; a wildcard, or the count of
+             the rest, is only text. -->
+        {#each value.links as link, i (i)}
+            <!-- An expression, because the whitespace of a plain ", " at the
+                 edge of a block is trimmed away. -->
+            {#if i > 0}{', '}{/if}
+            {#if link.url}
+                <a class="out" href={link.url} target="_blank" rel="noreferrer" title="Open {link.url} in your browser" onclick={(event) => openLink(link.url, event)}>{link.text}</a>
+            {:else}
+                {link.text}
+            {/if}
+        {/each}
     {:else}
         {value?.text ?? ''}
     {/if}
@@ -736,8 +763,12 @@
     {/if}
 
     <div class="scroll">
-        {#if error}
+        {#if error && isNotServed(error)}
+            <NotServed {kind} message={error} {context} onRetry={() => attempt++} />
+        {:else if error}
             <ErrorState message={error} {context} onRetry={() => attempt++} />
+        {:else if table?.error && isNotServed(table.error)}
+            <NotServed {kind} message={table.error} {context} onRetry={() => attempt++} />
         {:else if table?.error}
             <ErrorState message={table.error} {context} onRetry={() => attempt++} />
         {:else if loading && !table}
@@ -764,6 +795,17 @@
 </div>
 
 <style>
+    .out {
+        color: var(--accent);
+        text-decoration: underline;
+        text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+        text-underline-offset: 2px;
+    }
+
+    .out:hover {
+        text-decoration-color: var(--accent);
+    }
+
     .tags {
         display: inline-flex;
         flex-wrap: wrap;

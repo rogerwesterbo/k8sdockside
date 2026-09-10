@@ -25,12 +25,17 @@ const RBACGroup = "rbac.authorization.k8s.io"
 // Gateway API and CRD kinds, continuing the contract in resources.go: these
 // strings are what the frontend catalogue sends to BuildTable and Subscribe.
 const (
-	KindGatewayClasses  = "gatewayclasses"
-	KindGateways        = "gateways"
-	KindHTTPRoutes      = "httproutes"
-	KindGRPCRoutes      = "grpcroutes"
-	KindReferenceGrants = "referencegrants"
-	KindCRDs            = "customresourcedefinitions"
+	KindGatewayClasses     = "gatewayclasses"
+	KindGateways           = "gateways"
+	KindListenerSets       = "listenersets"
+	KindHTTPRoutes         = "httproutes"
+	KindGRPCRoutes         = "grpcroutes"
+	KindTLSRoutes          = "tlsroutes"
+	KindTCPRoutes          = "tcproutes"
+	KindUDPRoutes          = "udproutes"
+	KindBackendTLSPolicies = "backendtlspolicies"
+	KindReferenceGrants    = "referencegrants"
+	KindCRDs               = "customresourcedefinitions"
 )
 
 // CustomPrefix marks a kind that names a custom resource rather than one of the
@@ -117,11 +122,21 @@ var builtinKinds = map[string]schema.GroupKind{
 	KindClusterRoles:        {Group: RBACGroup, Kind: "ClusterRole"},
 	KindClusterRoleBindings: {Group: RBACGroup, Kind: "ClusterRoleBinding"},
 
-	KindGatewayClasses:  {Group: GatewayGroup, Kind: "GatewayClass"},
-	KindGateways:        {Group: GatewayGroup, Kind: "Gateway"},
-	KindHTTPRoutes:      {Group: GatewayGroup, Kind: "HTTPRoute"},
-	KindGRPCRoutes:      {Group: GatewayGroup, Kind: "GRPCRoute"},
-	KindReferenceGrants: {Group: GatewayGroup, Kind: "ReferenceGrant"},
+	KindGatewayClasses: {Group: GatewayGroup, Kind: "GatewayClass"},
+	KindGateways:       {Group: GatewayGroup, Kind: "Gateway"},
+	// Only the standard-channel ListenerSet. Before v1.5 it was experimental,
+	// as XListenerSet in gateway.networking.x-k8s.io -- a different group and
+	// kind, which the definitions tree still reaches.
+	KindListenerSets: {Group: GatewayGroup, Kind: "ListenerSet"},
+	KindHTTPRoutes:   {Group: GatewayGroup, Kind: "HTTPRoute"},
+	KindGRPCRoutes:   {Group: GatewayGroup, Kind: "GRPCRoute"},
+	// The TLS, TCP and UDP routes spent years at v1alpha2 in the experimental
+	// channel before reaching v1; the mapper serves whichever is installed.
+	KindTLSRoutes:          {Group: GatewayGroup, Kind: "TLSRoute"},
+	KindTCPRoutes:          {Group: GatewayGroup, Kind: "TCPRoute"},
+	KindUDPRoutes:          {Group: GatewayGroup, Kind: "UDPRoute"},
+	KindBackendTLSPolicies: {Group: GatewayGroup, Kind: "BackendTLSPolicy"},
+	KindReferenceGrants:    {Group: GatewayGroup, Kind: "ReferenceGrant"},
 
 	KindCRDs: {Group: "apiextensions.k8s.io", Kind: "CustomResourceDefinition"},
 }

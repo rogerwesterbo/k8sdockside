@@ -97,6 +97,14 @@ func joinAny(items []any, limit int) string {
 			parts = append(parts, s)
 		}
 	}
+	return joinStrings(parts, limit)
+}
+
+// joinStrings is joinAny for a list already built as strings.
+func joinStrings(parts []string, limit int) string {
+	if len(parts) == 0 {
+		return "<none>"
+	}
 	if len(parts) > limit {
 		return strings.Join(parts[:limit], ", ") + fmt.Sprintf(" +%d more", len(parts)-limit)
 	}
@@ -291,20 +299,78 @@ func loadBalancerAddress(u *unstructured.Unstructured) Cell {
 	return muted(strings.Join(parts, ", "))
 }
 
+// ingressHosts lists the hosts an Ingress answers on, each opening in the
+// browser. A host its TLS section covers is opened over https, and any other
+// over http, since that is all the Ingress itself promises.
 func ingressHosts(u *unstructured.Unstructured) Cell {
-	var hosts []string
-	for _, raw := range nestedSlice(u, "spec", "rules") {
-		if host := mapString(asMap(raw), "host"); host != "" {
-			hosts = append(hosts, host)
+	var secure []string
+	for _, raw := range nestedSlice(u, "spec", "tls") {
+		for _, h := range nestedSlice(&unstructured.Unstructured{Object: asMap(raw)}, "hosts") {
+			if s, ok := h.(string); ok {
+				secure = append(secure, s)
+			}
 		}
 	}
-	if len(hosts) == 0 {
+	var links []Link
+	for _, raw := range nestedSlice(u, "spec", "rules") {
+		host := mapString(asMap(raw), "host")
+		if host == "" {
+			continue
+		}
+		scheme := "http"
+		if hostCovered(host, secure) {
+			scheme = "https"
+		}
+		links = append(links, Link{Text: host, URL: webURL(scheme, host, 0)})
+	}
+	if len(links) == 0 {
 		return muted("*")
 	}
-	if len(hosts) > 3 {
-		return plain(strings.Join(hosts[:3], ", ") + fmt.Sprintf(" +%d more", len(hosts)-3))
+	return linked(links, 3)
+}
+
+// hostCovered reports whether a host is one of a list of names, where a name
+// may be a wildcard covering one label: "*.example.com" covers
+// "shop.example.com" but not "example.com".
+func hostCovered(host string, names []string) bool {
+	for _, name := range names {
+		if name == host {
+			return true
+		}
+		if suffix, ok := strings.CutPrefix(name, "*"); ok {
+			if label, found := strings.CutSuffix(host, suffix); found && label != "" && !strings.Contains(label, ".") {
+				return true
+			}
+		}
 	}
-	return plain(strings.Join(hosts, ", "))
+	return false
+}
+
+// webURL is where a browser should go for a host: the scheme, the host, and
+// the port only when it is not the scheme's own. A wildcard has no address.
+func webURL(scheme, host string, port int64) string {
+	if host == "" || strings.Contains(host, "*") {
+		return ""
+	}
+	defaultPort := (scheme == "https" && port == 443) || (scheme == "http" && port == 80)
+	if port > 0 && !defaultPort {
+		host = fmt.Sprintf("%s:%d", host, port)
+	}
+	return scheme + "://" + host
+}
+
+// linked is a cell of entries that open in the browser. Like joinAny it stops
+// at a few, and the count of the rest is an entry of its own that opens
+// nothing, so the text and what is drawn stay the same list.
+func linked(links []Link, limit int) Cell {
+	if len(links) > limit {
+		links = append(links[:limit:limit], Link{Text: fmt.Sprintf("+%d more", len(links)-limit)})
+	}
+	texts := make([]string, len(links))
+	for i, l := range links {
+		texts[i] = l.Text
+	}
+	return Cell{Text: strings.Join(texts, ", "), Links: links}
 }
 
 // ---- nodes -----------------------------------------------------------------
@@ -407,28 +473,170 @@ func gatewayAddress(u *unstructured.Unstructured) Cell {
 	return muted(strings.Join(parts, ", "))
 }
 
+// parentRefName renders a reference to a Gateway the way it was written: the
+// namespace only when it is not the referrer's own, and the listener it picks
+// out, if any.
+func parentRefName(p map[string]any) string {
+	name := mapString(p, "name")
+	if name == "" {
+		return ""
+	}
+	if ns := mapString(p, "namespace"); ns != "" {
+		name = ns + "/" + name
+	}
+	if section := mapString(p, "sectionName"); section != "" {
+		name += "#" + section
+	}
+	return name
+}
+
 // routeParents lists the Gateways a route has attached itself to, which is the
 // question anyone opening a route list is actually asking.
 func routeParents(u *unstructured.Unstructured) Cell {
 	var parts []string
 	for _, raw := range nestedSlice(u, "spec", "parentRefs") {
-		p := asMap(raw)
-		name := mapString(p, "name")
-		if name == "" {
-			continue
+		if name := parentRefName(asMap(raw)); name != "" {
+			parts = append(parts, name)
 		}
-		if ns := mapString(p, "namespace"); ns != "" {
-			name = ns + "/" + name
-		}
-		if section := mapString(p, "sectionName"); section != "" {
-			name += "#" + section
-		}
-		parts = append(parts, name)
 	}
 	if len(parts) == 0 {
 		return muted("<none>")
 	}
 	return muted(strings.Join(parts, ", "))
+}
+
+// routeBackends lists where a route sends its traffic, across all of its rules:
+// "db:5432", or "data/db:5432" for a backend in another namespace.
+func routeBackends(u *unstructured.Unstructured) Cell {
+	var parts []string
+	for _, rule := range nestedSlice(u, "spec", "rules") {
+		for _, raw := range nestedSlice(&unstructured.Unstructured{Object: asMap(rule)}, "backendRefs") {
+			b := asMap(raw)
+			name := mapString(b, "name")
+			if name == "" {
+				continue
+			}
+			if ns := mapString(b, "namespace"); ns != "" {
+				name = ns + "/" + name
+			}
+			if port := mapInt(b, "port"); port > 0 {
+				name += fmt.Sprintf(":%d", port)
+			}
+			parts = append(parts, name)
+		}
+	}
+	return muted(joinStrings(parts, 3))
+}
+
+// listenerSetParent names the Gateway a ListenerSet adds its listeners to.
+// Unlike a route it has exactly one.
+func listenerSetParent(u *unstructured.Unstructured) Cell {
+	if name := parentRefName(asMap(nestedMap(u, "spec", "parentRef"))); name != "" {
+		return muted(name)
+	}
+	return muted("<none>")
+}
+
+// listenerSetListeners renders each listener as "shop.example.com:443/HTTPS".
+// The hostname leads because handing a team its own hostnames on a shared
+// Gateway is what a ListenerSet is for, and an HTTP or HTTPS listener with one
+// opens in the browser.
+func listenerSetListeners(u *unstructured.Unstructured) Cell {
+	var links []Link
+	for _, raw := range nestedSlice(u, "spec", "listeners") {
+		l := asMap(raw)
+		port, protocol, host := mapInt(l, "port"), mapString(l, "protocol"), mapString(l, "hostname")
+		link := Link{Text: fmt.Sprintf("%d/%s", port, protocol)}
+		if host != "" {
+			link.Text = host + ":" + link.Text
+		}
+		if protocol == "HTTP" || protocol == "HTTPS" {
+			link.URL = webURL(strings.ToLower(protocol), host, port)
+		}
+		links = append(links, link)
+	}
+	if len(links) == 0 {
+		return muted("<none>")
+	}
+	cell := linked(links, 3)
+	cell.Tone = "info"
+	return cell
+}
+
+// httpRouteHostnames lists the hostnames an HTTPRoute answers on, each opening
+// in the browser.
+func httpRouteHostnames(u *unstructured.Unstructured) Cell {
+	var links []Link
+	scheme := routeScheme(u)
+	for _, raw := range nestedSlice(u, "spec", "hostnames") {
+		if host, ok := raw.(string); ok && host != "" {
+			links = append(links, Link{Text: host, URL: webURL(scheme, host, 0)})
+		}
+	}
+	if len(links) == 0 {
+		return plain("<none>")
+	}
+	return linked(links, 3)
+}
+
+// routeScheme guesses how an HTTPRoute is reached. Whether it is served over
+// TLS is a property of the Gateway listener it attaches to, not of the route,
+// and looking that up is a second object per row -- so the answer is https
+// unless every parent is plainly an HTTP listener, by port or by name.
+func routeScheme(u *unstructured.Unstructured) string {
+	parents := nestedSlice(u, "spec", "parentRefs")
+	if len(parents) == 0 {
+		return "https"
+	}
+	for _, raw := range parents {
+		p := asMap(raw)
+		if mapInt(p, "port") != 80 && !strings.EqualFold(mapString(p, "sectionName"), "http") {
+			return "https"
+		}
+	}
+	return "http"
+}
+
+// policyTargets names what a policy is attached to. The kind is kept because a
+// target need not be a Service.
+func policyTargets(u *unstructured.Unstructured) Cell {
+	var parts []string
+	for _, raw := range nestedSlice(u, "spec", "targetRefs") {
+		t := asMap(raw)
+		name := mapString(t, "name")
+		if name == "" {
+			continue
+		}
+		if kind := mapString(t, "kind"); kind != "" {
+			name = kind + "/" + name
+		}
+		if section := mapString(t, "sectionName"); section != "" {
+			name += "#" + section
+		}
+		parts = append(parts, name)
+	}
+	return muted(joinStrings(parts, 3))
+}
+
+// policyAccepted folds a policy's status into one answer. A policy is reported
+// on once per ancestor -- each Gateway whose routes lead to its target -- so it
+// is accepted only when every one of them says so, and a single refusal is the
+// thing worth showing.
+func policyAccepted(u *unstructured.Unstructured) Cell {
+	ancestors := nestedSlice(u, "status", "ancestors")
+	accepted := 0
+	for _, raw := range ancestors {
+		switch conditionStatus(&unstructured.Unstructured{Object: asMap(raw)}, "Accepted", "conditions") {
+		case "False":
+			return toned("False", "error")
+		case "True":
+			accepted++
+		}
+	}
+	if len(ancestors) > 0 && accepted == len(ancestors) {
+		return toned("True", "ok")
+	}
+	return muted("Unknown")
 }
 
 func referenceGrantFrom(u *unstructured.Unstructured) Cell {

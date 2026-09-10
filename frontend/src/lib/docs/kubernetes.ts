@@ -212,7 +212,7 @@ export const KUBERNETES_PRIMER: Page = {
                         },
                         {
                             term: 'Gateway API',
-                            meaning: 'The successor to Ingress: a **GatewayClass** names an implementation, a **Gateway** is a listening endpoint, and **HTTPRoute**, **GRPCRoute** and the rest attach routing rules to it. Optional; the sidebar says so when a cluster does not serve it.',
+                            meaning: 'The successor to Ingress: a **GatewayClass** names an implementation, a **Gateway** is a listening endpoint, and **HTTPRoute**, **GRPCRoute** and the rest attach routing rules to it. Optional; its views say it is not installed when a cluster does not serve it.',
                             resource: 'gateways',
                             href: 'https://gateway-api.sigs.k8s.io/',
                         },

@@ -380,8 +380,31 @@ var builtinColumns = map[string][]column{
 		{Name: "Programmed", From: conditionCell("Programmed", "status", "conditions")},
 		ageColumn,
 	},
-	KindHTTPRoutes:      routeColumns,
-	KindGRPCRoutes:      routeColumns,
+	KindListenerSets: {
+		nameColumn,
+		{Name: "Parent", From: listenerSetParent},
+		{Name: "Listeners", From: listenerSetListeners},
+		{Name: "Accepted", From: conditionCell("Accepted", "status", "conditions")},
+		{Name: "Programmed", From: conditionCell("Programmed", "status", "conditions")},
+		ageColumn,
+	},
+	KindHTTPRoutes: {
+		nameColumn,
+		{Name: "Hostnames", From: httpRouteHostnames},
+		{Name: "Parents", From: routeParents},
+		ageColumn,
+	},
+	KindGRPCRoutes: routeColumns,
+	KindTLSRoutes:  routeColumns,
+	KindTCPRoutes:  l4RouteColumns,
+	KindUDPRoutes:  l4RouteColumns,
+	KindBackendTLSPolicies: {
+		nameColumn,
+		{Name: "Targets", From: policyTargets},
+		{Name: "Hostname", Path: ".spec.validation.hostname"},
+		{Name: "Accepted", From: policyAccepted},
+		ageColumn,
+	},
 	KindReferenceGrants: {nameColumn, {Name: "From", From: referenceGrantFrom}, ageColumn},
 
 	KindCRDs: {
@@ -718,13 +741,25 @@ var workloadColumns = []column{
 	{Name: "Condition", From: workloadCondition},
 }
 
-// routeColumns is shared by HTTPRoute and GRPCRoute.
+// routeColumns is shared by GRPCRoute and TLSRoute, which match on a hostname
+// but are not something a browser can open. HTTPRoute has the same columns
+// with the hostnames as links.
 var routeColumns = []column{
 	nameColumn,
 	{Name: "Hostnames", From: func(u *unstructured.Unstructured) Cell {
 		return plain(joinAny(nestedSlice(u, "spec", "hostnames"), 3))
 	}},
 	{Name: "Parents", From: routeParents},
+	ageColumn,
+}
+
+// l4RouteColumns is shared by TCPRoute and UDPRoute. With no hostname to match
+// on, a listener hands them everything, so where it goes is what tells one
+// route from the next.
+var l4RouteColumns = []column{
+	nameColumn,
+	{Name: "Parents", From: routeParents},
+	{Name: "Backends", From: routeBackends},
 	ageColumn,
 }
 

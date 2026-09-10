@@ -110,6 +110,26 @@ const RULES: { match: string[]; explain: (host: string) => Explanation }[] = [
 ];
 
 /**
+ * Whether an error says the cluster does not serve a kind at all.
+ *
+ * That is not a failure: the Gateway API, the newer admission policies and
+ * every CRD are optional, and a cluster without them answered the question
+ * perfectly well. The backend words every such error with this phrase -- see
+ * kube.ErrNotServed, which matches on the same text.
+ */
+export function isNotServed(message: string): boolean {
+    return message.includes('does not serve');
+}
+
+/**
+ * The API group a not-served error names, e.g. "gateway.networking.k8s.io",
+ * or '' when it names none -- a core kind has no group.
+ */
+export function notServedGroup(message: string): string {
+    return /the (\S+) API is not installed/.exec(message)?.[1] ?? '';
+}
+
+/**
  * classify reads one error message and returns how to lead with it. An
  * unrecognised message is not guessed at: it gets a generic headline, and the
  * raw text underneath does the work.

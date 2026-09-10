@@ -5,13 +5,23 @@ import { detail } from '../state/detail.svelte';
 
 // The table's rows arrive through a subscription. Stubbing that is what lets a
 // test say "the cluster holds this" without a cluster.
-const pushed = vi.hoisted(() => ({ send: (_table: unknown) => {} }));
+const pushed = vi.hoisted(() => ({ send: (_table: unknown) => {}, fail: (_message: string) => {} }));
 vi.mock('../state/subscriptions', () => ({
-    subscribe: vi.fn((_c: string, _k: string, _n: string, onTable: (t: unknown) => void) => {
-        pushed.send = onTable;
-        return { setNamespaces: vi.fn(), close: vi.fn() };
-    }),
+    subscribe: vi.fn(
+        (_c: string, _k: string, _n: string, onTable: (t: unknown) => void, onError: (m: string) => void) => {
+            pushed.send = onTable;
+            pushed.fail = onError;
+            return { setNamespaces: vi.fn(), close: vi.fn() };
+        },
+    ),
 }));
+
+// A link out goes through the runtime, which hands it to the user's browser.
+const openURL = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('@wailsio/runtime', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@wailsio/runtime')>();
+    return { ...actual, Browser: { ...actual.Browser, OpenURL: openURL } };
+});
 
 // The real backend answers every settings write with the whole settings file,
 // and the store adopts that answer whole. A mock answering `{}` says instead
@@ -606,4 +616,91 @@ test('a node name in the pods listing leads to the other pods there', async () =
     await page.getByRole('button', { name: 'worker-2' }).click();
 
     await expect.poll(() => names()).toEqual(['web']);
+});
+
+// ----- links out and kinds the cluster does not serve ---------------------
+
+function routesTable() {
+    return {
+        kind: 'httproutes',
+        columns: ['Name', 'Hostnames'],
+        namespaced: true,
+        error: '',
+        rows: [
+            {
+                id: 'httproutes/prod/api',
+                name: 'api',
+                namespace: 'prod',
+                cells: [
+                    plain('api'),
+                    {
+                        text: 'api.example.com, *.example.com',
+                        tone: '',
+                        sort: '',
+                        pills: null,
+                        links: [
+                            { text: 'api.example.com', url: 'https://api.example.com' },
+                            { text: '*.example.com', url: '' },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+}
+
+test('a hostname opens in the browser rather than selecting the row', async () => {
+    openURL.mockClear();
+    render(ResourceTable, { contextId: PROD, kind: 'httproutes' });
+    pushed.send(routesTable());
+
+    await page.getByRole('link', { name: 'api.example.com' }).click();
+
+    expect(openURL).toHaveBeenCalledWith('https://api.example.com');
+    expect(detail.target).toBeNull();
+});
+
+// A wildcard names every host under it and none in particular.
+test('a wildcard hostname is shown but is not a link', async () => {
+    render(ResourceTable, { contextId: PROD, kind: 'httproutes' });
+    pushed.send(routesTable());
+
+    await expect.element(page.getByRole('cell', { name: 'api.example.com, *.example.com' })).toBeVisible();
+    expect(page.getByRole('link', { name: '*.example.com' }).elements()).toHaveLength(0);
+});
+
+// The Gateway API is optional. A cluster without it is healthy, and must not be
+// told something went wrong.
+test('a kind the cluster does not serve says it is not installed, not that something failed', async () => {
+    const { clusters } = await import('../state/health.svelte');
+    render(ResourceTable, { contextId: PROD, kind: 'httproutes' });
+
+    pushed.fail('this cluster does not serve httproutes -- the gateway.networking.k8s.io API is not installed');
+
+    await expect.element(page.getByRole('heading', { name: 'The Gateway API is not installed on this cluster' })).toBeVisible();
+    await expect.element(page.getByRole('link', { name: 'How to install it' })).toBeVisible();
+    await expect.element(page.getByRole('button', { name: 'Check again' })).toBeVisible();
+    expect(page.getByText('Something went wrong').elements()).toHaveLength(0);
+    expect(clusters.of(PROD).status).toBe('connected');
+});
+
+test('any other optional kind is described by its API group', async () => {
+    render(ResourceTable, { contextId: PROD, kind: 'mutatingadmissionpolicies' });
+
+    pushed.fail('this cluster does not serve mutatingadmissionpolicies -- the admissionregistration.k8s.io API is not installed');
+
+    await expect
+        .element(page.getByRole('heading', { name: 'This cluster does not serve Mutating Admission Policies' }))
+        .toBeVisible();
+    await expect.element(page.getByText(/admissionregistration\.k8s\.io API is not installed on/)).toBeVisible();
+});
+
+test('a real failure still reads as one', async () => {
+    const { clusters } = await import('../state/health.svelte');
+    render(ResourceTable, { contextId: PROD, kind: 'httproutes' });
+
+    pushed.fail('dial tcp 10.0.0.1:6443: connect: connection refused');
+
+    await expect.element(page.getByRole('heading', { name: 'Cannot reach the API server' })).toBeVisible();
+    expect(clusters.of(PROD).status).toBe('error');
 });

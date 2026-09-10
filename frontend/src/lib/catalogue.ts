@@ -155,8 +155,14 @@ export const NAV_GROUPS: NavGroup[] = [
         items: [
             { kind: 'gatewayclasses', label: 'Gateway Classes', icon: 'gateway' },
             { kind: 'gateways', label: 'Gateways', icon: 'gateway' },
+            // Extra listeners attached to a Gateway, beside what they extend.
+            { kind: 'listenersets', label: 'Listener Sets', icon: 'gateway' },
             { kind: 'httproutes', label: 'HTTP Routes', icon: 'route' },
             { kind: 'grpcroutes', label: 'gRPC Routes', icon: 'route' },
+            { kind: 'tlsroutes', label: 'TLS Routes', icon: 'route' },
+            { kind: 'tcproutes', label: 'TCP Routes', icon: 'route' },
+            { kind: 'udproutes', label: 'UDP Routes', icon: 'route' },
+            { kind: 'backendtlspolicies', label: 'Backend TLS Policies', icon: 'lock' },
             { kind: 'referencegrants', label: 'Reference Grants', icon: 'grant' },
         ],
     },
@@ -408,11 +414,13 @@ export function iconFor(kind: string): string {
  * the slide-in detail panel.
  *
  * Only a double s takes the "-es" plural here: "Ingresses" and "Classes" lose
- * two letters, everything else loses one. Matching a single "ses" would be
- * wrong for any singular already ending in "se" -- it turns "Leases" into
- * "Leas".
+ * two letters, and "Policies" gives back its y; everything else loses one.
+ * Matching a single "ses" would be wrong for any singular already ending in
+ * "se" -- it turns "Leases" into "Leas".
  */
 export function singularFor(kind: string): string {
     const label = labelFor(kind);
-    return label.endsWith('sses') ? label.slice(0, -2) : label.replace(/s$/, '');
+    if (label.endsWith('sses')) return label.slice(0, -2);
+    if (label.endsWith('ies')) return label.slice(0, -3) + 'y';
+    return label.replace(/s$/, '');
 }

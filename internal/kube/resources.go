@@ -16,6 +16,14 @@ type Tag struct {
 	Tone string `json:"tone"`
 }
 
+// Link is one entry of a cell that can be opened in a browser: a hostname an
+// Ingress or an HTTPRoute answers on. URL is empty for an entry that cannot be
+// opened -- a wildcard names every host under it and none in particular.
+type Link struct {
+	Text string `json:"text"`
+	URL  string `json:"url"`
+}
+
 // Cell is one table cell. Tone lets the frontend colour a value without having
 // to know what the value means: "ok", "warn", "error", "info" or "" for plain.
 type Cell struct {
@@ -29,6 +37,9 @@ type Cell struct {
 	// colour. Text still carries them joined, as kubectl writes them, for the
 	// filter and the sort. Absent for a cell that says one thing.
 	Tags []Tag `json:"tags,omitempty"`
+	// Links, where a cell lists addresses worth opening in a browser. Text
+	// carries the same entries joined with ", ", for the filter and the sort.
+	Links []Link `json:"links,omitempty"`
 	// Sort is compared in place of Text where the two do not share an order.
 	// An age reads "3d" but belongs in seconds; a volume reads "500Mi" but
 	// belongs in bytes. Sorting the text would put "5m" before "2h" before

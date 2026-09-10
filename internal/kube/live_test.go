@@ -209,7 +209,11 @@ func TestLiveGatewayKindsResolve(t *testing.T) {
 	defer w.Close()
 
 	served := 0
-	for _, kind := range []string{KindGatewayClasses, KindGateways, KindHTTPRoutes, KindGRPCRoutes, KindReferenceGrants} {
+	for _, kind := range []string{
+		KindGatewayClasses, KindGateways, KindListenerSets,
+		KindHTTPRoutes, KindGRPCRoutes, KindTLSRoutes, KindTCPRoutes, KindUDPRoutes,
+		KindBackendTLSPolicies, KindReferenceGrants,
+	} {
 		id, err := w.Subscribe(ctx, kind, nil, NoSelector)
 		if err != nil {
 			// The Gateway API is optional, and a cluster without it must say so

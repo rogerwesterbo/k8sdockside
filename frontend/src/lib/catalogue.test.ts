@@ -64,6 +64,11 @@ describe('the kinds added beyond the original set', () => {
         ['mutatingadmissionpolicybindings', 'Mutating Policy Bindings'],
         ['validatingadmissionpolicies', 'Validating Admission Policies'],
         ['validatingadmissionpolicybindings', 'Validating Policy Bindings'],
+        ['listenersets', 'Listener Sets'],
+        ['tlsroutes', 'TLS Routes'],
+        ['tcproutes', 'TCP Routes'],
+        ['udproutes', 'UDP Routes'],
+        ['backendtlspolicies', 'Backend TLS Policies'],
     ];
 
     test.each(ADDED)('%s is offered in the sidebar as "%s"', (kind, label) => {
@@ -84,6 +89,15 @@ describe('the kinds added beyond the original set', () => {
         expect(singularFor('leases')).toBe('Lease');
         expect(singularFor('replicasets')).toBe('Replica Set');
         expect(singularFor('priorityclasses')).toBe('Priority Class');
+        expect(singularFor('backendtlspolicies')).toBe('Backend TLS Policy');
+        expect(singularFor('networkpolicies')).toBe('Network Policy');
+        expect(singularFor('listenersets')).toBe('Listener Set');
+    });
+
+    test('the Gateway API kinds sit together in their own section', () => {
+        for (const kind of ['listenersets', 'tlsroutes', 'tcproutes', 'udproutes', 'backendtlspolicies']) {
+            expect(groupForKind(kind)).toBe('Gateway API');
+        }
     });
 });
 

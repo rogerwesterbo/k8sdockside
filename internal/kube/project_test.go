@@ -230,7 +230,7 @@ func TestHTTPRouteListsItsParentGateways(t *testing.T) {
 		},
 	})
 
-	table := buildLiveTable(KindHTTPRoutes, withNamespace(routeColumns, true), true, []*unstructured.Unstructured{route})
+	table := buildLiveTable(KindHTTPRoutes, withNamespace(builtinColumns[KindHTTPRoutes], true), true, []*unstructured.Unstructured{route})
 	cells := cellsByHeader(t, table, 0)
 
 	if want := "api.example.com, www.example.com"; cells["Hostnames"] != want {
@@ -238,6 +238,205 @@ func TestHTTPRouteListsItsParentGateways(t *testing.T) {
 	}
 	if want := "ingress/external#https"; cells["Parents"] != want {
 		t.Errorf("Parents = %q, want %q", cells["Parents"], want)
+	}
+}
+
+// linksIn returns the URL of every entry in one column of the first row, with
+// "" for an entry that opens nothing.
+func linksIn(t *testing.T, table Table, header string) []string {
+	t.Helper()
+	for i, c := range table.Columns {
+		if c != header {
+			continue
+		}
+		var urls []string
+		for _, l := range table.Rows[0].Cells[i].Links {
+			urls = append(urls, l.URL)
+		}
+		return urls
+	}
+	t.Fatalf("no %s column", header)
+	return nil
+}
+
+func TestHTTPRouteHostnamesOpenInTheBrowser(t *testing.T) {
+	route := func(parents ...any) *unstructured.Unstructured {
+		return obj(map[string]any{
+			"metadata": map[string]any{"name": "api", "namespace": "prod"},
+			"spec": map[string]any{
+				"hostnames":  []any{"api.example.com", "*.example.com"},
+				"parentRefs": parents,
+			},
+		})
+	}
+	cases := []struct {
+		name   string
+		route  *unstructured.Unstructured
+		scheme string
+	}{
+		{"an unnamed listener is taken as https", route(map[string]any{"name": "external"}), "https"},
+		{"the http listener by name", route(map[string]any{"name": "external", "sectionName": "http"}), "http"},
+		{"the http listener by port", route(map[string]any{"name": "external", "port": int64(80)}), "http"},
+		{"one https parent is enough", route(map[string]any{"name": "a", "sectionName": "http"}, map[string]any{"name": "b"}), "https"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			table := buildLiveTable(KindHTTPRoutes, withNamespace(builtinColumns[KindHTTPRoutes], true), true, []*unstructured.Unstructured{tc.route})
+			got := linksIn(t, table, "Hostnames")
+			// A wildcard is shown but opens nothing.
+			want := []string{tc.scheme + "://api.example.com", ""}
+			if !slices.Equal(got, want) {
+				t.Errorf("links = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestIngressHostsOpenOverHTTPSOnlyWhereTLSCoversThem(t *testing.T) {
+	ing := obj(map[string]any{
+		"metadata": map[string]any{"name": "web", "namespace": "prod"},
+		"spec": map[string]any{
+			"tls": []any{map[string]any{"hosts": []any{"*.example.com"}}},
+			"rules": []any{
+				map[string]any{"host": "shop.example.com"},
+				map[string]any{"host": "legacy.internal"},
+				map[string]any{"host": "a.b.example.com"},
+				map[string]any{"host": "four.example.com"},
+			},
+		},
+	})
+
+	table := buildLiveTable(KindIngresses, withNamespace(builtinColumns[KindIngresses], true), true, []*unstructured.Unstructured{ing})
+	cells := cellsByHeader(t, table, 0)
+
+	if want := "shop.example.com, legacy.internal, a.b.example.com, +1 more"; cells["Hosts"] != want {
+		t.Errorf("Hosts = %q, want %q", cells["Hosts"], want)
+	}
+	// A wildcard covers one label, so a.b.example.com is not under its cert.
+	want := []string{"https://shop.example.com", "http://legacy.internal", "http://a.b.example.com", ""}
+	if got := linksIn(t, table, "Hosts"); !slices.Equal(got, want) {
+		t.Errorf("links = %q, want %q", got, want)
+	}
+}
+
+func TestListenerSetOpensItsWebListeners(t *testing.T) {
+	ls := obj(map[string]any{
+		"metadata": map[string]any{"name": "shop", "namespace": "shop"},
+		"spec": map[string]any{
+			"parentRef": map[string]any{"name": "shared"},
+			"listeners": []any{
+				map[string]any{"name": "https", "hostname": "shop.example.com", "port": int64(443), "protocol": "HTTPS"},
+				map[string]any{"name": "alt", "hostname": "shop.example.com", "port": int64(8080), "protocol": "HTTP"},
+				map[string]any{"name": "tls", "hostname": "db.example.com", "port": int64(5432), "protocol": "TLS"},
+			},
+		},
+	})
+
+	table := buildLiveTable(KindListenerSets, withNamespace(builtinColumns[KindListenerSets], true), true, []*unstructured.Unstructured{ls})
+	want := []string{"https://shop.example.com", "http://shop.example.com:8080", ""}
+	if got := linksIn(t, table, "Listeners"); !slices.Equal(got, want) {
+		t.Errorf("links = %q, want %q", got, want)
+	}
+}
+
+func TestTCPRouteListsItsBackendsAcrossRules(t *testing.T) {
+	route := obj(map[string]any{
+		"metadata": map[string]any{"name": "postgres", "namespace": "prod"},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{"name": "internal", "sectionName": "pg"}},
+			"rules": []any{
+				map[string]any{"backendRefs": []any{map[string]any{"name": "db", "port": int64(5432)}}},
+				map[string]any{"backendRefs": []any{map[string]any{"name": "db-replica", "namespace": "data", "port": int64(5432)}}},
+			},
+		},
+	})
+
+	table := buildLiveTable(KindTCPRoutes, withNamespace(builtinColumns[KindTCPRoutes], true), true, []*unstructured.Unstructured{route})
+	cells := cellsByHeader(t, table, 0)
+
+	if want := "internal#pg"; cells["Parents"] != want {
+		t.Errorf("Parents = %q, want %q", cells["Parents"], want)
+	}
+	if want := "db:5432, data/db-replica:5432"; cells["Backends"] != want {
+		t.Errorf("Backends = %q, want %q", cells["Backends"], want)
+	}
+	if _, ok := cells["Hostnames"]; ok {
+		t.Error("a TCPRoute has no hostnames, but the table has a Hostnames column")
+	}
+}
+
+func TestListenerSetShowsItsGatewayAndListeners(t *testing.T) {
+	ls := obj(map[string]any{
+		"metadata": map[string]any{"name": "shop", "namespace": "shop"},
+		"spec": map[string]any{
+			"parentRef": map[string]any{"name": "shared", "namespace": "ingress"},
+			"listeners": []any{
+				map[string]any{"name": "https", "hostname": "shop.example.com", "port": int64(443), "protocol": "HTTPS"},
+				map[string]any{"name": "http", "port": int64(80), "protocol": "HTTP"},
+			},
+		},
+		"status": map[string]any{"conditions": []any{
+			map[string]any{"type": "Accepted", "status": "True"},
+			map[string]any{"type": "Programmed", "status": "False"},
+		}},
+	})
+
+	table := buildLiveTable(KindListenerSets, withNamespace(builtinColumns[KindListenerSets], true), true, []*unstructured.Unstructured{ls})
+	cells := cellsByHeader(t, table, 0)
+
+	if want := "ingress/shared"; cells["Parent"] != want {
+		t.Errorf("Parent = %q, want %q", cells["Parent"], want)
+	}
+	if want := "shop.example.com:443/HTTPS, 80/HTTP"; cells["Listeners"] != want {
+		t.Errorf("Listeners = %q, want %q", cells["Listeners"], want)
+	}
+	if cells["Accepted"] != "True" || cells["Programmed"] != "False" {
+		t.Errorf("Accepted, Programmed = %q, %q; want True, False", cells["Accepted"], cells["Programmed"])
+	}
+}
+
+func TestBackendTLSPolicyIsAcceptedOnlyWhenEveryAncestorSaysSo(t *testing.T) {
+	ancestor := func(status string) any {
+		return map[string]any{
+			"ancestorRef": map[string]any{"name": "external"},
+			"conditions":  []any{map[string]any{"type": "Accepted", "status": status}},
+		}
+	}
+	policy := func(ancestors ...any) *unstructured.Unstructured {
+		return obj(map[string]any{
+			"metadata": map[string]any{"name": "api-tls", "namespace": "prod"},
+			"spec": map[string]any{
+				"targetRefs": []any{map[string]any{"group": "", "kind": "Service", "name": "api", "sectionName": "https"}},
+				"validation": map[string]any{"hostname": "api.internal"},
+			},
+			"status": map[string]any{"ancestors": ancestors},
+		})
+	}
+
+	cases := []struct {
+		name   string
+		policy *unstructured.Unstructured
+		want   string
+	}{
+		{"every ancestor accepts", policy(ancestor("True"), ancestor("True")), "True"},
+		{"one ancestor refuses", policy(ancestor("True"), ancestor("False")), "False"},
+		{"no controller has reported", policy(), "Unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			table := buildLiveTable(KindBackendTLSPolicies, withNamespace(builtinColumns[KindBackendTLSPolicies], true), true, []*unstructured.Unstructured{tc.policy})
+			cells := cellsByHeader(t, table, 0)
+
+			if cells["Accepted"] != tc.want {
+				t.Errorf("Accepted = %q, want %q", cells["Accepted"], tc.want)
+			}
+			if want := "Service/api#https"; cells["Targets"] != want {
+				t.Errorf("Targets = %q, want %q", cells["Targets"], want)
+			}
+			if cells["Hostname"] != "api.internal" {
+				t.Errorf("Hostname = %q, want api.internal", cells["Hostname"])
+			}
+		})
 	}
 }
 
