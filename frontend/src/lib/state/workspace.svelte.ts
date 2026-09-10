@@ -30,6 +30,7 @@ import {
     isEmptyContextPrefs,
     type ConfigFile,
     type ContextPrefs,
+    type ContextSort,
     type Density,
     type Settings,
 } from './adopt';
@@ -263,6 +264,7 @@ function defaultSettings(): Settings {
             restoreTabs: true,
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
+            contextSort: 'name',
             showLineNumbers: true,
             checkForUpdates: true,
             metricsRange: 60,
@@ -289,6 +291,15 @@ function defaultSettings(): Settings {
  * cluster's identity.
  */
 const NEUTRAL_TAB_COLOR = '#7b8794';
+
+/**
+ * How two context names are compared when the sidebar is sorted.
+ *
+ * Numeric so `node-2` comes before `node-10`, and case-insensitive so a
+ * capitalised alias is not filed away in a block of its own above the rest --
+ * cluster names are read as words, not as byte strings.
+ */
+const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /** Zoom bounds, matching appconfig.MinZoom/MaxZoom on the Go side. */
 const MIN_ZOOM = 0.5;
@@ -632,6 +643,11 @@ class Workspace {
     checkForUpdates = $derived(this.settings.preferences.checkForUpdates);
     /** Whether the sidebar groups contexts under the kubeconfig they came from. */
     showKubeconfigNames = $derived(this.settings.preferences.showKubeconfigNames);
+    /**
+     * The order the sidebar lists contexts in. See `orderContexts`, which is
+     * the only thing that should be reading it.
+     */
+    contextSort = $derived(this.settings.preferences.contextSort);
     /** Whether the YAML editor draws a line-number gutter. On by default. */
     showLineNumbers = $derived(this.settings.preferences.showLineNumbers);
     /**
@@ -848,6 +864,36 @@ class Workspace {
     /** The name to show for a context: the user's alias, or the kubeconfig name. */
     displayName(context: kube.Context): string {
         return this.settings.contexts[context.id]?.alias?.trim() || context.name;
+    }
+
+    /**
+     * Contexts in the order the sidebar shows them.
+     *
+     * Sorted on the *displayed* name rather than the kubeconfig's, so a context
+     * the user renamed lands where its new name says it should; sorting on a
+     * name nobody can see would look like no sorting at all. The list is copied
+     * before it is sorted -- the array belongs to the file it came from, and
+     * reordering that in place would leave 'kubeconfig' with nothing to go back
+     * to after a sync.
+     */
+    orderContexts(contexts: kube.Context[]): kube.Context[] {
+        if (this.contextSort === 'kubeconfig') return contexts;
+        const direction = this.contextSort === 'name-desc' ? -1 : 1;
+        return [...contexts].sort(
+            (a, b) => direction * byName.compare(this.displayName(a), this.displayName(b)),
+        );
+    }
+
+    /**
+     * Kubeconfig files in the order the sidebar heads them, by file name rather
+     * than by the whole path: the path is what the heading's tooltip says, and
+     * the name is what it shows.
+     */
+    orderFiles<T extends { path: string }>(files: T[]): T[] {
+        if (this.contextSort === 'kubeconfig') return files;
+        const direction = this.contextSort === 'name-desc' ? -1 : 1;
+        const name = (path: string) => path.split('/').pop() || path;
+        return [...files].sort((a, b) => direction * byName.compare(name(a.path), name(b.path)));
     }
 
     /**
@@ -2439,6 +2485,21 @@ class Workspace {
 
     setShowKubeconfigNames(showKubeconfigNames: boolean): void {
         this.updatePreferences({ showKubeconfigNames });
+    }
+
+    setContextSort(contextSort: ContextSort): void {
+        this.updatePreferences({ contextSort });
+    }
+
+    /**
+     * Steps the sidebar's sort on to the next order. One button rather than a
+     * menu: there are three orders, the header is already crowded at narrow
+     * widths, and the button draws which one is on.
+     */
+    cycleContextSort(): void {
+        const orders: ContextSort[] = ['name', 'name-desc', 'kubeconfig'];
+        const at = orders.indexOf(this.contextSort);
+        this.setContextSort(orders[(at + 1) % orders.length]);
     }
 
     setShowLineNumbers(showLineNumbers: boolean): void {

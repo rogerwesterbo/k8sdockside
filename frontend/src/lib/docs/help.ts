@@ -56,6 +56,7 @@ export const HELP: Page = {
                         '**Plugins** lists the installed plugins for every cluster and says in the margin which of them this cluster does not appear to have.',
                         '**Custom Resource Definitions** reads the cluster’s CRDs on first unfold and lists them by API group. Any of them opens as a table with the columns `kubectl get` would print.',
                         '**Removing and hiding.** The close button on a context row removes that one context from k8sdockside; the close button on a file heading hides the whole file. Neither writes to your kubeconfig, and a rescan brings neither back — the next scan finds them and hides them again. Both are listed under **Hidden** at the foot of the sidebar, each with a button to bring it back.',
+                        '**Sorting.** The sort button in the sidebar header steps through A → Z, Z → A and the order the kubeconfigs themselves give. It sorts on the name shown, so a context you renamed sorts under its new name. The same choice is in Settings → Appearance.',
                         '**Filter** appears above the list once there are more than a handful of contexts.',
                     ],
                 },

@@ -406,6 +406,18 @@ type Preferences struct {
 	// are the same, so a settings file written before this field existed reads
 	// as "hidden", which is exactly right.
 	ShowKubeconfigNames bool `json:"showKubeconfigNames"`
+	// ContextSort is the order the sidebar lists contexts in: by the name shown,
+	// by that name reversed, or in the order the kubeconfigs themselves give.
+	// The name sorted on is the one on screen -- an alias when the user has set
+	// one -- because sorting by a name nobody can see is sorting at random.
+	//
+	// A string rather than an enum for the same reason Density is: the settings
+	// file stays readable, and an unknown value from a hand-edited file
+	// normalises back to the default rather than failing to parse. Empty is that
+	// default, which is why a file written before this field existed reads as
+	// sorted by name: an unordered list of twenty clusters is a list nobody can
+	// find anything in, and the kubeconfig's own order is the special case.
+	ContextSort string `json:"contextSort"`
 	// MetricsRange is how far back a chart looks, in minutes. Persisted because
 	// it is a way of working rather than a moment: somebody watching a rollout
 	// wants fifteen minutes every time they open a pod, and somebody reviewing
@@ -541,10 +553,11 @@ func Defaults() Settings {
 		},
 		Layout: Layout{DetailPane: PaneRight, SidebarWidth: 320, Zoom: 1},
 		Preferences: Preferences{
-			Theme:    themes.DefaultID,
-			Density:  DensityComfortable,
-			Terminal: DefaultTerminal(),
-			Helm:     DefaultHelm(),
+			Theme:       themes.DefaultID,
+			Density:     DensityComfortable,
+			ContextSort: ContextSortName,
+			Terminal:    DefaultTerminal(),
+			Helm:        DefaultHelm(),
 		},
 		PortForwards: []PortForward{},
 	}
@@ -588,6 +601,20 @@ const (
 	// across, or eyes that would rather not lean in -- zoom scales everything
 	// together, which is the wrong tool when only the table is too tight.
 	DensitySpacious = "spacious"
+)
+
+// The values Preferences.ContextSort may take, strings for the same reason the
+// densities are.
+const (
+	// ContextSortName is A to Z by the name the sidebar shows.
+	ContextSortName = "name"
+	// ContextSortNameDesc is the same order reversed.
+	ContextSortNameDesc = "name-desc"
+	// ContextSortKubeconfig leaves the contexts in the order their kubeconfigs
+	// list them, which is what the app did before there was a choice. Worth
+	// keeping: a hand-written config is often ordered on purpose, and that
+	// order carries meaning no sort can reproduce.
+	ContextSortKubeconfig = "kubeconfig"
 )
 
 // MaxMetricsRange bounds how far back a chart may look, in minutes. A week of
@@ -1246,6 +1273,11 @@ func normalise(s Settings) Settings {
 	case DensityComfortable, DensityCompact, DensitySpacious:
 	default:
 		s.Preferences.Density = p.Density
+	}
+	switch s.Preferences.ContextSort {
+	case ContextSortName, ContextSortNameDesc, ContextSortKubeconfig:
+	default:
+		s.Preferences.ContextSort = p.ContextSort
 	}
 	// A hand-edited file could ask for a year of samples at fifteen-second
 	// resolution, which is a query no cluster should be asked to answer.

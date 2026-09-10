@@ -21,6 +21,7 @@
     import MetricsPanel from '../charts/MetricsPanel.svelte';
     import ErrorState from './ErrorState.svelte';
     import Icon from './Icon.svelte';
+    import { onExternalClick } from '../links';
 
     interface Props {
         contextId: string;
@@ -175,7 +176,13 @@
                         open, and say the same thing.
                     </p>
                     {#if plugin.docs}
-                        <p><a href={plugin.docs} target="_blank" rel="noreferrer noopener">Installation docs</a></p>
+                        <p>
+                            <a
+                                href={plugin.docs}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                onclick={onExternalClick(plugin.docs)}>Installation docs</a>
+                        </p>
                     {/if}
                 </div>
             </section>
@@ -309,7 +316,11 @@
             </span>
             {#if plugin.author}<span>· {plugin.author}</span>{/if}
             {#if plugin.docs}
-                <a href={plugin.docs} target="_blank" rel="noreferrer noopener">Documentation</a>
+                <a
+                    href={plugin.docs}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    onclick={onExternalClick(plugin.docs)}>Documentation</a>
             {/if}
             <button class="refresh" onclick={() => attempt++} disabled={loading}>
                 <Icon name="refresh" size={12} />

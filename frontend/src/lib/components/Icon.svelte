@@ -85,6 +85,12 @@
         // one chevron opens a context, two open the lot.
         'expand-all': ['M6 5.5l6 6 6-6', 'M6 12.5l6 6 6-6'],
         'collapse-all': ['M6 11.5l6-6 6 6', 'M6 18.5l6-6 6 6'],
+        // Bars shortening down the list with an arrow to match: the sidebar
+        // sorted A to Z, and the same glyph flipped for Z to A. The third
+        // state is neither, so its bars are uneven and it carries no arrow.
+        'sort-asc': ['M4 6h11', 'M4 12h7', 'M4 18h4', 'M18 5v14', 'M15 16l3 3 3-3'],
+        'sort-desc': ['M4 6h4', 'M4 12h7', 'M4 18h11', 'M18 19V5', 'M15 8l3-3 3 3'],
+        'sort-off': ['M4 6h8', 'M4 12h14', 'M4 18h6'],
         plus: ['M12 5v14', 'M5 12h14'],
         // A folder with a plus: add every kubeconfig in a directory.
         'folder-plus': [

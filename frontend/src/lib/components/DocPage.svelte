@@ -16,6 +16,7 @@
 
 <script lang="ts">
     import { inline } from '../docs/inline';
+    import { onExternalClick } from '../links';
     import type { Action, Page } from '../docs/types';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
@@ -162,7 +163,11 @@
                                                 </button>
                                             {/if}
                                             {#if term.href}
-                                                <a href={term.href} target="_blank" rel="noreferrer noopener">docs</a>
+                                                <a
+                                                    href={term.href}
+                                                    target="_blank"
+                                                    rel="noreferrer noopener"
+                                                    onclick={onExternalClick(term.href)}>docs</a>
                                             {/if}
                                         </span>
                                     </dd>
@@ -173,7 +178,11 @@
                         <ul class="links">
                             {#each block.links as link (link.href)}
                                 <li>
-                                    <a href={link.href} target="_blank" rel="noreferrer noopener">{link.label}</a>
+                                    <a
+                                        href={link.href}
+                                        target="_blank"
+                                        rel="noreferrer noopener"
+                                        onclick={onExternalClick(link.href)}>{link.label}</a>
                                     {#if link.note}<span class="link-note">{@render runs(link.note)}</span>{/if}
                                 </li>
                             {/each}

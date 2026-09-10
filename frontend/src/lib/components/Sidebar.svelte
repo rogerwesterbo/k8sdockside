@@ -7,7 +7,7 @@
   to the pane holding it, which is why nothing here sets one.
 -->
 <script lang="ts">
-    import { splitContextId } from '../state/adopt';
+    import { splitContextId, type ConfigFile, type ContextSort } from '../state/adopt';
     import { workspace } from '../state/workspace.svelte';
     import ContextSettings from './ContextSettings.svelte';
     import ContextTree from './ContextTree.svelte';
@@ -15,17 +15,54 @@
 
     let filter = $state('');
 
+    // What the sort button draws and says, in each of the three orders. The
+    // title names the order that is on *and* the one a click moves to: an icon
+    // on its own cannot say which of three states it is in, and a control that
+    // cycles has to say where the next click lands.
+    const SORTS: Record<ContextSort, { icon: string; label: string; next: string }> = {
+        name: { icon: 'sort-asc', label: 'Sorted A to Z', next: 'sort Z to A' },
+        'name-desc': {
+            icon: 'sort-desc',
+            label: 'Sorted Z to A',
+            next: 'leave them in kubeconfig order',
+        },
+        kubeconfig: { icon: 'sort-off', label: 'In kubeconfig order', next: 'sort A to Z' },
+    };
+
+    let sort = $derived(SORTS[workspace.contextSort]);
+
     let files = $derived(
-        workspace.files
-            .map((file) => ({
-                ...file,
-                contexts: file.contexts.filter((c) => matches(c.name, workspace.displayName(c))),
-            }))
-            // A file is worth showing if it still has a matching context, or if
-            // it is broken -- an unreadable kubeconfig is something the user
-            // needs to see rather than something to filter away.
-            .filter((file) => file.contexts.length > 0 || file.error !== ''),
+        workspace.orderFiles(
+            workspace.files
+                .map((file) => ({
+                    ...file,
+                    contexts: workspace.orderContexts(
+                        file.contexts.filter((c) => matches(c.name, workspace.displayName(c))),
+                    ),
+                }))
+                // A file is worth showing if it still has a matching context, or
+                // if it is broken -- an unreadable kubeconfig is something the
+                // user needs to see rather than something to filter away.
+                .filter((file) => file.contexts.length > 0 || file.error !== ''),
+        ),
     );
+
+    /**
+     * Every context on screen as one list, for when the files are not headed.
+     *
+     * Sorting inside each file and then printing the files one after another
+     * would only sort within kubeconfigs, and a list with no headings in it has
+     * no file boundaries the user can see -- so it would read as half-sorted.
+     * Ordered once, across the lot, which is what a flat list is.
+     */
+    let flat = $derived(workspace.orderContexts(files.flatMap((file) => file.contexts)));
+
+    /**
+     * The files named even when the grouping is off: a kubeconfig that would
+     * not parse has no contexts to show in its place, so it has to say so
+     * itself or it vanishes from the sidebar without a word.
+     */
+    let broken = $derived(files.filter((file) => file.error !== ''));
 
     let total = $derived(workspace.contexts.length);
 
@@ -57,6 +94,14 @@
                 aria-label={collapsing ? 'Collapse all contexts' : 'Expand all contexts'}
             >
                 <Icon name={collapsing ? 'collapse-all' : 'expand-all'} size={15} />
+            </button>
+            <button
+                class="action"
+                onclick={() => workspace.cycleContextSort()}
+                title="{sort.label}. Click to {sort.next}."
+                aria-label="Sort contexts. {sort.label}."
+            >
+                <Icon name={sort.icon} size={15} />
             </button>
             <!-- The tree control and the kubeconfig-source controls do
                  different jobs; the rule keeps them from reading as one row. -->
@@ -118,40 +163,54 @@
         </div>
     {/if}
 
+    <!-- The heading over a file's contexts, and whatever went wrong reading it.
+         A snippet because it is drawn in both arrangements below: grouped, it
+         heads every file; flat, it is all that is left of a broken one. -->
+    {#snippet head(file: ConfigFile)}
+        <div class="file-head" title={file.path}>
+            <Icon name="file" size={12} />
+            <span class="file-name">{basename(file.path)}</span>
+            <button
+                class="remove"
+                onclick={() => workspace.removeFile(file.path)}
+                title={file.source === 'manual'
+                    ? 'Stop tracking this file'
+                    : 'Hide this file. Discovery would find it again, so it is remembered as hidden.'}
+                aria-label="Remove {basename(file.path)}"
+            >
+                <Icon name="close" size={12} />
+            </button>
+        </div>
+
+        {#if file.error}
+            <p class="file-error"><Icon name="alert" size={12} />{file.error}</p>
+        {/if}
+    {/snippet}
+
     <div class="scroll">
-        {#each files as file (file.path)}
-            <!-- Grouped by file, or one flat list of contexts. A file that
-                 could not be parsed is always headed, whatever the setting:
-                 it has no contexts to show in its place, so hiding its name
-                 would remove it from the sidebar without saying so. -->
-            {@const headed = workspace.showKubeconfigNames || file.error !== ''}
-            <div class="file" class:flat={!headed}>
-                {#if headed}
-                <div class="file-head" title={file.path}>
-                    <Icon name="file" size={12} />
-                    <span class="file-name">{basename(file.path)}</span>
-                    <button
-                        class="remove"
-                        onclick={() => workspace.removeFile(file.path)}
-                        title={file.source === 'manual'
-                            ? 'Stop tracking this file'
-                            : 'Hide this file. Discovery would find it again, so it is remembered as hidden.'}
-                        aria-label="Remove {basename(file.path)}"
-                    >
-                            <Icon name="close" size={12} />
-                    </button>
+        {#if workspace.showKubeconfigNames}
+            {#each files as file (file.path)}
+                <div class="file">
+                    {@render head(file)}
+                    {#each file.contexts as context (context.id)}
+                        <ContextTree {context} />
+                    {/each}
                 </div>
-                {/if}
-
-                {#if file.error}
-                    <p class="file-error"><Icon name="alert" size={12} />{file.error}</p>
-                {/if}
-
-                {#each file.contexts as context (context.id)}
+            {/each}
+        {:else}
+            <!-- One list, in one order. A file that could not be parsed is
+                 still named, whatever the setting: it has no contexts to show
+                 in its place, so hiding its name would take it out of the
+                 sidebar without saying so. -->
+            {#each broken as file (file.path)}
+                <div class="file">{@render head(file)}</div>
+            {/each}
+            <div class="file flat">
+                {#each flat as context (context.id)}
                     <ContextTree {context} />
                 {/each}
             </div>
-        {/each}
+        {/if}
 
         {#if workspace.loaded && files.length === 0}
             <div class="empty">
@@ -347,14 +406,11 @@
         padding: 6px 8px 12px;
     }
 
+    /* Grouped, this is the gap between one file's contexts and the next
+       heading; ungrouped, the one below a broken file's error, since the whole
+       list is a single block down there. */
     .file + .file {
         margin-top: 10px;
-    }
-
-    /* Without its heading a file is not a group any more, so the gap that
-       separated it from the one above would read as a stray blank line. */
-    .file.flat + .file.flat {
-        margin-top: 0;
     }
 
     .file-head {

@@ -2,6 +2,14 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-svelte';
 
+// The runtime is what a link out actually goes through: a plain target=_blank
+// does nothing in the webview the app runs in. See lib/links.ts.
+const openURL = vi.fn().mockResolvedValue(undefined);
+vi.mock('@wailsio/runtime', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@wailsio/runtime')>();
+    return { ...actual, Browser: { ...actual.Browser, OpenURL: openURL } };
+});
+
 vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services', () => ({
     HelmService: {
         Releases: vi.fn().mockResolvedValue({ kind: 'helmreleases', columns: [], rows: [], namespaced: true, error: '' }),
@@ -129,6 +137,7 @@ beforeEach(() => {
     const style = document.createElement('style');
     style.textContent = TOKENS;
     document.head.appendChild(style);
+    openURL.mockClear();
     workspace.closeAllTabs();
     workspace.files = [{ path: '/home/u/.kube/config', source: 'auto', error: '', contexts: [
         { id: PROD, name: 'admin@prod', cluster: 'prod', user: 'admin', namespace: '', server: '', file: '/home/u/.kube/config', current: false },
@@ -184,8 +193,17 @@ test('a settings button opens the settings tab', async () => {
 test('links go to the browser, not into the window', async () => {
     await openPage();
 
-    const link = document.querySelector('a[href="https://kubernetes.io/docs/"]');
-    expect(link?.getAttribute('target')).toBe('_blank');
-    expect(link?.getAttribute('rel')).toContain('noopener');
+    const link = document.querySelector('a[href="https://kubernetes.io/docs/"]') as HTMLAnchorElement;
+    // The inert target is the backstop: were the click below ever missed, the
+    // webview would do nothing rather than navigate away from the app.
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
     await expect.element(page.getByText('Everything, eventually.')).toBeVisible();
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+
+    expect(openURL).toHaveBeenCalledWith('https://kubernetes.io/docs/');
+    // Nothing is left for the webview to do with the address afterwards.
+    expect(click.defaultPrevented).toBe(true);
 });

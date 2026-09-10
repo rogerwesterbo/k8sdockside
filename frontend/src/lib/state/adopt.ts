@@ -177,6 +177,14 @@ export function isEmptyContextPrefs(prefs: ContextPrefs): boolean {
  */
 export type Density = 'comfortable' | 'compact' | 'spacious';
 
+/**
+ * The order the sidebar lists contexts in.
+ *
+ * Mirrors appconfig's ContextSort constants. 'kubeconfig' is the order the
+ * files themselves give, which is what the app did before there was a choice.
+ */
+export type ContextSort = 'name' | 'name-desc' | 'kubeconfig';
+
 export interface Settings {
     manualFiles: string[];
     manualFolders: string[];
@@ -215,6 +223,8 @@ export interface Settings {
         restoreTabs: boolean;
         confirmSourceRemoval: boolean;
         showKubeconfigNames: boolean;
+        /** How the sidebar orders contexts: by name, by name reversed, or as found. */
+        contextSort: ContextSort;
         showLineNumbers: boolean;
         /** Whether the app asks GitHub, on its own, if a newer release is out. */
         checkForUpdates: boolean;
@@ -314,6 +324,10 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
             // Off by default: most people keep every context in one
             // ~/.kube/config, where a heading per file only repeats itself.
             showKubeconfigNames: settings.preferences?.showKubeconfigNames ?? false,
+            // Sorted by name unless the file says otherwise, including when it
+            // says nothing: see appconfig.Preferences.ContextSort for why the
+            // kubeconfig's own order is the case that has to be asked for.
+            contextSort: (settings.preferences?.contextSort || 'name') as ContextSort,
             // On by default, and nullable on the Go side for exactly that
             // reason -- see RestoreTabs above.
             showLineNumbers: settings.preferences?.showLineNumbers ?? true,

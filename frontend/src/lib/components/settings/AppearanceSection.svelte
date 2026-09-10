@@ -12,7 +12,7 @@
 -->
 <script lang="ts">
     import { workspace } from '../../state/workspace.svelte';
-    import type { Density } from '../../state/adopt';
+    import type { ContextSort, Density } from '../../state/adopt';
     import Icon from '../Icon.svelte';
     import SegmentedControl from './SegmentedControl.svelte';
     import SettingsRow from './SettingsRow.svelte';
@@ -25,6 +25,14 @@
         { value: 'compact', label: 'Compact' },
         { value: 'comfortable', label: 'Comfortable' },
         { value: 'spacious', label: 'Spacious' },
+    ];
+
+    // A to Z first, because it is the order most lists are read in, and the
+    // kubeconfig's own order last: it is the one that has to be asked for.
+    const CONTEXT_SORTS = [
+        { value: 'name', label: 'A → Z' },
+        { value: 'name-desc', label: 'Z → A' },
+        { value: 'kubeconfig', label: 'Kubeconfig' },
     ];
 
     // Set by the settings view so the theme row can hand the user over to the
@@ -100,6 +108,18 @@
             checked={workspace.showKubeconfigNames}
             label="Show kubeconfig file names in the sidebar"
             onchange={(v) => workspace.setShowKubeconfigNames(v)}
+        />
+    </SettingsRow>
+
+    <SettingsRow
+        label="Sort contexts"
+        hint="The order the cluster list is in. Sorting is on the name shown, so a context you renamed sorts under its new name. Kubeconfig keeps the order the files themselves give — worth choosing when a hand-written config is ordered on purpose."
+    >
+        <SegmentedControl
+            options={CONTEXT_SORTS}
+            value={workspace.contextSort}
+            label="Sort contexts"
+            onchange={(v) => workspace.setContextSort(v as ContextSort)}
         />
     </SettingsRow>
 

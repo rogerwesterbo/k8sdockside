@@ -1161,6 +1161,7 @@ describe('preferences', () => {
             restoreTabs: true,
             confirmSourceRemoval: false,
             showKubeconfigNames: false,
+            contextSort: 'name',
             showLineNumbers: true,
             checkForUpdates: true,
             metricsRange: 60,
