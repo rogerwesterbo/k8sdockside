@@ -65,6 +65,16 @@ export const HELM_RELEASES = 'helmreleases';
 export const PORT_FORWARDS = '__forwards__';
 
 /**
+ * The access overview: who may do what in a cluster, drawn as a graph from
+ * subjects through bindings to roles, with a "who can…" question box and the
+ * caller's own permissions beside it.
+ *
+ * A sentinel kind for the same reason PORT_FORWARDS is, and like it, it lives
+ * in a section -- at the top of Access, above the five kinds it is drawn from.
+ */
+export const ACCESS_OVERVIEW = '__access__';
+
+/**
  * The section the forwards live under. Named here because the sidebar hangs
  * the live list of them off this heading, and a group matched by a string
  * typed twice is a group that stops matching when one of them is renamed.
@@ -187,6 +197,9 @@ export const NAV_GROUPS: NavGroup[] = [
         // Who may do what.
         label: 'Access',
         items: [
+            // Not a kind the cluster serves: the five below, drawn together.
+            // See ACCESS_OVERVIEW.
+            { kind: ACCESS_OVERVIEW, label: 'Access Overview', icon: 'graph' },
             { kind: 'serviceaccounts', label: 'Service Accounts', icon: 'grant' },
             { kind: 'roles', label: 'Roles', icon: 'policy' },
             { kind: 'rolebindings', label: 'Role Bindings', icon: 'link' },

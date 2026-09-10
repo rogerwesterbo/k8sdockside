@@ -17,6 +17,7 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
     import {
+        ACCESS_OVERVIEW,
         DASHBOARD,
         PORT_FORWARDS,
         SETTINGS,
@@ -37,6 +38,7 @@
     } from '../state/panes';
     import { currentTabDrag, endTabDrag } from '../state/tabdrag.svelte';
     import { isAppTab, isSettingsTab, workspace } from '../state/workspace.svelte';
+    import AccessOverview from '../access/AccessOverview.svelte';
     import Dashboard from './Dashboard.svelte';
     import DetailPanel from './DetailPanel.svelte';
     import Icon from './Icon.svelte';
@@ -370,6 +372,8 @@
                             <Dashboard contextId={active.contextId} />
                         {:else if active.kind === PORT_FORWARDS}
                             <PortForwards contextId={active.contextId} />
+                        {:else if active.kind === ACCESS_OVERVIEW}
+                            <AccessOverview contextId={active.contextId} />
                         {:else if isPluginOverview(active.kind)}
                             <PluginOverview contextId={active.contextId} kind={active.kind} />
                         {:else}
