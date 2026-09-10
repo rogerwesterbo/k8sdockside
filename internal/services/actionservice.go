@@ -164,8 +164,12 @@ func (s *ActionService) Cordon(contextID, name string, on bool) error {
 //
 // It returns as soon as the drain is under way. A drain takes minutes -- it
 // waits on disruption budgets, which is the point of using the eviction API --
-// so it reports through events rather than making the window wait.
-func (s *ActionService) Drain(contextID, node string) (string, error) {
+// so it reports through events rather than making the window wait. Options
+// that cannot work are refused here, before the node is touched.
+func (s *ActionService) Drain(contextID, node string, opts kube.DrainOptions) (string, error) {
+	if err := opts.Validate(); err != nil {
+		return "", err
+	}
 	kc, err := s.resolve(contextID)
 	if err != nil {
 		return "", err
@@ -182,7 +186,7 @@ func (s *ActionService) Drain(contextID, node string) (string, error) {
 		defer s.finished(id)
 		// The error is reported through the progress events, which carry it to
 		// the panel that asked; there is nobody here to return it to.
-		_ = s.watcher.Drain(ctx, kc, id, node, s.push)
+		_ = s.watcher.Drain(ctx, kc, id, node, opts, s.push)
 	}()
 
 	return id, nil

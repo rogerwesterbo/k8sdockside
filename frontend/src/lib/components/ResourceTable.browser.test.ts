@@ -181,6 +181,42 @@ test('the rectangles in the table are not buttons', async () => {
     expect(page.getByRole('button', { name: /app — Running/ }).elements()).toHaveLength(0);
 });
 
+// A node that is Ready and cordoned is both. The cell says each, coloured as
+// itself, rather than one word in one colour.
+test('a cell saying several things shows each in its own tone', async () => {
+    render(ResourceTable, { contextId: PROD, kind: 'nodes' });
+
+    pushed.send({
+        kind: 'nodes',
+        columns: ['Name', 'Conditions'],
+        namespaced: false,
+        error: '',
+        rows: [
+            {
+                id: 'nodes//wrkr01',
+                name: 'wrkr01',
+                namespace: '',
+                cells: [
+                    plain('wrkr01'),
+                    {
+                        text: 'Ready,SchedulingDisabled',
+                        tone: 'warn',
+                        sort: '',
+                        pills: null,
+                        tags: [
+                            { text: 'Ready', tone: 'ok' },
+                            { text: 'SchedulingDisabled', tone: 'warn' },
+                        ],
+                    },
+                ],
+            },
+        ],
+    });
+
+    await expect.element(page.getByText('Ready', { exact: true })).toHaveClass(/ok/);
+    await expect.element(page.getByText('SchedulingDisabled', { exact: true })).toHaveClass(/warn/);
+});
+
 // A plugin view is a tab kind of its own -- plugin:argocd/applications -- but
 // the rows in it are Applications. Opening one has to ask about the kind the
 // view lists, or every describe, edit and action on it fails with "unknown

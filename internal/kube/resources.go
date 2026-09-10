@@ -9,6 +9,13 @@ type Pill struct {
 	Detail string `json:"detail"`
 }
 
+// Tag is one of several statuses a cell holds at once, in its own tone: a node
+// that is Ready and cordoned, or Ready and under memory pressure.
+type Tag struct {
+	Text string `json:"text"`
+	Tone string `json:"tone"`
+}
+
 // Cell is one table cell. Tone lets the frontend colour a value without having
 // to know what the value means: "ok", "warn", "error", "info" or "" for plain.
 type Cell struct {
@@ -18,6 +25,10 @@ type Cell struct {
 	// for every kind but one, and an empty one renders as Text exactly as
 	// before.
 	Pills []Pill `json:"pills"`
+	// Tags, where a cell says more than one thing and each needs its own
+	// colour. Text still carries them joined, as kubectl writes them, for the
+	// filter and the sort. Absent for a cell that says one thing.
+	Tags []Tag `json:"tags,omitempty"`
 	// Sort is compared in place of Text where the two do not share an order.
 	// An age reads "3d" but belongs in seconds; a volume reads "500Mi" but
 	// belongs in bytes. Sorting the text would put "5m" before "2h" before

@@ -34,7 +34,38 @@ export interface ObjectState {
 export interface Refusal {
     pod: { namespace: string; name: string };
     reason: string;
+    /** The option that would have moved it: "force" or "deleteEmptyDirData". */
+    option: string;
 }
+
+/**
+ * What a drain is told beyond `kubectl drain`'s defaults: the flags k9s's drain
+ * dialog asks for, and kubectl's --pod-selector and --disable-eviction.
+ */
+export interface DrainOptions {
+    /** Seconds each pod gets to stop, instead of its own. Null keeps its own. */
+    gracePeriodSeconds: number | null;
+    /** Seconds before the drain gives up. Zero waits as long as budgets take. */
+    timeoutSeconds: number;
+    /** Move pods holding emptyDir data, losing the data. */
+    deleteEmptyDirData: boolean;
+    /** Move pods nothing manages, deleting them for good. */
+    force: boolean;
+    /** Delete rather than evict, so no disruption budget is asked. */
+    disableEviction: boolean;
+    /** Only the pods carrying these labels. Empty is every pod. */
+    podSelector: string;
+}
+
+/** `kubectl drain` with no flags. */
+export const DRAIN_DEFAULTS: DrainOptions = {
+    gracePeriodSeconds: null,
+    timeoutSeconds: 0,
+    deleteEmptyDirData: false,
+    force: false,
+    disableEviction: false,
+    podSelector: '',
+};
 
 /** A drain in flight, or the last one this node had. */
 export interface DrainState {
@@ -289,12 +320,13 @@ class Actions {
      *
      * It resolves once the drain is under way, not once it is finished: a drain
      * waits on disruption budgets and can take minutes, and its progress
-     * arrives as events.
+     * arrives as events. Options the backend cannot use are refused here,
+     * before the node is touched.
      */
-    async drain(ref: ObjectRef): Promise<void> {
+    async drain(ref: ObjectRef, options: DrainOptions = DRAIN_DEFAULTS): Promise<void> {
         let id: string;
         try {
-            id = await ActionService.Drain(ref.contextId, ref.name);
+            id = await ActionService.Drain(ref.contextId, ref.name, options);
         } catch (err) {
             throw message(err);
         }

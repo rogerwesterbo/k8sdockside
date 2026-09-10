@@ -540,3 +540,96 @@ func indexOf(t Table, name string) int {
 	}
 	return -1
 }
+
+// ---- node conditions -------------------------------------------------------
+
+// nodeWith builds a node carrying the given conditions, as type/status pairs.
+func nodeWith(cordoned bool, conditions ...string) *unstructured.Unstructured {
+	conds := []any{}
+	for i := 0; i+1 < len(conditions); i += 2 {
+		conds = append(conds, map[string]any{"type": conditions[i], "status": conditions[i+1]})
+	}
+	return obj(map[string]any{
+		"metadata": map[string]any{"name": "wrkr01"},
+		"spec":     map[string]any{"unschedulable": cordoned},
+		"status":   map[string]any{"conditions": conds},
+	})
+}
+
+// The ordinary case stays an ordinary cell: one word, one colour, no tags.
+func TestANodeThatIsReadyReadsReadyAlone(t *testing.T) {
+	got := nodeCondition(nodeWith(false, "Ready", "True", "MemoryPressure", "False", "DiskPressure", "False"))
+
+	if got.Text != "Ready" || got.Tone != "ok" {
+		t.Errorf("nodeCondition = %q (%s), want Ready (ok)", got.Text, got.Tone)
+	}
+	if got.Tags != nil {
+		t.Errorf("Tags = %v, want none for a cell that says one thing", got.Tags)
+	}
+}
+
+// Cordoning a node does not make it any less Ready, and showing only
+// SchedulingDisabled hid that. kubectl prints both; so do we, each in its own
+// colour.
+func TestACordonedNodeIsStillReady(t *testing.T) {
+	got := nodeCondition(nodeWith(true, "Ready", "True"))
+
+	if got.Text != "Ready,SchedulingDisabled" {
+		t.Errorf("Text = %q, want Ready,SchedulingDisabled", got.Text)
+	}
+	want := []Tag{{Text: "Ready", Tone: "ok"}, {Text: "SchedulingDisabled", Tone: "warn"}}
+	if !slices.Equal(got.Tags, want) {
+		t.Errorf("Tags = %v, want %v", got.Tags, want)
+	}
+	// The cell's own tone is the worst of them, for anything drawing only one.
+	if got.Tone != "warn" {
+		t.Errorf("Tone = %q, want warn", got.Tone)
+	}
+}
+
+// For a node every condition but Ready is bad news when True, and a node under
+// pressure is evicting pods while it still reads Ready.
+func TestANodeUnderPressureSaysWhichPressure(t *testing.T) {
+	got := nodeCondition(nodeWith(false,
+		"Ready", "True",
+		"MemoryPressure", "True",
+		"DiskPressure", "True",
+		"PIDPressure", "False",
+		"NetworkUnavailable", "False",
+	))
+
+	if got.Text != "Ready,MemoryPressure,DiskPressure" {
+		t.Errorf("Text = %q, want Ready,MemoryPressure,DiskPressure", got.Text)
+	}
+}
+
+// Whatever a node-problem-detector adds is a condition like any other.
+func TestANodeWithEverythingWrongSaysAllOfIt(t *testing.T) {
+	got := nodeCondition(nodeWith(true, "Ready", "False", "NetworkUnavailable", "True", "KernelDeadlock", "True"))
+
+	if want := "NotReady,SchedulingDisabled,NetworkUnavailable,KernelDeadlock"; got.Text != want {
+		t.Errorf("Text = %q, want %q", got.Text, want)
+	}
+	if got.Tone != "error" {
+		t.Errorf("Tone = %q, want error", got.Tone)
+	}
+}
+
+func TestANodeThatHasNotReportedIsUnknown(t *testing.T) {
+	got := nodeCondition(nodeWith(false))
+
+	if got.Text != "Unknown" || got.Tone != "error" {
+		t.Errorf("nodeCondition = %q (%s), want Unknown (error)", got.Text, got.Tone)
+	}
+}
+
+// The column is what the table draws, so the tags have to arrive through it.
+func TestTheNodesTableCarriesEveryCondition(t *testing.T) {
+	n := nodeWith(true, "Ready", "True")
+
+	table := buildLiveTable(KindNodes, builtinColumns[KindNodes], false, []*unstructured.Unstructured{n})
+
+	if got := cellsByHeader(t, table, 0)["Conditions"]; got != "Ready,SchedulingDisabled" {
+		t.Errorf("Conditions = %q, want Ready,SchedulingDisabled", got)
+	}
+}

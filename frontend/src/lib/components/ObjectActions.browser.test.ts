@@ -449,7 +449,16 @@ test('draining asks first, then reports as it goes', async () => {
     render(ObjectActions, { object: NODE });
     await page.getByRole('button', { name: 'Drain' }).click();
     await page.getByRole('button', { name: 'Drain', exact: true }).click();
-    await vi.waitFor(() => expect(ActionService.Drain).toHaveBeenCalledWith(PROD, 'wrkr01'));
+    await vi.waitFor(() =>
+        expect(ActionService.Drain).toHaveBeenCalledWith(PROD, 'wrkr01', {
+            gracePeriodSeconds: null,
+            timeoutSeconds: 0,
+            deleteEmptyDirData: false,
+            force: false,
+            disableEviction: false,
+            podSelector: '',
+        }),
+    );
 
     deliver({
         data: {
@@ -492,6 +501,66 @@ test('the pods a drain would not move are named', async () => {
 
     await expect.element(page.getByText(/default\/debug/)).toBeVisible();
     await expect.element(page.getByText(/nothing manages it/)).toBeVisible();
+});
+
+// kubectl drain's flags, as k9s's dialog asks for them.
+test('a drain can be told what kubectl drain is told', async () => {
+    render(ObjectActions, { object: NODE });
+    await page.getByRole('button', { name: 'Drain' }).click();
+
+    await page.getByRole('checkbox', { name: /Delete emptyDir data/ }).click();
+    await page.getByRole('spinbutton', { name: /Grace period/ }).fill('30');
+    await page.getByRole('textbox', { name: /Pod selector/ }).fill(' app=web ');
+    await page.getByRole('button', { name: 'Drain', exact: true }).click();
+
+    await vi.waitFor(() =>
+        expect(ActionService.Drain).toHaveBeenCalledWith(
+            PROD,
+            'wrkr01',
+            expect.objectContaining({
+                deleteEmptyDirData: true,
+                force: false,
+                gracePeriodSeconds: 30,
+                timeoutSeconds: 0,
+                podSelector: 'app=web',
+            }),
+        ),
+    );
+});
+
+// A refusal names the option that would have moved its pod, so what was left
+// behind is one click from the question with that box already ticked.
+test('the pods a drain left behind can be drained again with what would move them', async () => {
+    render(ObjectActions, { object: NODE });
+    await page.getByRole('button', { name: 'Drain' }).click();
+    await page.getByRole('button', { name: 'Drain', exact: true }).click();
+    await vi.waitFor(() => expect(ActionService.Drain).toHaveBeenCalled());
+
+    deliver({
+        data: {
+            drainId: 'drain-1',
+            node: 'wrkr01',
+            phase: 'done',
+            evicted: 1,
+            total: 1,
+            refused: [
+                {
+                    pod: { namespace: 'default', name: 'cache' },
+                    reason: 'it holds data in an emptyDir volume',
+                    option: 'deleteEmptyDirData',
+                },
+            ],
+            error: '',
+            done: true,
+        },
+    });
+
+    await page.getByRole('button', { name: /Drain these too/ }).click();
+
+    await expect.element(page.getByRole('checkbox', { name: /Delete emptyDir data/ })).toBeChecked();
+    await expect.element(page.getByRole('checkbox', { name: /Force/ })).not.toBeChecked();
+    // Ticked, not run: the question still has to be answered.
+    expect(ActionService.Drain).toHaveBeenCalledTimes(1);
 });
 
 test('a drain in flight can be called off', async () => {

@@ -352,18 +352,44 @@ func nodeAddress(kind string) func(*unstructured.Unstructured) Cell {
 	}
 }
 
+// nodeCondition says everything about a node's state worth a look, not just the
+// first thing: whether it is Ready, whether it is cordoned, and every other
+// condition that is True. kubectl prints the first two joined,
+// "Ready,SchedulingDisabled"; the rest are added here because for a node every
+// condition but Ready is bad news when True -- MemoryPressure, DiskPressure,
+// PIDPressure, NetworkUnavailable, and whatever node-problem-detector reports
+// -- and a node under pressure is evicting pods while still reading Ready.
 func nodeCondition(u *unstructured.Unstructured) Cell {
-	if unschedulable, _, _ := unstructured.NestedBool(u.Object, "spec", "unschedulable"); unschedulable {
-		return toned("SchedulingDisabled", "warn")
-	}
+	var tags []Tag
 	switch conditionStatus(u, "Ready", "status", "conditions") {
 	case "True":
-		return status("Ready")
+		tags = append(tags, Tag{Text: "Ready", Tone: "ok"})
 	case "False":
-		return status("NotReady")
+		tags = append(tags, Tag{Text: "NotReady", Tone: "error"})
 	default:
-		return status("Unknown")
+		tags = append(tags, Tag{Text: "Unknown", Tone: "error"})
 	}
+
+	if unschedulable, _, _ := unstructured.NestedBool(u.Object, "spec", "unschedulable"); unschedulable {
+		tags = append(tags, Tag{Text: "SchedulingDisabled", Tone: "warn"})
+	}
+
+	for _, raw := range nestedSlice(u, "status", "conditions") {
+		c := asMap(raw)
+		kind := mapString(c, "type")
+		if kind == "" || kind == "Ready" || mapString(c, "status") != "True" {
+			continue
+		}
+		// A node with no network runs nothing that works; pressure is a node
+		// still working, and shedding pods to stay that way.
+		tone := "warn"
+		if kind == "NetworkUnavailable" {
+			tone = "error"
+		}
+		tags = append(tags, Tag{Text: kind, Tone: tone})
+	}
+
+	return tagged(tags)
 }
 
 // ---- Gateway API -----------------------------------------------------------

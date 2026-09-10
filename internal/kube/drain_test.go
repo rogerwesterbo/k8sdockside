@@ -41,8 +41,30 @@ func owners(kind string) func(map[string]any) {
 	}
 }
 
+// unmanaged takes a pod's owners away: a pod somebody ran by hand.
+func unmanaged(obj map[string]any) {
+	delete(obj["metadata"].(map[string]any), "ownerReferences")
+}
+
+// scratch gives a pod an emptyDir beside a volume that holds nothing local.
+func scratch(obj map[string]any) {
+	obj["spec"].(map[string]any)["volumes"] = []any{
+		map[string]any{"name": "config", "configMap": map[string]any{"name": "c"}},
+		map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
+	}
+}
+
+// both applies several tweaks to one pod.
+func both(tweaks ...func(map[string]any)) func(map[string]any) {
+	return func(obj map[string]any) {
+		for _, t := range tweaks {
+			t(obj)
+		}
+	}
+}
+
 func TestClassifyEvictsAnOrdinaryPod(t *testing.T) {
-	got, reason := classify(testPod("web", nil))
+	got, reason, _ := classify(testPod("web", nil), DrainOptions{})
 
 	if got != evictIt {
 		t.Errorf("classify(a replicaset's pod) = %v (%s), want evict", got, reason)
@@ -52,7 +74,7 @@ func TestClassifyEvictsAnOrdinaryPod(t *testing.T) {
 // A DaemonSet puts a pod back on the node the moment it goes, so evicting one
 // is work that undoes itself. kubectl skips them; so do we.
 func TestClassifySkipsDaemonSetPods(t *testing.T) {
-	got, _ := classify(testPod("node-exporter", owners("DaemonSet")))
+	got, _, _ := classify(testPod("node-exporter", owners("DaemonSet")), DrainOptions{})
 
 	if got != skipIt {
 		t.Errorf("classify(a daemonset's pod) = %v, want skip", got)
@@ -69,7 +91,7 @@ func TestClassifySkipsMirrorPodsRatherThanRefusingThem(t *testing.T) {
 		meta["annotations"] = map[string]any{mirrorPod: "0123456789abcdef"}
 	})
 
-	got, reason := classify(mirror)
+	got, reason, _ := classify(mirror, DrainOptions{})
 
 	if got != skipIt {
 		t.Errorf("classify(a mirror pod) = %v (%s), want skip", got, reason)
@@ -81,24 +103,16 @@ func TestClassifySkipsPodsThatHaveAlreadyFinished(t *testing.T) {
 		done := testPod("batch", func(obj map[string]any) {
 			obj["status"] = map[string]any{"phase": phase}
 		})
-		if got, _ := classify(done); got != skipIt {
+		if got, _, _ := classify(done, DrainOptions{}); got != skipIt {
 			t.Errorf("classify(a %s pod) = %v, want skip", phase, got)
 		}
 	}
 }
 
 // kubectl refuses these without --delete-emptydir-data, because evicting the
-// pod destroys the data. We have no such flag, so we refuse and say which pod.
+// pod destroys the data. Without the option we refuse too, and say which pod.
 func TestClassifyRefusesAPodHoldingLocalData(t *testing.T) {
-	withData := testPod("cache", func(obj map[string]any) {
-		spec := obj["spec"].(map[string]any)
-		spec["volumes"] = []any{
-			map[string]any{"name": "config", "configMap": map[string]any{"name": "c"}},
-			map[string]any{"name": "scratch", "emptyDir": map[string]any{}},
-		}
-	})
-
-	got, reason := classify(withData)
+	got, reason, _ := classify(testPod("cache", scratch), DrainOptions{})
 
 	if got != refuseIt {
 		t.Fatalf("classify(a pod with emptyDir) = %v, want refuse", got)
@@ -111,11 +125,7 @@ func TestClassifyRefusesAPodHoldingLocalData(t *testing.T) {
 // kubectl refuses these without --force: nothing would recreate the pod, so
 // evicting it is deleting it.
 func TestClassifyRefusesAPodNothingManages(t *testing.T) {
-	bare := testPod("debug", func(obj map[string]any) {
-		delete(obj["metadata"].(map[string]any), "ownerReferences")
-	})
-
-	got, reason := classify(bare)
+	got, reason, _ := classify(testPod("debug", unmanaged), DrainOptions{})
 
 	if got != refuseIt {
 		t.Fatalf("classify(a bare pod) = %v, want refuse", got)
@@ -129,16 +139,110 @@ func TestClassifyRefusesAPodNothingManages(t *testing.T) {
 // the emptyDir check to win, every node running a DaemonSet that scratches to
 // disk would refuse to drain.
 func TestClassifySkipsADaemonSetPodEvenWithLocalData(t *testing.T) {
-	both := testPod("fluent-bit", func(obj map[string]any) {
-		meta := obj["metadata"].(map[string]any)
-		meta["ownerReferences"] = []any{map[string]any{"kind": "DaemonSet", "name": "fluent-bit"}}
-		obj["spec"].(map[string]any)["volumes"] = []any{
-			map[string]any{"name": "buf", "emptyDir": map[string]any{}},
-		}
-	})
+	pod := testPod("fluent-bit", both(owners("DaemonSet"), scratch))
 
-	if got, _ := classify(both); got != skipIt {
+	if got, _, _ := classify(pod, DrainOptions{}); got != skipIt {
 		t.Errorf("classify(a daemonset pod with emptyDir) = %v, want skip", got)
+	}
+}
+
+// ----- the options ------------------------------------------------------
+
+// --delete-emptydir-data: the user has agreed to lose the data, so the pod goes.
+func TestClassifyEvictsAPodHoldingLocalDataWhenToldTo(t *testing.T) {
+	got, reason, _ := classify(testPod("cache", scratch), DrainOptions{DeleteEmptyDirData: true})
+
+	if got != evictIt {
+		t.Errorf("classify(a pod with emptyDir, delete-emptydir-data) = %v (%s), want evict", got, reason)
+	}
+}
+
+// --force: the user has agreed the pod is gone for good, so it goes.
+func TestClassifyEvictsAPodNothingManagesWhenForced(t *testing.T) {
+	got, reason, _ := classify(testPod("debug", unmanaged), DrainOptions{Force: true})
+
+	if got != evictIt {
+		t.Errorf("classify(a bare pod, force) = %v (%s), want evict", got, reason)
+	}
+}
+
+// Force is agreement to lose the pod, not its data. A bare pod with an emptyDir
+// still needs the second option, exactly as it does in kubectl.
+func TestForceDoesNotAlsoAgreeToLosingLocalData(t *testing.T) {
+	got, _, option := classify(testPod("debug", both(unmanaged, scratch)), DrainOptions{Force: true})
+
+	if got != refuseIt {
+		t.Fatalf("classify(a bare pod with emptyDir, force) = %v, want refuse", got)
+	}
+	if option != optionDeleteEmptyDirData {
+		t.Errorf("option = %q, want %q", option, optionDeleteEmptyDirData)
+	}
+}
+
+// The options widen what may be moved, never what is skipped: a DaemonSet's pod
+// evicted is a pod put straight back.
+func TestTheOptionsNeverMoveAPodADrainSkips(t *testing.T) {
+	all := DrainOptions{Force: true, DeleteEmptyDirData: true, DisableEviction: true}
+	pod := testPod("fluent-bit", both(owners("DaemonSet"), scratch))
+
+	if got, _, _ := classify(pod, all); got != skipIt {
+		t.Errorf("classify(a daemonset pod, every option) = %v, want skip", got)
+	}
+}
+
+// A refusal names the option that would have moved its pod, which is how the
+// panel ticks the right box when asked to drain what was left.
+func TestARefusalNamesTheOptionThatWouldHaveMovedIt(t *testing.T) {
+	cases := []struct {
+		name string
+		pod  *unstructured.Unstructured
+		want string
+	}{
+		{"a bare pod", testPod("debug", unmanaged), optionForce},
+		{"a pod with emptyDir", testPod("cache", scratch), optionDeleteEmptyDirData},
+	}
+	for _, c := range cases {
+		if _, _, option := classify(c.pod, DrainOptions{}); option != c.want {
+			t.Errorf("%s: option = %q, want %q", c.name, option, c.want)
+		}
+	}
+}
+
+func TestValidateDrainOptions(t *testing.T) {
+	negative, zero := int64(-1), int64(0)
+	cases := []struct {
+		name string
+		opts DrainOptions
+		ok   bool
+	}{
+		{"the defaults", DrainOptions{}, true},
+		{"a grace period of nothing, which is kill now", DrainOptions{GracePeriodSeconds: &zero}, true},
+		{"a negative grace period", DrainOptions{GracePeriodSeconds: &negative}, false},
+		{"a negative timeout", DrainOptions{TimeoutSeconds: -5}, false},
+		{"a selector", DrainOptions{PodSelector: "app=web,tier!=db"}, true},
+		{"a selector that does not parse", DrainOptions{PodSelector: "app in (web"}, false},
+	}
+	for _, c := range cases {
+		err := c.opts.Validate()
+		if c.ok && err != nil {
+			t.Errorf("%s: Validate = %v, want nil", c.name, err)
+		}
+		if !c.ok && err == nil {
+			t.Errorf("%s: Validate = nil, want an error", c.name)
+		}
+	}
+}
+
+// The selector is the API server's to apply, beside the node, so the listing is
+// only ever the pods the drain is about.
+func TestListOnNodeCarriesTheSelector(t *testing.T) {
+	opts := listOnNode("wrkr01", "app=web")
+
+	if opts.FieldSelector != "spec.nodeName=wrkr01" {
+		t.Errorf("FieldSelector = %q", opts.FieldSelector)
+	}
+	if opts.LabelSelector != "app=web" {
+		t.Errorf("LabelSelector = %q, want app=web", opts.LabelSelector)
 	}
 }
 
@@ -267,18 +371,19 @@ func TestPlanDrainSortsPodsIntoWhatMovesAndWhatDoesNot(t *testing.T) {
 	pods := []unstructured.Unstructured{
 		*testPod("web", nil),                           // moves
 		*testPod("node-exporter", owners("DaemonSet")), // skipped, and named nowhere
-		*testPod("debug", func(obj map[string]any) { // refused
-			delete(obj["metadata"].(map[string]any), "ownerReferences")
-		}),
+		*testPod("debug", unmanaged),                   // refused
 	}
 
-	plan := planDrain(pods)
+	plan := planDrain(pods, DrainOptions{})
 
 	if want := []PodRef{{Namespace: "default", Name: "web"}}; !slices.Equal(plan.Evict, want) {
 		t.Errorf("Evict = %v, want %v", plan.Evict, want)
 	}
 	if len(plan.Refused) != 1 || plan.Refused[0].Pod.Name != "debug" {
-		t.Errorf("Refused = %v, want the bare pod alone", plan.Refused)
+		t.Fatalf("Refused = %v, want the bare pod alone", plan.Refused)
+	}
+	if plan.Refused[0].Option != optionForce {
+		t.Errorf("Refused[0].Option = %q, want %q", plan.Refused[0].Option, optionForce)
 	}
 	// A skipped pod belongs in neither list: it is not work, and it is not a
 	// refusal the user has to do anything about.
@@ -286,5 +391,23 @@ func TestPlanDrainSortsPodsIntoWhatMovesAndWhatDoesNot(t *testing.T) {
 		if r.Pod.Name == "node-exporter" {
 			t.Error("a DaemonSet's pod was reported as a refusal")
 		}
+	}
+}
+
+// The options move what the defaults leave: with both, nothing is left behind.
+func TestPlanDrainWithTheOptionsLeavesNothingBehind(t *testing.T) {
+	pods := []unstructured.Unstructured{
+		*testPod("web", nil),
+		*testPod("debug", unmanaged),
+		*testPod("cache", scratch),
+	}
+
+	plan := planDrain(pods, DrainOptions{Force: true, DeleteEmptyDirData: true})
+
+	if len(plan.Evict) != 3 {
+		t.Errorf("Evict = %v, want all three", plan.Evict)
+	}
+	if len(plan.Refused) != 0 {
+		t.Errorf("Refused = %v, want none", plan.Refused)
 	}
 }

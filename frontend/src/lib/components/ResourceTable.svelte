@@ -565,6 +565,15 @@
         </button>
     {:else if value?.pills?.length}
         <ContainerPills pills={value.pills} />
+    {:else if value?.tags?.length}
+        <!-- Several statuses at once, each in its own colour: a node that is
+             Ready and cordoned is both, and one colour for the pair would say
+             only one of them. -->
+        <span class="tags">
+            {#each value.tags as tag, i (i)}
+                <span class="tag {tag.tone}">{tag.text}</span>
+            {/each}
+        </span>
     {:else}
         {value?.text ?? ''}
     {/if}
@@ -755,6 +764,28 @@
 </div>
 
 <style>
+    .tags {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 2px 8px;
+    }
+
+    .tag.ok {
+        color: var(--ok);
+    }
+
+    .tag.warn {
+        color: var(--warn);
+    }
+
+    .tag.error {
+        color: var(--error);
+    }
+
+    .tag.info {
+        color: var(--text-dim);
+    }
+
     .view {
         display: flex;
         flex-direction: column;

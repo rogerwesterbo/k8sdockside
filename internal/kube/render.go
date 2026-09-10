@@ -26,6 +26,46 @@ func status(s string) Cell      { return Cell{Text: s, Tone: toneFor(s)} }
 func number(n int) Cell         { return Cell{Text: fmt.Sprintf("%d", n)} }
 func muted(s string) Cell       { return Cell{Text: s, Tone: "info"} }
 
+// tagged is a cell that says several things at once, each in its own tone: a
+// node that is Ready and cordoned is both, and green alone or amber alone hides
+// half of it. Text is kubectl's spelling, "Ready,SchedulingDisabled", so a
+// filter or a sort still reads the cell as one string; Tone is the worst of the
+// parts, for anything that can draw only one. A single tag is an ordinary cell.
+func tagged(tags []Tag) Cell {
+	if len(tags) == 0 {
+		return Cell{}
+	}
+	texts := make([]string, len(tags))
+	tone := ""
+	for i, t := range tags {
+		texts[i] = t.Text
+		if toneRank(t.Tone) > toneRank(tone) {
+			tone = t.Tone
+		}
+	}
+	c := Cell{Text: strings.Join(texts, ","), Tone: tone}
+	if len(tags) > 1 {
+		c.Tags = tags
+	}
+	return c
+}
+
+// toneRank orders the tones by how much they want to be seen.
+func toneRank(tone string) int {
+	switch tone {
+	case "error":
+		return 4
+	case "warn":
+		return 3
+	case "ok":
+		return 2
+	case "info":
+		return 1
+	default:
+		return 0
+	}
+}
+
 // farFuture sorts a cell with no time after every cell that has one, so
 // "<none>" collects at the end rather than leading the list.
 const farFuture = 1 << 62

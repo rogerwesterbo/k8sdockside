@@ -44,7 +44,7 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
     ActionService: { ObjectState, Delete, DeleteMany, PatchMany, PreviewPatch, Scale, Restart, Cordon, Drain, CancelDrain },
 }));
 
-const { actions } = await import('./actions.svelte');
+const { actions, DRAIN_DEFAULTS } = await import('./actions.svelte');
 const { changes } = await import('./changes.svelte');
 
 const NODE = { contextId: 'cfg::prod', kind: 'nodes', namespace: '', name: 'wrkr01' };
@@ -165,8 +165,16 @@ describe('draining a node', () => {
     test('starting one shows it as under way straight away', async () => {
         await actions.drain(NODE);
 
-        expect(Drain).toHaveBeenCalledWith('cfg::prod', 'wrkr01');
+        expect(Drain).toHaveBeenCalledWith('cfg::prod', 'wrkr01', DRAIN_DEFAULTS);
         expect(actions.drainOf(NODE)?.done).toBe(false);
+    });
+
+    test('the options chosen travel with it', async () => {
+        const options = { ...DRAIN_DEFAULTS, force: true, gracePeriodSeconds: 30, podSelector: 'app=web' };
+
+        await actions.drain(NODE, options);
+
+        expect(Drain).toHaveBeenCalledWith('cfg::prod', 'wrkr01', options);
     });
 
     test('progress reports land on the node they belong to', async () => {

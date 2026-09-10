@@ -13,7 +13,7 @@
 <script lang="ts">
     import { singularFor } from '../catalogue';
     import { actionsFor, actionsForVM, type Action, type ActionId } from '../actions';
-    import { actions } from '../state/actions.svelte';
+    import { actions, type DrainOptions } from '../state/actions.svelte';
     import { forwards, type PortOption } from '../state/forwards.svelte';
     import { helm } from '../state/helm.svelte';
     import { workspace, type DetailTarget } from '../state/workspace.svelte';
@@ -73,6 +73,22 @@
     let revision = $state<number | null>(null);
     /** Whether an uninstall keeps the release's records, so it can be rolled back. */
     let keepHistory = $state(false);
+
+    /**
+     * What a drain is told beyond kubectl's defaults: the flags k9s's drain
+     * dialog offers, plus kubectl's --pod-selector and --disable-eviction.
+     * Opened on the defaults every time, so a Force ticked for one node is not
+     * quietly carried to the next.
+     *
+     * The two numbers are nullable because that is what a number field bound
+     * to an empty box holds, and empty is the answer that means "the default":
+     * each pod's own grace period, and no timeout.
+     */
+    let drainFlags = $state({ deleteEmptyDirData: false, force: false, disableEviction: false, podSelector: '' });
+    let gracePeriod = $state<number | null>(null);
+    let drainTimeout = $state<number | null>(null);
+    /** Set when the drain would destroy something the defaults would leave alone. */
+    let drainRisky = $derived(drainFlags.force || drainFlags.deleteEmptyDirData || drainFlags.disableEviction);
 
     /** The action waiting on an answer -- a confirmation, a number, a port -- if any. */
     let asking = $state<ActionId | null>(null);
@@ -198,7 +214,39 @@
             return;
         }
         if (action.form === 'number') replicas = facts.replicas;
+        if (action.id === 'drain') resetDrain();
         asking = action.id;
+    }
+
+    function resetDrain(): void {
+        drainFlags = { deleteEmptyDirData: false, force: false, disableEviction: false, podSelector: '' };
+        gracePeriod = null;
+        drainTimeout = null;
+    }
+
+    /** The drain form as the backend takes it. */
+    function drainOptions(): DrainOptions {
+        return {
+            ...drainFlags,
+            podSelector: drainFlags.podSelector.trim(),
+            gracePeriodSeconds: gracePeriod,
+            timeoutSeconds: drainTimeout ?? 0,
+        };
+    }
+
+    /**
+     * Opens the drain question again with the boxes ticked that would move
+     * what the last drain left behind. Each refusal names the option that
+     * would have moved its pod, so "why was this left" is one click from "move
+     * it anyway" -- ticked rather than run, because both options destroy
+     * something, and the question still has to be answered.
+     */
+    function drainAgain(): void {
+        const needed = new Set(drain?.refused.map((r) => r.option));
+        resetDrain();
+        drainFlags.deleteEmptyDirData = needed.has('deleteEmptyDirData');
+        drainFlags.force = needed.has('force');
+        asking = 'drain';
     }
 
     /**
@@ -231,7 +279,7 @@
                     notices.inform(`${subject} ${facts.cordoned ? 'cordoned' : 'uncordoned'}`);
                     break;
                 case 'drain':
-                    await actions.drain(object);
+                    await actions.drain(object, drainOptions());
                     break;
                 case 'vmstart':
                 case 'vmstop':
@@ -389,7 +437,7 @@
 <svelte:document onkeydown={(e) => e.key === 'Escape' && asking && (asking = null)} />
 
 {#if available.length > 0}
-    <div class="bar">
+    <div class="bar" class:stacked={asked?.id === 'drain'}>
         {#if asked && asked.form === 'confirm'}
             <p class="question">{question(asked.id)}</p>
             {#if asked.id === 'uninstall'}
@@ -401,9 +449,51 @@
                     Keep the history, so it can be rolled back
                 </label>
             {/if}
+            {#if asked.id === 'drain'}
+                <!-- kubectl drain's flags. The three boxes each give up a
+                     protection the defaults keep, so each says which; ticking
+                     any of them turns the answer red. -->
+                <div class="options">
+                    <label class="check">
+                        <input type="checkbox" bind:checked={drainFlags.deleteEmptyDirData} />
+                        Delete emptyDir data
+                    </label>
+                    <label class="check">
+                        <input type="checkbox" bind:checked={drainFlags.force} />
+                        Force — delete pods nothing manages
+                    </label>
+                    <label class="check">
+                        <input type="checkbox" bind:checked={drainFlags.disableEviction} />
+                        Delete instead of evict — skips disruption budgets
+                    </label>
+                    <label class="field">
+                        Grace period (s)
+                        <input type="number" min="0" step="1" placeholder="pod's own" bind:value={gracePeriod} />
+                    </label>
+                    <label class="field">
+                        Timeout (s)
+                        <input type="number" min="0" step="1" placeholder="none" bind:value={drainTimeout} />
+                    </label>
+                    <label class="field">
+                        Pod selector
+                        <input
+                            type="text"
+                            placeholder="app=web"
+                            spellcheck="false"
+                            autocomplete="off"
+                            bind:value={drainFlags.podSelector}
+                        />
+                    </label>
+                </div>
+            {/if}
             <div class="answers">
                 <button bind:this={cancelEl} class="plain" onclick={() => (asking = null)}>Cancel</button>
-                <button class="go" class:danger={asked.tone === 'danger'} disabled={busy} onclick={() => perform(asked.id)}>
+                <button
+                    class="go"
+                    class:danger={asked.tone === 'danger' || (asked.id === 'drain' && drainRisky)}
+                    disabled={busy}
+                    onclick={() => perform(asked.id)}
+                >
                     {asked.label}
                 </button>
             </div>
@@ -547,6 +637,9 @@
                         </li>
                     {/each}
                 </ul>
+                {#if drain.done && drain.refused.some((r) => r.option)}
+                    <button class="again" onclick={drainAgain}>Drain these too…</button>
+                {/if}
             {/if}
         </div>
     {/if}
@@ -661,6 +754,33 @@
 
     .question.failed {
         color: var(--error);
+    }
+
+    /* The drain question carries a form, which does not fit the bar's one
+       line: the question, the options under it, the answers under those. */
+    .bar.stacked {
+        flex-wrap: wrap;
+        row-gap: 8px;
+    }
+
+    .bar.stacked .question {
+        flex: 1 1 100%;
+    }
+
+    .options {
+        flex: 1 1 100%;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 16px;
+    }
+
+    .options .field input[type='number'] {
+        width: 90px;
+    }
+
+    .again {
+        margin-top: 8px;
     }
 
     .scale input {
