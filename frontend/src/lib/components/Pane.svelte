@@ -375,6 +375,9 @@
                             <PortForwards contextId={active.contextId} />
                         {:else if active.kind === ACCESS_OVERVIEW}
                             <AccessOverview contextId={active.contextId} />
+                        {:else if isPluginOverview(active.kind) && workspace.pluginFor(active.kind)?.overview}
+                            <!-- A plugin that draws its own landing page. -->
+                            <PluginFrame contextId={active.contextId} kind={active.kind} />
                         {:else if isPluginOverview(active.kind)}
                             <PluginOverview contextId={active.contextId} kind={active.kind} />
                         {:else if workspace.pluginViewFor(active.kind)?.type === 'custom'}

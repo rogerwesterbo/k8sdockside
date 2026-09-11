@@ -288,8 +288,10 @@
         {/if}
 
         <!-- The plugin's own charts, after the counts it can answer from the
-             API server and before the list of views. -->
-        <MetricsPanel {contextId} attach="overview" title="Charts" />
+             API server and before the list of views. Asked for by this tab's
+             own kind: an overview is one plugin's page, and bare "overview"
+             drew every plugin's charts here. -->
+        <MetricsPanel {contextId} attach={kind} title="Charts" />
 
         {#if plugin.views.length > 0}
             <section>
@@ -314,8 +316,16 @@
                     <span class="selectable">{plugin.origin}</span>
                 {/if}
             </span>
+            {#if plugin.version}<span>· v{plugin.version.replace(/^v/, '')}</span>{/if}
             {#if plugin.author}<span>· {plugin.author}</span>{/if}
-            {#if plugin.docs}
+            <!-- What the plugin is about: its links, and its docs where the
+                 links do not already carry them. -->
+            {#each plugin.links ?? [] as link (link.url)}
+                <a href={link.url} target="_blank" rel="noreferrer noopener" title={link.url} onclick={onExternalClick(link.url)}
+                    >{link.label}</a
+                >
+            {/each}
+            {#if plugin.docs && !(plugin.links ?? []).some((l) => l.url === plugin.docs)}
                 <a
                     href={plugin.docs}
                     target="_blank"

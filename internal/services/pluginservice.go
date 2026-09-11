@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/rogerwesterbo/k8sdockside/internal/appconfig"
@@ -65,7 +66,7 @@ func (s *PluginService) catalogue() plugins.Catalogue {
 		return *cached
 	}
 
-	loaded := plugins.Load(s.store.PluginsDir(), s.store.PluginFolders(), s.store.DisabledPlugins())
+	loaded := plugins.LoadAt(DisplayVersion(), s.store.PluginsDir(), s.store.PluginFolders(), s.store.DisabledPlugins())
 	s.mu.Lock()
 	s.cached = &loaded
 	s.mu.Unlock()
@@ -324,6 +325,15 @@ func (s *PluginService) SetEnabled(id string, enabled bool) (plugins.Catalogue, 
 	return s.catalogue(), nil
 }
 
+// HideSuggestion stops the sidebar suggesting a known plugin, or lets it
+// suggest it again, and returns the settings as saved.
+func (s *PluginService) HideSuggestion(id string, hidden bool) (appconfig.Settings, error) {
+	if _, ok := plugins.FindKnown(id); !ok {
+		return s.store.Get(), fmt.Errorf("%q is not a plugin this app knows of", id)
+	}
+	return s.store.HidePluginSuggestion(id, hidden)
+}
+
 // Dir is the folder user plugins are read from by default.
 func (s *PluginService) Dir() string {
 	return s.store.PluginsDir()
@@ -353,12 +363,64 @@ func (s *PluginService) CreateExample() (string, error) {
 
 // InstallFromGit clones a plugin repository into the plugins folder and reads
 // it. The repository's plugin.json has to be at its root.
+//
+// A clone that worked but holds nothing that loads is still an error, with
+// what was wrong: "installed" followed by nothing appearing is the one outcome
+// that leaves the user with no idea where to look. The clone is kept either
+// way, so a plugin waiting on a newer app loads once the app is updated, and
+// one with a mistake in it can be fixed and updated in place.
 func (s *PluginService) InstallFromGit(url string) (plugins.Catalogue, error) {
-	if _, err := plugins.Clone(s.store.PluginsDir(), url); err != nil {
+	dest, err := plugins.Clone(s.store.PluginsDir(), url)
+	if err != nil {
 		return s.catalogue(), err
 	}
 	s.forget()
-	return s.catalogue(), nil
+	cat := s.catalogue()
+	return cat, installed(cat, dest)
+}
+
+// InstallKnown installs one of the plugins the app knows of, from the
+// repository the app has for it. The frontend names the plugin rather than the
+// address, so the known list is the only place that address comes from.
+func (s *PluginService) InstallKnown(id string) (plugins.Catalogue, error) {
+	known, ok := plugins.FindKnown(id)
+	if !ok {
+		return s.catalogue(), fmt.Errorf("%q is not a plugin this app knows of", id)
+	}
+	if _, ok := s.catalogue().Find(id); ok {
+		return s.catalogue(), fmt.Errorf("%s is already installed", known.Name)
+	}
+	return s.InstallFromGit(known.Repo)
+}
+
+// Known is the list of plugins the app knows of, each marked with whether it
+// is already installed here.
+func (s *PluginService) Known() []plugins.KnownOffer {
+	return s.catalogue().Offer()
+}
+
+// installed says what became of a freshly cloned folder: nil when a plugin
+// from it loaded, and otherwise why nothing did.
+func installed(cat plugins.Catalogue, dest string) error {
+	inside := func(path string) bool {
+		rel, err := filepath.Rel(dest, path)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	for _, p := range cat.Plugins {
+		if !p.Builtin() && inside(p.Origin) {
+			return nil
+		}
+	}
+	var reasons []string
+	for _, problem := range cat.Problems {
+		if inside(problem.Path) {
+			reasons = append(reasons, problem.Message)
+		}
+	}
+	if len(reasons) == 0 {
+		return fmt.Errorf("cloned into %s, but there is no plugin.json at its root", dest)
+	}
+	return fmt.Errorf("cloned into %s, but it would not load:\n%s", dest, strings.Join(reasons, "\n"))
 }
 
 // UpdateFromGit pulls the repository a plugin was cloned from and reads it

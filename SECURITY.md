@@ -75,7 +75,14 @@ and no account.
   gets a confirmation from the app first.
 - **Installing a plugin from a repository runs `git clone`** into the plugins
   folder, for `https://`, `ssh://` and `git@host:path` addresses only, with
-  prompts disabled.
+  prompts disabled. The plugins offered under *Settings → Plugins → Available*
+  are a list compiled into the app, each with a fixed `https://` repository;
+  the frontend names the plugin, never the address, and nothing is fetched to
+  find out what exists. Suggestions in the sidebar only open Settings.
+- **Plugin files are read strictly.** A member the manifest has no field for,
+  an icon the app does not draw, a link that is not `http(s)`, or a page that is
+  not in the plugin's own folder refuses the plugin, with the reason, rather
+  than being ignored.
 
 The app is only as privileged as the kubeconfig you point it at. Treat a
 context's RBAC as the boundary: **Shell** on a node, for example, creates the

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Argo CD applications</title>
+        <link rel="stylesheet" href="argo.css" />
+        <!-- The bridge to the app. Served by k8sdockside itself, always at this path. -->
+        <script src="/plugin-ui/_sdk/k8sdockside.js"></script>
+    </head>
+    <body class="page page-board">
+        <header class="top">
+            <div class="brand">
+                <span class="logo" id="logo"></span>
+                <div>
+                    <h1>Application board</h1>
+                    <p id="where" class="faint">Connecting…</p>
+                </div>
+            </div>
+            <label class="search">
+                <span id="search-icon"></span>
+                <input id="query" type="search" placeholder="Find an application, repository or namespace" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="segmented" id="group" role="group" aria-label="Group by"></div>
+        </header>
+
+        <p id="error" class="banner error" hidden></p>
+        <section id="empty" class="empty" hidden></section>
+
+        <div class="board" id="board" hidden>
+            <aside id="rail" class="rail" aria-label="Filters"></aside>
+            <main id="groups" class="groups"></main>
+        </div>
+
+        <!-- One application in full: slides in over the right of the board. -->
+        <aside id="drawer" class="drawer" hidden aria-live="polite"></aside>
+
+        <!-- Classic scripts, not type="module": a sandboxed frame has an opaque
+             origin, so a module would be a cross-origin load. -->
+        <script src="model.js"></script>
+        <script src="kit.js"></script>
+        <script src="board.js"></script>
+    </body>
+</html>

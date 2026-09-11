@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"regexp"
@@ -172,20 +173,25 @@ func writable(kind string) bool {
 // subresource is called.
 var segment = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
 
+// validateActions checks every action, gathering what is wrong with each
+// rather than stopping at the first -- see validate.
 func validateActions(p *Plugin) error {
+	var errs []error
 	seen := map[string]bool{}
 	for i, action := range p.Actions {
 		action, err := validateAction(p.ID, action)
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		if seen[action.ID] {
-			return fmt.Errorf("plugin %q has two actions with id %q", p.ID, action.ID)
+			errs = append(errs, fmt.Errorf("plugin %q has two actions with id %q", p.ID, action.ID))
+			continue
 		}
 		seen[action.ID] = true
 		p.Actions[i] = action
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func validateAction(pluginID string, a Action) (Action, error) {
@@ -198,6 +204,9 @@ func validateAction(pluginID string, a Action) (Action, error) {
 	}
 	if a.Label == "" {
 		a.Label = a.ID
+	}
+	if err := checkIcon(pluginID, fmt.Sprintf("action %q", a.ID), a.Icon); err != nil {
+		return a, err
 	}
 	if a.Icon == "" {
 		a.Icon = "puzzle"
@@ -288,7 +297,10 @@ func validateRequest(kind string, r Request) (Request, error) {
 	return r, nil
 }
 
+// validateSections checks every section, gathering what is wrong with each
+// rather than stopping at the first -- see validate.
 func validateSections(p *Plugin) error {
+	var errs []error
 	seen := map[string]bool{}
 	for i, s := range p.Sections {
 		s.ID = strings.TrimSpace(s.ID)
@@ -297,30 +309,34 @@ func validateSections(p *Plugin) error {
 		s.Entry = strings.TrimSpace(s.Entry)
 
 		if !addons.ValidID(s.ID) {
-			return fmt.Errorf("plugin %q has a section with id %q, which must be lowercase letters, digits and dashes", p.ID, s.ID)
+			errs = append(errs, fmt.Errorf("plugin %q has a section with id %q, which must be lowercase letters, digits and dashes", p.ID, s.ID))
+			continue
 		}
 		if seen[s.ID] {
-			return fmt.Errorf("plugin %q has two sections with id %q", p.ID, s.ID)
+			errs = append(errs, fmt.Errorf("plugin %q has two sections with id %q", p.ID, s.ID))
+			continue
 		}
 		seen[s.ID] = true
 		if s.Label == "" {
 			s.Label = s.ID
 		}
 		if !kube.IsKnownKind(s.Kind) {
-			return fmt.Errorf("plugin %q draws section %q on %q, which is not a kind this app can open", p.ID, s.ID, s.Kind)
+			errs = append(errs, fmt.Errorf("plugin %q draws section %q on %q, which is not a kind this app can open", p.ID, s.ID, s.Kind))
+			continue
 		}
 		if s.Entry == "" {
 			s.Entry = DefaultEntry
 		}
 		if !fs.ValidPath(s.Entry) || s.Entry == "." {
-			return fmt.Errorf("plugin %q has a section %q opening %q, which is not a file inside its ui folder", p.ID, s.ID, s.Entry)
+			errs = append(errs, fmt.Errorf("plugin %q has a section %q opening %q, which is not a file inside its ui folder", p.ID, s.ID, s.Entry))
+			continue
 		}
 		if s.Height <= 0 {
 			s.Height = DefaultSectionHeight
 		}
 		p.Sections[i] = s
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Action returns the plugin's action with the given id.

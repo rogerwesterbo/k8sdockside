@@ -280,3 +280,175 @@ test('a card opens the view that lists what it counts', async () => {
 
     expect(workspace.activeTab?.kind).toBe('plugin:argocd/applications');
 });
+
+// An overview is one plugin's page. Asked for as bare "overview", the chart
+// panel drew every installed plugin's overview charts on every overview --
+// Argo CD's application health on the MetalLB overview.
+test("the overview asks for its own plugin's charts, not every plugin's", async () => {
+    const { MetricsService } = await import('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services');
+    const Charts = vi.mocked(MetricsService.Charts);
+    Charts.mockClear();
+    workspace.metricsAttachments = ['plugin:argocd/overview', 'plugin:flux/overview'];
+
+    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
+    await expect.element(page.getByText('installed here')).toBeVisible();
+
+    await vi.waitFor(() => expect(Charts).toHaveBeenCalled());
+    for (const call of Charts.mock.calls) {
+        expect(call[1]).toBe('plugin:argocd/overview');
+    }
+    workspace.metricsAttachments = [];
+});
+
+// A plugin that draws its own landing page gets its page in the overview tab,
+// in the same sandboxed frame as its other views.
+test('a plugin with an overview of its own opens that page in its frame', async () => {
+    const PluginFrame = (await import('./PluginFrame.svelte')).default;
+    workspace.pluginCatalogue = {
+        plugins: [
+            {
+                ...structuredClone(ARGO),
+                id: 'acme',
+                name: 'Acme',
+                origin: '/plugins/acme/plugin.json',
+                ui: { readable: [], write: false },
+                overview: { entry: 'home.html' },
+            },
+        ],
+        dir: '',
+        folders: [],
+        problems: [],
+    };
+
+    render(PluginFrame, { contextId: PROD, kind: 'plugin:acme/overview' });
+
+    const frame = document.querySelector('iframe');
+    expect(frame).not.toBeNull();
+    expect(frame?.getAttribute('src')).toBe('/plugin-ui/acme/home.html?scheme=dark');
+    expect(frame?.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame?.getAttribute('title')).toBe('Acme: Acme');
+});
+
+// The links say what a plugin is about; the generated overview carries them
+// in its foot, and a docs link the links already hold is not repeated.
+test('the overview links to what the plugin is about', async () => {
+    workspace.pluginCatalogue = {
+        plugins: [
+            {
+                ...structuredClone(ARGO),
+                version: '2.1.0',
+                links: [
+                    { label: 'argoproj.github.io', url: 'https://argoproj.github.io/cd/' },
+                    { label: 'Docs', url: 'https://argo-cd.readthedocs.io' },
+                ],
+            },
+        ],
+        dir: '',
+        folders: [],
+        problems: [],
+    };
+    render(PluginOverview, { contextId: PROD, kind: 'plugin:argocd/overview' });
+
+    await expect.element(page.getByRole('link', { name: 'argoproj.github.io' })).toBeVisible();
+    await expect.element(page.getByText('· v2.1.0')).toBeVisible();
+    expect(page.getByRole('link', { name: 'Documentation' }).elements()).toHaveLength(0);
+});
+
+// Settings lists the plugins the app knows of with one button each, says
+// which clusters run them, and lists a plugin that would not load reason by
+// reason rather than as one run-on sentence.
+test('settings offers the known plugins and explains the ones that would not load', async () => {
+    const PluginsSection = (await import('./settings/PluginsSection.svelte')).default;
+    workspace.knownPlugins = [
+        {
+            id: 'cert-manager',
+            name: 'cert-manager',
+            tagline: 'TLS certificates',
+            icon: 'lock',
+            description: 'When every certificate expires.',
+            repo: 'https://github.com/rogerwesterbo/k8sdockside-certmanager.git',
+            detect: ['crd:certificates.cert-manager.io'],
+            links: [{ label: 'cert-manager.io', url: 'https://cert-manager.io' }],
+            official: true,
+            installed: false,
+        },
+        {
+            id: 'argocd',
+            name: 'Argo CD',
+            tagline: '',
+            icon: 'rocket',
+            description: '',
+            repo: 'https://github.com/example/argocd.git',
+            detect: [],
+            links: [],
+            official: true,
+            installed: true,
+        },
+    ];
+    workspace.pluginCatalogue = {
+        plugins: [structuredClone(ARGO)],
+        dir: '/plugins',
+        folders: [],
+        problems: [
+            {
+                path: '/plugins/acme/plugin.json',
+                message: 'plugin "acme": unknown field "lable" in views[0] (line 7, column 9) -- did you mean "label"?\nplugin "acme" requires "widgets", which is not a kind this app can open',
+            },
+        ],
+    };
+
+    render(PluginsSection);
+
+    // One offer: Argo CD is installed already, and is listed where it is.
+    await expect.element(page.getByTitle('git clone https://github.com/rogerwesterbo/k8sdockside-certmanager.git')).toBeVisible();
+    expect(page.getByTitle(/^git clone/).elements()).toHaveLength(1);
+    await expect.element(page.getByRole('link', { name: 'cert-manager.io' })).toBeVisible();
+    await expect.element(page.getByText('acme/plugin.json', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('did you mean "label"?', { exact: false })).toBeVisible();
+    await expect.element(page.getByText('requires "widgets"', { exact: false })).toBeVisible();
+    workspace.knownPlugins = [];
+});
+
+// WebKit lays a frame under a zoomed element out at the zoomed size and then
+// zooms it again, so the page overflowed and scrolled both ways. The frame is
+// taken out of the app's zoom and scaled back up instead; it has to cover
+// exactly the room its host has.
+test("a plugin's frame follows the app's zoom by scaling, not by zooming", async () => {
+    const PluginFrame = (await import('./PluginFrame.svelte')).default;
+    workspace.pluginCatalogue = {
+        plugins: [
+            {
+                ...structuredClone(ARGO),
+                id: 'acme',
+                name: 'Acme',
+                origin: '/plugins/acme/plugin.json',
+                ui: { readable: [], write: false },
+                overview: { entry: 'home.html' },
+            },
+        ],
+        dir: '',
+        folders: [],
+        problems: [],
+    };
+    workspace.settings.layout.zoom = 1.25;
+    try {
+        const shell = document.createElement('div');
+        shell.style.cssText = 'zoom: 1.25; width: 640px; height: 400px; display: flex;';
+        document.body.appendChild(shell);
+        render(PluginFrame, { target: shell, props: { contextId: PROD, kind: 'plugin:acme/overview' } });
+
+        const frame = document.querySelector('iframe') as HTMLIFrameElement;
+        const viewport = frame.parentElement as HTMLElement;
+        expect(viewport.style.zoom).toBe(String(1 / 1.25));
+        expect(frame.style.transform).toBe('scale(1.25)');
+
+        // The frame on screen is the host on screen, to the pixel.
+        const host = viewport.parentElement as HTMLElement;
+        const a = host.getBoundingClientRect();
+        const b = frame.getBoundingClientRect();
+        expect(Math.round(b.width)).toBe(Math.round(a.width));
+        expect(Math.round(b.height)).toBe(Math.round(a.height));
+    } finally {
+        workspace.settings.layout.zoom = 1;
+    }
+});

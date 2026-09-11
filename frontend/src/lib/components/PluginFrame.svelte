@@ -15,11 +15,14 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import {
+        MetricsService,
         PluginService,
         ResourceService,
     } from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services';
-    import { PLUGIN_OVERVIEW, pluginKindFor } from '../catalogue';
+    import { adoptPanel } from '../charts/adopt';
+    import { isPluginOverview, PLUGIN_OVERVIEW, pluginKindFor } from '../catalogue';
     import { openExternal } from '../links';
+    import { adoptPluginSummary } from '../plugins/adopt';
     import { detail, type DetailTarget } from '../state/detail.svelte';
     import { workspace } from '../state/workspace.svelte';
     import Icon from './Icon.svelte';
@@ -52,19 +55,49 @@
 
     let frame = $state<HTMLIFrameElement | null>(null);
 
-    /** What the page is: a tab's view, or a section. Null when neither is installed any more. */
+    /**
+     * What the page is: a tab's view, the plugin's own overview, or a section.
+     * Null when none of them is installed any more.
+     */
     let page = $derived.by((): { id: string; entry: string; label: string } | null => {
         if (sectionSpec) return { id: sectionSpec.id, entry: sectionSpec.entry, label: sectionSpec.label };
         if (view && view.type === 'custom') return { id: view.id, entry: view.entry || 'index.html', label: view.label };
+        if (!section && plugin?.overview && isPluginOverview(kind)) {
+            return { id: PLUGIN_OVERVIEW, entry: plugin.overview.entry, label: plugin.name };
+        }
         return null;
     });
+
+    /**
+     * Light or dark, as the page should start before the bridge has said a
+     * word. It rides in the address so the SDK can set the page's colour
+     * scheme before anything is drawn: WebKit keeps the scrollbars it drew
+     * first, and a page that turned dark a moment after loading kept white
+     * ones. Read once -- a later change of theme reaches the page through the
+     * bridge, and changing the address would reload it.
+     */
+    const scheme = document.documentElement.dataset.themeBase === 'light' ? 'light' : 'dark';
 
     /** The page's address. Each segment is encoded; the Go side decodes and re-checks it. */
     let src = $derived.by(() => {
         if (!plugin || !page) return '';
         const entry = page.entry.split('/').map(encodeURIComponent).join('/');
-        return `/plugin-ui/${encodeURIComponent(plugin.id)}/${entry}`;
+        return `/plugin-ui/${encodeURIComponent(plugin.id)}/${entry}?scheme=${scheme}`;
     });
+
+    /**
+     * The app's zoom, which the page follows without ever seeing it.
+     *
+     * The app zooms with CSS zoom on its root, and WebKit gets a frame under a
+     * zoomed element wrong: the page inside is laid out at the zoomed size and
+     * then drawn zoomed again, so at any zoom but 1 it overflows its frame and
+     * scrolls both ways whatever its size. So the frame is taken out of the
+     * zoom -- the box around it zooms by 1 / zoom -- and scaled back up with a
+     * transform. The page gets an ordinary viewport of exactly the room it is
+     * shown in, in the app's own CSS pixels, and no zoom at all, which also
+     * keeps its mouse positions and its element positions in the same units.
+     */
+    let zoom = $derived(workspace.zoom || 1);
 
     /**
      * A section's height: where the manifest says to start, then whatever the
@@ -176,6 +209,16 @@
                     readable: [...(p.ui?.readable ?? [])],
                     write: p.ui?.write ?? false,
                     actions: (p.actions ?? []).map((a) => ({ id: a.id, label: a.label, kind: a.kind })),
+                    // What the plugin says about itself, so a page that is its
+                    // own overview can link to what it is about the way the
+                    // generated one does.
+                    plugin: {
+                        id: p.id,
+                        name: p.name,
+                        version: p.version ?? '',
+                        docs: p.docs,
+                        links: (p.links ?? []).map((l) => ({ label: l.label, url: l.url })),
+                    },
                     theme: currentTheme(),
                 };
             case 'actions': {
@@ -234,6 +277,23 @@
             }
             case 'namespaces':
                 return (await ResourceService.Namespaces(contextId)) ?? [];
+            case 'summary':
+                // What the generated overview is made of -- which of the kinds
+                // it needs this cluster serves, and the manifest's card counts
+                // -- so a page of the plugin's own can still answer "is this
+                // even installed here?" first. The plugin's own, never another's.
+                return adoptPluginSummary(await PluginService.Summary(contextId, p.id));
+            case 'charts': {
+                // The plugin's own overview charts, drawn by the page however
+                // it likes -- the generated panel they would sit in is not on
+                // screen when the plugin has an overview of its own. Only its
+                // own overview surface: never another plugin's, never an object's.
+                const wanted = Number(params.minutes);
+                const minutes = Number.isFinite(wanted) ? Math.min(10080, Math.max(5, Math.round(wanted))) : 60;
+                return adoptPanel(
+                    await MetricsService.Charts(contextId, pluginKindFor(p.id, PLUGIN_OVERVIEW), '', '', minutes),
+                );
+            }
             case 'patch': {
                 const target = targetOf(params);
                 if (!p.ui?.write) throw new Error(`${p.name} does not declare "ui": { "write": true }`);
@@ -345,15 +405,20 @@
         <!-- allow-scripts and nothing else: no same-origin, no forms, no
              popups, no top-level navigation. The Go side repeats the sandbox in
              the page's own Content-Security-Policy. -->
-        {#key objectKey}
-            <iframe
-                bind:this={frame}
-                {src}
-                title="{plugin.name}: {page.label}"
-                sandbox="allow-scripts"
-                referrerpolicy="no-referrer"
-            ></iframe>
-        {/key}
+        <div class="viewport" style:zoom={zoom === 1 ? null : 1 / zoom}>
+            {#key objectKey}
+                <iframe
+                    bind:this={frame}
+                    {src}
+                    title="{plugin.name}: {page.label}"
+                    sandbox="allow-scripts"
+                    referrerpolicy="no-referrer"
+                    style:width={zoom === 1 ? null : `${100 / zoom}%`}
+                    style:height={zoom === 1 ? null : `${100 / zoom}%`}
+                    style:transform={zoom === 1 ? null : `scale(${zoom})`}
+                ></iframe>
+            {/key}
+        </div>
 
         {#if confirming}
             {@const c = confirming}
@@ -384,12 +449,23 @@
         height: 100%;
     }
 
+    /* Fills the host, and is where the app's zoom is undone; the frame in it
+       is scaled back up from its top-left corner. See `zoom` above. */
+    .viewport {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+    }
+
     iframe {
-        flex: 1 1 auto;
+        position: absolute;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
         border: 0;
         background: var(--bg);
+        transform-origin: 0 0;
     }
 
     /* In a detail view: as tall as the page says, framed like the panels

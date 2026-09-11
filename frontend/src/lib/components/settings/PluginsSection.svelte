@@ -9,6 +9,8 @@
   to learn a second set of motions to install a plugin.
 -->
 <script lang="ts">
+    import { onExternalClick } from '../../links';
+    import type { KnownPlugin, PluginLink } from '../../plugins/types';
     import { workspace } from '../../state/workspace.svelte';
     import Icon from '../Icon.svelte';
     import SettingsSection from './SettingsSection.svelte';
@@ -29,6 +31,29 @@
         } finally {
             cloning = false;
         }
+    }
+
+    /** The known plugin being installed, if one is. */
+    let installing = $state<string | null>(null);
+
+    async function installKnown(known: KnownPlugin): Promise<void> {
+        if (installing) return;
+        installing = known.id;
+        try {
+            await workspace.installKnownPlugin(known.id);
+        } finally {
+            installing = null;
+        }
+    }
+
+    function hiddenSuggestion(id: string): boolean {
+        return (workspace.settings.hiddenPluginSuggestions ?? []).includes(id);
+    }
+
+    /** "the folder it is in / the file", which is how a problem is found on disk. */
+    function shortPath(path: string): string {
+        const parts = path.split(/[\\/]/).filter(Boolean);
+        return parts.slice(-2).join('/');
     }
 
     async function update(id: string): Promise<void> {
@@ -52,6 +77,12 @@
 
     let builtin = $derived(workspace.plugins.filter((p) => p.origin === 'builtin'));
     let installed = $derived(workspace.plugins.filter((p) => p.origin !== 'builtin'));
+    /**
+     * The known plugins not installed here. One that is installed is already
+     * under Installed, with its links and its update button; listing it here
+     * as well would only say the same thing twice.
+     */
+    let known = $derived(workspace.knownPlugins.filter((k) => !workspace.hasPlugin(k.id)));
 
     function fileOf(origin: string): string {
         const at = Math.max(origin.lastIndexOf('/'), origin.lastIndexOf('\\'));
@@ -65,8 +96,21 @@
 
 <SettingsSection
     title="Plugins"
-    lede="A solution plugin gives something installed in your clusters — Argo CD, Flux, Prometheus — a place of its own in the sidebar, instead of leaving its custom resources scattered through the definitions tree under group names. Like a theme, it is a JSON file that names things the app already knows how to show. One from a folder may also bring views of its own — a page in a sandboxed frame that reads only the kinds its card lists, and asks before changing anything."
+    lede="A solution plugin gives something installed in your clusters — Argo CD, cert-manager, KubeVirt — a place of its own in the sidebar, instead of leaving its custom resources scattered through the definitions tree under group names. At heart it is a JSON file naming things the app already knows how to show. It may also bring pages of its own, drawn in a sandboxed frame that reads only the kinds its card lists and asks before changing anything."
 >
+    {#if known.length > 0}
+        <h3>Available</h3>
+        <p class="note">
+            Plugins kept in repositories of their own. Installing one clones it into the plugins folder; its card
+            then updates it from there. The sidebar suggests one for any cluster running what it is about.
+        </p>
+        <div class="gallery wide">
+            {#each known as offer (offer.id)}
+                {@render knownCard(offer)}
+            {/each}
+        </div>
+    {/if}
+
     <h3>Built in</h3>
     <div class="gallery">
         {#each builtin as plugin (plugin.id)}
@@ -121,7 +165,7 @@
     >
         <input
             type="text"
-            placeholder="https://github.com/you/k8sdockside-kubevirt.git"
+            placeholder="https://github.com/you/your-plugin.git"
             spellcheck="false"
             autocomplete="off"
             aria-label="Repository address"
@@ -155,13 +199,22 @@
 
     {#if workspace.pluginProblems.length > 0}
         <h3>Would not load</h3>
+        <p class="note">
+            Fix what is listed and press <strong>Reload</strong>. To check a plugin without the app, run
+            <code>go run github.com/rogerwesterbo/k8sdockside/cmd/plugincheck@main</code> in its folder.
+        </p>
         <ul class="problems">
             {#each workspace.pluginProblems as problem (problem.path + problem.message)}
                 <li>
                     <Icon name="alert" size={13} />
                     <div>
+                        <span class="file" title={problem.path}>{shortPath(problem.path)}</span>
                         <span class="path selectable">{problem.path}</span>
-                        <p>{problem.message}</p>
+                        <ul class="reasons selectable">
+                            {#each problem.message.split('\n').filter(Boolean) as reason, i (i)}
+                                <li>{reason}</li>
+                            {/each}
+                        </ul>
                     </div>
                 </li>
             {/each}
@@ -181,11 +234,17 @@
             path such as <code>status.health.status</code> or <code>status.conditions[Ready]</code>.
         </p>
         <pre class="example selectable">{`{
+    "$schema": "https://raw.githubusercontent.com/rogerwesterbo/k8sdockside/main/docs/plugin.schema.json",
     "id": "acme",
     "name": "Acme Mesh",
+    "version": "1.0.0",
+    "minAppVersion": "0.0.15",
     "tagline": "service mesh",
     "icon": "share",
-    "docs": "https://example.com",
+    "links": [
+        { "label": "acme.io", "url": "https://acme.io" },
+        { "label": "GitHub", "url": "https://github.com/acme/mesh" }
+    ],
     "requires": [
         { "kind": "crd:meshes.acme.io", "label": "Meshes" }
     ],
@@ -227,6 +286,7 @@
             </label>
         </header>
         <p class="counts">
+            {#if plugin.version}<span class="version">v{plugin.version.replace(/^v/, '')}</span> ·{/if}
             {plugin.views.length} view{plugin.views.length === 1 ? '' : 's'}
             · {required(plugin)} required kind{required(plugin) === 1 ? '' : 's'}
         </p>
@@ -243,6 +303,7 @@
                 {objectExtras(plugin)}
             </p>
         {/if}
+        {@render links(plugin.links ?? [], plugin.docs)}
         {#if plugin.origin !== 'builtin'}
             <p class="from" title={plugin.origin}>
                 {#if plugin.pack}{plugin.pack} · {/if}{fileOf(plugin.origin)}
@@ -257,6 +318,56 @@
             >
                 <Icon name="refresh" size={11} />
                 {updating === plugin.id ? 'Updating…' : 'Update from repository'}
+            </button>
+        {/if}
+    </article>
+{/snippet}
+
+{#snippet links(list: PluginLink[], docs = '')}
+    <!-- What the plugin is about, one click each; the docs link is shown only
+         when the links do not already carry it. -->
+    {@const all = docs && !list.some((l) => l.url === docs) ? [...list, { label: 'Docs', url: docs }] : list}
+    {#if all.length > 0}
+        <p class="links">
+            {#each all as link (link.url)}
+                <a href={link.url} target="_blank" rel="noreferrer noopener" title={link.url} onclick={onExternalClick(link.url)}
+                    >{link.label}</a
+                >
+            {/each}
+        </p>
+    {/if}
+{/snippet}
+
+{#snippet knownCard(offer: KnownPlugin)}
+    {@const running = workspace.clustersRunning(offer)}
+    <article class="plugin known">
+        <header>
+            <Icon name={offer.icon} size={18} />
+            <div class="naming">
+                <p class="name">{offer.name}</p>
+                <p class="tagline">{offer.tagline}</p>
+            </div>
+            <button
+                class="install"
+                disabled={installing !== null}
+                title="git clone {offer.repo}"
+                onclick={() => void installKnown(offer)}
+            >
+                <Icon name="download" size={12} />
+                {installing === offer.id ? 'Installing…' : 'Install'}
+            </button>
+        </header>
+        <p class="description">{offer.description}</p>
+        {#if running.length > 0}
+            <p class="running" title="Seen in the definitions of {running.join(', ')}">
+                <span class="dot"></span>
+                Running in {running.slice(0, 3).join(', ')}{running.length > 3 ? ` and ${running.length - 3} more` : ''}
+            </p>
+        {/if}
+        {@render links(offer.links)}
+        {#if hiddenSuggestion(offer.id)}
+            <button class="suggest" onclick={() => void workspace.hidePluginSuggestion(offer.id, false)}>
+                Not suggested in the sidebar · suggest it again
             </button>
         {/if}
     </article>
@@ -354,6 +465,110 @@
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
         gap: 10px;
+    }
+
+    .gallery.wide {
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    }
+
+    .known {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px 14px;
+    }
+
+    .known header :global(svg) {
+        color: var(--accent);
+    }
+
+    .description {
+        margin: 0;
+        font-size: 11.5px;
+        line-height: 1.55;
+        color: var(--text-dim);
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .install {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex: 0 0 auto;
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 11.5px;
+        background: var(--accent);
+        color: var(--accent-text);
+    }
+
+    .install:hover:not(:disabled) {
+        filter: brightness(1.08);
+    }
+
+    .install:disabled {
+        opacity: 0.55;
+    }
+
+    .running {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0;
+        font-size: 11px;
+        color: var(--text);
+    }
+
+    .running .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--ok);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+        flex: none;
+    }
+
+    .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px 12px;
+        margin: 7px 0 0;
+        font-size: 11px;
+    }
+
+    .known .links {
+        margin-top: auto;
+        padding-top: 2px;
+    }
+
+    .links a {
+        color: var(--accent);
+        text-decoration: none;
+    }
+
+    .links a:hover {
+        text-decoration: underline;
+    }
+
+    .version {
+        font-family: var(--mono);
+        font-size: 10.5px;
+    }
+
+    .suggest {
+        align-self: flex-start;
+        font-size: 11px;
+        color: var(--text-faint);
+    }
+
+    .suggest:hover {
+        color: var(--text);
+        text-decoration: underline;
     }
 
     .plugin {
@@ -564,10 +779,45 @@
         min-width: 0;
     }
 
-    .problems p {
-        margin: 2px 0 0;
+    .problems .file {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text);
+    }
+
+    .problems .path {
+        display: block;
+        font-size: 10px;
+        color: var(--text-faint);
+    }
+
+    .reasons {
+        list-style: none;
+        margin: 6px 0 2px;
+        padding: 0;
+    }
+
+    .reasons li {
+        display: block;
+        position: relative;
+        padding: 2px 0 2px 12px;
+        border: 0;
         font-size: 11.5px;
+        line-height: 1.5;
         color: var(--text-dim);
+        overflow-wrap: anywhere;
+    }
+
+    .reasons li::before {
+        content: '';
+        position: absolute;
+        left: 2px;
+        top: 9px;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--error);
     }
 
     .drop {

@@ -20,7 +20,7 @@
 
     interface Props {
         contextId: string;
-        /** A resource kind, `dashboard`, or `overview`. */
+        /** A resource kind, `dashboard`, or a plugin's overview tab kind, `plugin:<id>/overview`. */
         attach: string;
         /** The object being drawn for. Empty on the two cluster-wide surfaces. */
         namespace?: string;

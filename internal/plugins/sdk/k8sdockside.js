@@ -13,6 +13,9 @@
  * The page runs in a sandboxed frame with no network access of its own: fetch,
  * XHR and websockets are refused by its Content-Security-Policy. Bundle what
  * you need into your own files.
+ *
+ * k8sdockside.d.ts beside this file types all of it for a plugin written in
+ * TypeScript; change the two together.
  */
 (function () {
     'use strict';
@@ -39,6 +42,14 @@
             }
         });
     }
+
+    /* Light or dark from the first paint, before the app has answered: the
+       frame's address says which. WebKit keeps the scrollbars it drew first,
+       so a page that only turned dark once the theme arrived kept white ones. */
+    (function () {
+        var scheme = /[?&]scheme=(light|dark)\b/.exec(location.search);
+        if (scheme) document.documentElement.style.colorScheme = scheme[1];
+    })();
 
     /* The app's theme, as the same custom properties the app's own components
        use: var(--bg), var(--text), var(--accent), var(--ok) and the rest. */
@@ -107,10 +118,15 @@
         /**
          * Resolves once the app has answered, with what this page is looking at:
          * { pluginId, viewId, sectionId, object, contextId, contextName,
-         *   readable, write, actions, theme }.
+         *   readable, write, actions, plugin, theme }.
          *
          * `object` is { kind, namespace, name } for a section in an object's
          * detail view, and null for a view that is a tab of its own.
+         *
+         * `plugin` is what the manifest says about the plugin itself:
+         * { id, name, version, docs, links: [{ label, url }] } -- for a page
+         * that is the plugin's own overview to link to what it is about. Open
+         * a link with openUrl.
          */
         ready: function () {
             return ready;
@@ -126,9 +142,9 @@
 
         /**
          * Which of this plugin's actions are offered on an object right now --
-         * the section's own object unless one is named -- as
-         * [{ id, label, icon, tone, confirm, done }]. For drawing a button group
-         * with only the buttons that apply.
+         * the section's own object unless one is named as { kind, namespace,
+         * name } -- as [{ pluginId, pluginName, id, label, icon, tone, confirm,
+         * done }]. For drawing a button group with only the buttons that apply.
          */
         actions: function (ref) {
             return call('actions', ref || {});
@@ -190,6 +206,31 @@
         /** The namespaces of this cluster. */
         namespaces: function () {
             return call('namespaces');
+        },
+
+        /**
+         * What the generated overview is made of, for this plugin and this
+         * cluster: { installed, checked, requirements: [{ kind, label,
+         * optional, served, error }], cards: [{ label, kind, total, grouped,
+         * buckets: [{ value, count, tone }], error }], error }. For a page
+         * that is the plugin's own overview, so it can still say first whether
+         * the solution is in this cluster at all. `checked` false means the
+         * cluster could not be asked, which is not the same as "not installed".
+         */
+        summary: function () {
+            return call('summary');
+        },
+
+        /**
+         * This plugin's overview charts, from the cluster's Prometheus, for a
+         * page that is the plugin's own overview to draw its own way:
+         * { minutes? (default 60) } -> { attached, range, source: { available,
+         * error, describe }, charts: [{ id, label, unit, description, error,
+         * series: [{ name, points: [{ t (unix seconds), v }] }] }] }.
+         * `source.available` false means no Prometheus was found.
+         */
+        charts: function (query) {
+            return call('charts', query || {});
         },
 
         /**

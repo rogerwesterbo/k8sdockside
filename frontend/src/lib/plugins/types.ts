@@ -78,6 +78,12 @@ export interface OfferedAction {
     done: string;
 }
 
+/** One place a plugin points its reader at: the product's site, its source. */
+export interface PluginLink {
+    label: string;
+    url: string;
+}
+
 /** A kind the plugin needs the cluster to serve. */
 export interface PluginRequirement {
     kind: string;
@@ -92,6 +98,12 @@ export interface Plugin {
     icon: string;
     author: string;
     docs: string;
+    /** What the plugin is about, http(s) only. Optional so fixtures need not spell it out. */
+    links?: PluginLink[];
+    /** The plugin's own version, empty if it does not say. */
+    version?: string;
+    /** The oldest release of the app it works with, empty if it does not say. */
+    minAppVersion?: string;
     description: string;
     requires: PluginRequirement[];
     views: PluginViewSpec[];
@@ -101,6 +113,11 @@ export interface Plugin {
     actions?: PluginActionSpec[];
     /** Panels in objects' detail views. Optional so fixtures need not spell it out. */
     sections?: PluginSectionSpec[];
+    /**
+     * A landing page of the plugin's own, opened in place of the generated
+     * overview. Null (or absent) for the generated one.
+     */
+    overview?: { entry: string } | null;
     /** `builtin`, or the path of the file it was read from. */
     origin: string;
     /** The collection it arrived in, empty for one that came on its own. */
@@ -113,6 +130,27 @@ export interface Plugin {
      * sidebar rows, no charts, no overview. See `workspace.enabledPlugins`.
      */
     disabled: boolean;
+}
+
+/**
+ * A plugin kept in a repository of its own that the app knows of, offered in
+ * Settings with one button and suggested in the sidebar for a cluster running
+ * what it is about.
+ */
+export interface KnownPlugin {
+    id: string;
+    name: string;
+    tagline: string;
+    icon: string;
+    description: string;
+    /** What installing it clones. */
+    repo: string;
+    /** Kinds whose presence in a cluster gives the product away. Empty: never suggested. */
+    detect: string[];
+    links: PluginLink[];
+    official: boolean;
+    /** A plugin with this id is already in the catalogue. */
+    installed: boolean;
 }
 
 /** Everything installed on this machine, and what would not load. */

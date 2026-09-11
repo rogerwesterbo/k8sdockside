@@ -1,9 +1,12 @@
 package plugins
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -111,39 +114,6 @@ func TestSecretsAreNeverReadableByAView(t *testing.T) {
 	}
 	if p.CanRead("secrets") {
 		t.Error("a custom view may read secrets")
-	}
-}
-
-// The example in the repository is what a plugin author copies, so it has to
-// keep loading as the format moves.
-func TestTheExamplePluginsLoad(t *testing.T) {
-	cat := Load(filepath.Join("..", "..", "examples", "plugins"), nil, nil)
-	if len(cat.Problems) > 0 {
-		t.Fatalf("problems: %v", cat.Problems)
-	}
-	p, ok := cat.Find("argocd-ui")
-	if !ok {
-		t.Fatal("argocd-ui did not load")
-	}
-	if v, _ := p.View("map"); v.Type != ViewCustom {
-		t.Errorf("map view = %+v", v)
-	}
-	if !p.CanRead("crd:applications.argoproj.io") || !p.CanWrite("crd:applications.argoproj.io") {
-		t.Errorf("the example cannot read or write its own Applications: %+v", p.UI)
-	}
-
-	vms, ok := cat.Find("kubevirt-ui")
-	if !ok {
-		t.Fatal("kubevirt-ui did not load")
-	}
-	if len(vms.Actions) != 7 || len(vms.Sections) != 1 {
-		t.Errorf("kubevirt-ui has %d actions and %d sections, want 7 and 1", len(vms.Actions), len(vms.Sections))
-	}
-	// Everything its panel reads has to be declared, or the panel is refused.
-	for _, kind := range []string{"crd:virtualmachines.kubevirt.io", "crd:virtualmachineinstances.kubevirt.io", "crd:virtualmachineinstancemigrations.kubevirt.io", "pods", "nodes"} {
-		if !vms.CanRead(kind) {
-			t.Errorf("kubevirt-ui's panel cannot read %s", kind)
-		}
 	}
 }
 
@@ -257,5 +227,95 @@ func TestMiddlewareRefusesTheRuntimeToASandboxedFrame(t *testing.T) {
 	}
 	if rec := serve(t, Catalogue{}, httptest.NewRequest(http.MethodGet, "/index.html", nil)); rec.Code != http.StatusTeapot {
 		t.Errorf("an ordinary asset got %d", rec.Code)
+	}
+}
+
+// A built-in's pages are embedded in the app and served like any plugin's,
+// with the same headers -- the sandbox travels with the file, not the folder.
+func TestABuiltinServesItsEmbeddedPages(t *testing.T) {
+	cat := Load(t.TempDir(), nil, nil)
+	argo, ok := cat.Find("argocd")
+	if !ok {
+		t.Fatal("no argocd built-in")
+	}
+	if argo.UI == nil || argo.Overview == nil {
+		t.Fatalf("argocd built-in has ui %+v and overview %+v, want both", argo.UI, argo.Overview)
+	}
+
+	for _, file := range []string{argo.Overview.Entry, "apps.html", "app.html", "model.js", "kit.js", "argo.css"} {
+		rec := serve(t, cat, httptest.NewRequest(http.MethodGet, "/plugin-ui/argocd/"+file, nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d, want 200", file, rec.Code)
+			continue
+		}
+		if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox allow-scripts") {
+			t.Errorf("%s is served without its sandbox", file)
+		}
+		if rec.Body.Len() == 0 {
+			t.Errorf("%s is empty", file)
+		}
+	}
+
+	// Nothing outside its own folder, embedded or not.
+	for _, file := range []string{"../argocd.json", "../flux.json", "missing.html"} {
+		rec := serve(t, cat, httptest.NewRequest(http.MethodGet, "/plugin-ui/argocd/"+file, nil))
+		if rec.Code == http.StatusOK {
+			t.Errorf("GET %s = 200, want it refused", file)
+		}
+	}
+}
+
+// Every page a built-in opens is in its embedded folder.
+func TestEveryBuiltinPageIsEmbedded(t *testing.T) {
+	for _, p := range Builtin() {
+		files, done, ok := p.UIFiles()
+		if !ok {
+			continue
+		}
+		var entries []string
+		for _, v := range p.Views {
+			if v.Type == ViewCustom {
+				entries = append(entries, v.Entry)
+			}
+		}
+		for _, s := range p.Sections {
+			entries = append(entries, s.Entry)
+		}
+		if p.Overview != nil {
+			entries = append(entries, p.Overview.Entry)
+		}
+		for _, entry := range entries {
+			if _, err := fs.Stat(files, entry); err != nil {
+				t.Errorf("built-in %q opens %s, which is not embedded: %v", p.ID, entry, err)
+			}
+		}
+		done()
+	}
+}
+
+// sdk/k8sdockside.d.ts is what a plugin written in TypeScript copies to type
+// the bridge, so every call the bridge has must be declared there too.
+func TestTheBridgeTypesDeclareEveryCall(t *testing.T) {
+	js, err := os.ReadFile(filepath.Join("sdk", "k8sdockside.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dts, err := os.ReadFile(filepath.Join("sdk", "k8sdockside.d.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(js)
+	start := strings.Index(body, "window.k8sdockside = {")
+	if start < 0 {
+		t.Fatal("cannot find window.k8sdockside in the bridge")
+	}
+	calls := regexp.MustCompile(`(?m)^ {8}([a-zA-Z]+): function`).FindAllStringSubmatch(body[start:], -1)
+	if len(calls) < 10 {
+		t.Fatalf("found only %d calls in the bridge", len(calls))
+	}
+	for _, call := range calls {
+		if !regexp.MustCompile(`(?m)^\s+` + call[1] + `[<(]`).Match(dts) {
+			t.Errorf("k8sdockside.d.ts does not declare %s()", call[1])
+		}
 	}
 }

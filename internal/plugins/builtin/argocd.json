@@ -4,7 +4,21 @@
     "tagline": "GitOps continuous delivery",
     "icon": "rocket",
     "docs": "https://argo-cd.readthedocs.io",
-    "description": "Argo CD keeps a cluster matching what is in Git. An Application is one thing it is keeping in sync, and carries two answers worth reading together: whether the cluster matches Git (sync), and whether what is deployed is actually working (health).",
+    "links": [
+        {
+            "label": "argoproj.github.io",
+            "url": "https://argoproj.github.io/cd/"
+        },
+        {
+            "label": "Documentation",
+            "url": "https://argo-cd.readthedocs.io"
+        },
+        {
+            "label": "GitHub",
+            "url": "https://github.com/argoproj/argo-cd"
+        }
+    ],
+    "description": "Argo CD keeps a cluster matching what is in Git. An Application is one thing it is keeping in sync, and carries two answers worth reading together: whether the cluster matches Git (sync), and whether what is deployed is actually working (health). The overview leads with the applications that need you and the button that fixes each; the application board shows every application at once, and one of them in full — what it deploys, where from, and what its last sync did.",
     "requires": [
         {
             "kind": "crd:applications.argoproj.io",
@@ -20,7 +34,37 @@
             "optional": true
         }
     ],
+    "ui": {
+        "kinds": [
+            "pods",
+            "events",
+            "deployments",
+            "statefulsets",
+            "daemonsets",
+            "replicasets",
+            "services",
+            "ingresses",
+            "configmaps",
+            "jobs",
+            "cronjobs",
+            "persistentvolumeclaims",
+            "horizontalpodautoscalers",
+            "networkpolicies",
+            "serviceaccounts"
+        ],
+        "write": true
+    },
+    "overview": {
+        "entry": "overview.html"
+    },
     "views": [
+        {
+            "id": "board",
+            "label": "Application board",
+            "icon": "dashboard",
+            "type": "custom",
+            "entry": "apps.html"
+        },
         {
             "id": "applications",
             "label": "Applications",
@@ -98,6 +142,58 @@
             "legend": "sync_status",
             "description": "From Argo CD's own metrics service.",
             "query": "sum by (sync_status) (argocd_app_info)"
+        }
+    ],
+    "actions": [
+        {
+            "id": "sync",
+            "label": "Sync",
+            "icon": "refresh",
+            "kind": "crd:applications.argoproj.io",
+            "confirm": "Sync {name}? Argo CD applies what Git describes to the cluster now.",
+            "done": "Sync requested for {name}",
+            "when": [{ "field": "status.operationState.phase", "notIn": ["Running", "Terminating"] }],
+            "request": {
+                "type": "patch",
+                "patch": {
+                    "operation": {
+                        "initiatedBy": { "username": "k8sdockside" },
+                        "sync": { "syncStrategy": { "hook": {} } }
+                    }
+                }
+            }
+        },
+        {
+            "id": "refresh",
+            "label": "Refresh",
+            "icon": "repeat",
+            "kind": "crd:applications.argoproj.io",
+            "done": "Refresh requested for {name}",
+            "request": {
+                "type": "patch",
+                "patch": { "metadata": { "annotations": { "argocd.argoproj.io/refresh": "normal" } } }
+            }
+        },
+        {
+            "id": "hard-refresh",
+            "label": "Hard refresh",
+            "icon": "repeat",
+            "kind": "crd:applications.argoproj.io",
+            "confirm": "Hard refresh {name}? Argo CD drops its cached manifests and renders them again from Git.",
+            "done": "Hard refresh requested for {name}",
+            "request": {
+                "type": "patch",
+                "patch": { "metadata": { "annotations": { "argocd.argoproj.io/refresh": "hard" } } }
+            }
+        }
+    ],
+    "sections": [
+        {
+            "id": "application",
+            "label": "Argo CD",
+            "kind": "crd:applications.argoproj.io",
+            "entry": "app.html",
+            "height": 260
         }
     ]
 }

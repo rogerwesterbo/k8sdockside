@@ -83,10 +83,12 @@ import {
 import { clusters } from './health.svelte';
 import { notices } from './notices.svelte';
 import { detail, type DetailTarget } from './detail.svelte';
+import { rememberSection } from '../components/settings/section.svelte';
 import { defaultColorFor } from '../colors';
-import { adoptPluginCatalogue } from '../plugins/adopt';
+import { adoptKnownPlugin, adoptPluginCatalogue } from '../plugins/adopt';
 import {
     emptyPluginCatalogue,
+    type KnownPlugin,
     type Plugin,
     type PluginCatalogue,
     type PluginSectionSpec,
@@ -262,6 +264,7 @@ function defaultSettings(): Settings {
         excludedContexts: [],
         themeFolders: [],
         pluginFolders: [],
+        hiddenPluginSuggestions: [],
         contexts: {},
         panes: defaultPaneSettings(),
         preferences: {
@@ -374,6 +377,15 @@ function message(err: unknown): string {
 }
 
 /**
+ * The first line of a message, for the status bar, which has room for one.
+ * The whole of a plugin's refusal is in Settings, where there is room.
+ */
+function firstLine(text: string): string {
+    const at = text.indexOf('\n');
+    return at < 0 ? text : `${text.slice(0, at)} (Settings → Plugins has the rest)`;
+}
+
+/**
  * debounce delays a call until the caller stops firing. Used so that dragging a
  * splitter or typing in the rename field does not write the settings file on
  * every frame or keystroke.
@@ -474,6 +486,13 @@ class Workspace {
      * by pluginInstalledIn below and, authoritatively, by the plugin's overview.
      */
     pluginCatalogue = $state<PluginCatalogue>(emptyPluginCatalogue());
+    /**
+     * The plugins kept in repositories of their own that the app knows of --
+     * see PluginService.Known. Read once: the list is compiled into the app.
+     */
+    knownPlugins = $state<KnownPlugin[]>([]);
+    /** Whether the plugins that would not load have been mentioned yet this session. */
+    private toldPluginProblems = false;
     /**
      * Which plugins are unfolded in the sidebar, as `contextId\0pluginId`.
      * Not persisted, for the same reason expandedApiGroups is not: it is where
@@ -2350,6 +2369,111 @@ class Workspace {
             return;
         }
         this.registerViews();
+        this.tellPluginProblems();
+        if (this.knownPlugins.length === 0) void this.loadKnownPlugins();
+    }
+
+    /**
+     * Says once per session, in the status bar, that some plugin would not
+     * load. Settings has the reasons, but nobody opens Settings to find out
+     * why a plugin they installed is not in the sidebar unless something tells
+     * them to look.
+     */
+    private tellPluginProblems(): void {
+        const count = this.pluginProblems.length;
+        if (count === 0 || this.toldPluginProblems) return;
+        this.toldPluginProblems = true;
+        notices.fail(
+            count === 1
+                ? 'A plugin would not load. Settings → Plugins says why.'
+                : `${count} plugin problems. Settings → Plugins says what is wrong.`,
+        );
+    }
+
+    /** Reads the list of plugins the app knows of. */
+    async loadKnownPlugins(): Promise<void> {
+        try {
+            this.knownPlugins = ((await PluginService.Known()) ?? []).map(adoptKnownPlugin);
+        } catch (err) {
+            notices.fail(`Could not read the list of known plugins: ${message(err)}`);
+        }
+    }
+
+    /** Whether a plugin with this id is installed here, switched on or off. */
+    hasPlugin(id: string): boolean {
+        return this.plugins.some((p) => p.id === id);
+    }
+
+    /**
+     * Known plugins worth suggesting for one cluster: not installed, not
+     * hidden, and with a kind that gives their product away served there.
+     *
+     * Answered from the definitions the sidebar has already read, as
+     * pluginInstalledIn is, so it costs nothing and says nothing until they
+     * have been read.
+     */
+    pluginSuggestionsFor(contextId: string): KnownPlugin[] {
+        const loaded = this.customKinds[contextId];
+        if (!loaded || loaded.status !== 'ready') return [];
+        const served = new Set(loaded.groups.flatMap((group) => group.kinds.map((kind) => kind.kind)));
+        const hidden = this.settings.hiddenPluginSuggestions ?? [];
+        return this.knownPlugins.filter(
+            (known) =>
+                !this.hasPlugin(known.id) &&
+                !hidden.includes(known.id) &&
+                known.detect.some((kind) => served.has(kind)),
+        );
+    }
+
+    /**
+     * The clusters, by the name the sidebar shows, whose definitions -- where
+     * they have been read -- show a known plugin's product running.
+     */
+    clustersRunning(known: KnownPlugin): string[] {
+        if (known.detect.length === 0) return [];
+        return this.orderContexts(this.contexts)
+            .filter((context) => {
+                const loaded = this.customKinds[context.id];
+                if (!loaded || loaded.status !== 'ready') return false;
+                return loaded.groups.some((group) => group.kinds.some((kind) => known.detect.includes(kind.kind)));
+            })
+            .map((context) => this.displayName(context));
+    }
+
+    /**
+     * Installs one of the known plugins from the repository the app has for
+     * it. Returns whether it worked.
+     */
+    async installKnownPlugin(id: string): Promise<boolean> {
+        const name = this.knownPlugins.find((k) => k.id === id)?.name ?? id;
+        try {
+            this.pluginCatalogue = adoptPluginCatalogue(await PluginService.InstallKnown(id));
+            this.metricsAttachments = (await MetricsService.Attachments()) ?? [];
+            this.registerViews();
+            notices.inform(`Installed ${name}`);
+            return true;
+        } catch (err) {
+            // A clone that would not load still left its folder behind, and
+            // Settings should list it with the reason.
+            await this.loadPlugins();
+            notices.fail(`Could not install ${name}: ${firstLine(message(err))}`);
+            return false;
+        }
+    }
+
+    /** Stops the sidebar suggesting a known plugin, or lets it again. */
+    async hidePluginSuggestion(id: string, hidden = true): Promise<void> {
+        try {
+            this.settings = adoptSettings(await PluginService.HideSuggestion(id, hidden));
+        } catch (err) {
+            notices.fail(`Could not save that: ${message(err)}`);
+        }
+    }
+
+    /** Opens Settings on its Plugins section. */
+    openPluginSettings(): void {
+        rememberSection('plugins');
+        this.openSettings();
     }
 
     /** Publishes every installed view's label and icon to the nav catalogue. */
@@ -2448,7 +2572,10 @@ class Workspace {
             notices.inform(`Installed ${url}`);
             return true;
         } catch (err) {
-            notices.fail(`Could not install the plugin: ${message(err)}`);
+            // A clone that would not load still left its folder behind, and
+            // Settings should list it with the reason.
+            await this.loadPlugins();
+            notices.fail(`Could not install the plugin: ${firstLine(message(err))}`);
             return false;
         }
     }

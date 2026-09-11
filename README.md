@@ -173,12 +173,20 @@ See [docs/development.md](docs/development.md).
 - Built-in **Plugins** for Argo CD, Flux and Prometheus — each unfolds into
   its own views instead of scattering custom resources through the definitions
   tree, with an overview of whether the cluster actually has it
+- More a button away in *Settings → Plugins*:
+  [cert-manager](https://github.com/rogerwesterbo/k8sdockside-certmanager),
+  [MetalLB](https://github.com/rogerwesterbo/k8sdockside-metallb),
+  [KubeVirt](https://github.com/rogerwesterbo/k8sdockside-kubevirt) and an
+  [image inventory](https://github.com/rogerwesterbo/k8sdockside-example-plugin-typescript),
+  each kept in its own repository, and suggested in the sidebar for a cluster
+  running what it is about
 - A plugin is a JSON file naming kinds the app already knows how to show, so
   supporting your own operator is a file, not a fork —
   [docs/plugins.md](docs/plugins.md). One kept in its own folder or repository
   can also bring views of its own: HTML drawn in a sandboxed frame, reading the
-  cluster through a narrow bridge — see
-  [examples/plugins](examples/plugins/README.md)
+  cluster through a narrow bridge. The
+  [TypeScript example](https://github.com/rogerwesterbo/k8sdockside-example-plugin-typescript)
+  is a starting point, and `plugincheck` runs the app's load checks on a folder
 - Graphs where the cluster can answer for them: Prometheus is found
   automatically and reached *through the API server*, no port-forward and no
   second credential. The queries live in the plugin file.

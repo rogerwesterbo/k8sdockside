@@ -3,9 +3,9 @@ package plugins
 import (
 	_ "embed"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
-	"os"
 	"path"
 	"strings"
 )
@@ -103,29 +103,25 @@ func serveUI(w http.ResponseWriter, r *http.Request, catalogue func() Catalogue)
 		http.NotFound(w, r)
 		return
 	}
-	root, ok := plugin.UIRoot()
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
 	if file == "" {
 		file = DefaultEntry
 	}
-	// fs.ValidPath refuses "..", absolute paths and empty elements; os.Root
-	// then refuses anything that escapes the folder through a symlink.
+	// fs.ValidPath refuses "..", absolute paths and empty elements; the
+	// os.Root behind a folder on disk then refuses anything that escapes it
+	// through a symlink.
 	if !fs.ValidPath(file) {
 		http.NotFound(w, r)
 		return
 	}
 
-	dir, err := os.OpenRoot(root)
-	if err != nil {
+	files, done, ok := plugin.UIFiles()
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	defer func() { _ = dir.Close() }()
+	defer done()
 
-	f, err := dir.Open(file)
+	f, err := files.Open(file)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			http.NotFound(w, r)
@@ -142,8 +138,16 @@ func serveUI(w http.ResponseWriter, r *http.Request, catalogue func() Catalogue)
 		return
 	}
 
+	// Both kinds of folder hand back seekable files -- *os.File from disk, an
+	// embedded file from the binary -- which is what ranges and HEAD need.
+	content, ok := f.(io.ReadSeeker)
+	if !ok {
+		http.Error(w, "cannot read that file", http.StatusForbidden)
+		return
+	}
+
 	setUIHeaders(w, host, plugin.ID)
-	http.ServeContent(w, r, path.Base(file), info.ModTime(), f)
+	http.ServeContent(w, r, path.Base(file), info.ModTime(), content)
 }
 
 // webviewHost is the host the page was loaded from -- "localhost" under the

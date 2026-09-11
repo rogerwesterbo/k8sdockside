@@ -46,6 +46,10 @@ vi.mock('../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/service
         Reload: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
         Summary: vi.fn().mockResolvedValue({ pluginId: '', installed: false, checked: true, requirements: [], cards: [], error: '' }),
         SetEnabled: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        Known: vi.fn().mockResolvedValue([]),
+        InstallKnown: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        InstallFromGit: vi.fn().mockResolvedValue({ plugins: [], dir: '', folders: [], problems: [] }),
+        HideSuggestion: vi.fn().mockResolvedValue({}),
     },
     ThemeService: {
         List: vi.fn().mockResolvedValue({ themes: [], dir: '', folders: [], problems: [] }),
@@ -104,6 +108,7 @@ const { labelFor, iconFor } = await import('../catalogue');
 const { changes } = await import('./changes.svelte');
 const { views } = await import('./views');
 const { SETTINGS, HELP, KUBERNETES } = await import('../catalogue');
+const { notices } = await import('./notices.svelte');
 const { ResourceService, KubeconfigService, SettingsService, ThemeService, PluginService, MetricsService } = await import(
     '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/services',
 );
@@ -2068,6 +2073,103 @@ describe('solution plugins', () => {
         workspace.openPluginOverview(PROD, 'argocd');
 
         expect(workspace.activeTab?.kind).toBe('plugin:argocd/overview');
+    });
+
+    function known(id: string, detect: string[]) {
+        return {
+            id,
+            name: id,
+            tagline: '',
+            icon: 'box',
+            description: '',
+            repo: `https://github.com/example/${id}.git`,
+            detect,
+            links: [],
+            official: true,
+            installed: false,
+        };
+    }
+
+    // A suggestion is an offer for what a cluster runs, so it needs the
+    // cluster to have been looked at, the product to be there, and no plugin
+    // for it on this machine already.
+    test('a known plugin is suggested only for a cluster running what it is about', () => {
+        workspace.knownPlugins = [
+            known('cert-manager', ['crd:certificates.cert-manager.io']),
+            known('metallb', ['crd:ipaddresspools.metallb.io']),
+            known('anywhere', []),
+        ];
+        expect(workspace.pluginSuggestionsFor(PROD)).toEqual([]);
+
+        clusterServes(PROD, ['crd:certificates.cert-manager.io', 'crd:ipaddresspools.metallb.io']);
+        expect(workspace.pluginSuggestionsFor(PROD).map((k) => k.id)).toEqual(['cert-manager', 'metallb']);
+
+        workspace.pluginCatalogue = { plugins: [plugin('metallb')], dir: '', folders: [], problems: [] };
+        expect(workspace.pluginSuggestionsFor(PROD).map((k) => k.id)).toEqual(['cert-manager']);
+
+        workspace.settings = { ...workspace.settings, hiddenPluginSuggestions: ['cert-manager'] };
+        expect(workspace.pluginSuggestionsFor(PROD)).toEqual([]);
+        workspace.settings = { ...workspace.settings, hiddenPluginSuggestions: [] };
+    });
+
+    test('the settings list says which clusters run a known plugin', () => {
+        workspace.knownPlugins = [known('cert-manager', ['crd:certificates.cert-manager.io'])];
+        clusterServes(PROD, ['crd:certificates.cert-manager.io']);
+        clusterServes(STAGING, ['crd:applications.argoproj.io']);
+        workspace.files = [
+            { path: '/home/u/.kube/prod', contexts: [{ id: PROD, name: 'admin@prod' }] },
+            { path: '/home/u/.kube/staging', contexts: [{ id: STAGING, name: 'admin@staging' }] },
+        ] as unknown as typeof workspace.files;
+
+        expect(workspace.clustersRunning(workspace.knownPlugins[0])).toEqual(['admin@prod']);
+        workspace.files = [];
+    });
+
+    test('installing a known plugin names it, and reads what it loaded', async () => {
+        workspace.knownPlugins = [{ ...known('metallb', []), name: 'MetalLB' }];
+        vi.mocked(PluginService.InstallKnown).mockResolvedValueOnce({
+            plugins: [plugin('metallb')],
+            dir: '',
+            folders: [],
+            problems: [],
+        });
+
+        expect(await workspace.installKnownPlugin('metallb')).toBe(true);
+        expect(PluginService.InstallKnown).toHaveBeenCalledWith('metallb');
+        expect(workspace.hasPlugin('metallb')).toBe(true);
+        expect(notices.current?.text).toBe('Installed MetalLB');
+    });
+
+    // The clone is kept when what it holds will not load, so the reasons have
+    // to reach the settings list, and the status bar has room for one line.
+    test('a clone that would not load is re-read, and reported on one line', async () => {
+        workspace.knownPlugins = [{ ...known('metallb', []), name: 'MetalLB' }];
+        vi.mocked(PluginService.InstallKnown).mockRejectedValueOnce(
+            new Error('cloned into /p/metallb, but it would not load:\nplugin "metallb" needs K8s Dockside 0.0.15 or newer'),
+        );
+        vi.mocked(PluginService.List).mockResolvedValueOnce({
+            plugins: [],
+            dir: '',
+            folders: [],
+            problems: [{ path: '/p/metallb/plugin.json', message: 'plugin "metallb" needs K8s Dockside 0.0.15 or newer' }],
+        });
+
+        expect(await workspace.installKnownPlugin('metallb')).toBe(false);
+        expect(workspace.pluginProblems).toHaveLength(1);
+        expect(notices.current?.text).toBe(
+            'Could not install MetalLB: cloned into /p/metallb, but it would not load: (Settings → Plugins has the rest)',
+        );
+    });
+
+    test('hiding a suggestion is saved', async () => {
+        vi.mocked(PluginService.HideSuggestion).mockResolvedValueOnce({
+            ...(await SettingsService.Get()),
+            hiddenPluginSuggestions: ['metallb'],
+        });
+        await workspace.hidePluginSuggestion('metallb');
+
+        expect(PluginService.HideSuggestion).toHaveBeenCalledWith('metallb', true);
+        expect(workspace.settings.hiddenPluginSuggestions).toEqual(['metallb']);
     });
 });
 

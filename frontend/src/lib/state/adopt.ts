@@ -199,6 +199,11 @@ export interface Settings {
     themeFolders: string[];
     /** Extra folders solution plugins are read from, on top of the default one. */
     pluginFolders: string[];
+    /**
+     * Known plugins the sidebar has been told to stop suggesting. Optional so
+     * fixtures need not spell it out.
+     */
+    hiddenPluginSuggestions?: string[];
     contexts: Record<string, ContextPrefs>;
     /**
      * Where every open view sits: which pane holds it, in what order, whether
@@ -289,6 +294,7 @@ export function adoptSettings(settings: appconfig.Settings): Settings {
         excludedContexts: [...(settings.excludedContexts ?? [])],
         themeFolders: [...(settings.themeFolders ?? [])],
         pluginFolders: [...(settings.pluginFolders ?? [])],
+        hiddenPluginSuggestions: [...(settings.hiddenPluginSuggestions ?? [])],
         contexts: Object.fromEntries(
             Object.entries(settings.contexts ?? {}).map(([id, prefs]) => [
                 id,

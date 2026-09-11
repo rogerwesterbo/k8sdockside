@@ -5,17 +5,27 @@ Prometheus — a place of its own in the sidebar, instead of leaving its custom
 resources scattered through the Custom Resource Definitions tree under group
 names like `kustomize.toolkit.fluxcd.io`.
 
-Three ship with the app. Anything else is a JSON file you drop in a folder.
+Three ship with the app: Argo CD, Flux and Prometheus. Others live in
+repositories of their own and are a button away in **Settings → Plugins →
+Available**: cert-manager, MetalLB, KubeVirt and an image inventory. The
+sidebar suggests one for any cluster running what it is about. Anything else is
+a JSON file you drop in a folder, or a repository you give the address of.
 
 Most of a plugin is data and nothing else: it names resource kinds the app
 already knows how to list and says how to arrange and summarise them. That part
 cannot ship code or CSS, which is what makes installing it about as risky as
 installing a stranger's wallpaper, and why it keeps working as the app grows.
 
-A plugin read from a folder may *also* ship [views of its own](#views-of-its-own)
-— an HTML page drawn in a sandboxed frame, for when a solution is better read as
-something other than rows: an Argo CD application's resource tree, a virtual
-machine's console and state. Those are code, and are fenced accordingly.
+A plugin may *also* ship [views of its own](#views-of-its-own) — an HTML page
+drawn in a sandboxed frame, for when a solution is better read as something
+other than rows: an Argo CD application's resource tree, a virtual machine's
+console and state. Those are code, and are fenced accordingly, whether the
+plugin came from a folder, a repository, or with the app.
+
+Built-in and installed plugins are the same thing in two places. A built-in can
+have pages, actions and panels exactly like a plugin from a repository — the
+built-in Argo CD plugin has all three — and a plugin you install under a
+built-in's id [replaces it](#replacing-a-built-in).
 
 ## The distinction everything here turns on
 
@@ -51,6 +61,32 @@ and whenever you press **Reload**.
 This is the same folder layout, the same starter-file button and the same
 "would not load" reporting as [themes](themes.md), on purpose.
 
+### The plugins the app knows of
+
+**Settings → Plugins → Available** lists plugins kept in repositories of their
+own, each with a line on what it shows, links to what it is about, and an
+**Install** button that clones it into the plugins folder (see
+[Installing from a repository](#installing-from-a-repository)). A card says
+which of your clusters run the product, where the sidebar has read their
+definitions.
+
+| Plugin | Repository | Suggested for clusters serving |
+| --- | --- | --- |
+| cert-manager | [rogerwesterbo/k8sdockside-certmanager](https://github.com/rogerwesterbo/k8sdockside-certmanager) | `crd:certificates.cert-manager.io` |
+| MetalLB | [rogerwesterbo/k8sdockside-metallb](https://github.com/rogerwesterbo/k8sdockside-metallb) | `crd:ipaddresspools.metallb.io` |
+| KubeVirt | [rogerwesterbo/k8sdockside-kubevirt](https://github.com/rogerwesterbo/k8sdockside-kubevirt) | `crd:virtualmachines.kubevirt.io` |
+| Image inventory | [rogerwesterbo/k8sdockside-example-plugin-typescript](https://github.com/rogerwesterbo/k8sdockside-example-plugin-typescript) | — works on any cluster |
+
+When a cluster serves one of those kinds and no plugin with that id is
+installed, the cluster's **Plugins** section in the sidebar shows a faint
+*get plugin* row that opens Settings on it. Nothing is cloned from the sidebar.
+The cross on the row stops the suggestion for good; the card in Settings can
+bring it back.
+
+The list is compiled into the app (`internal/plugins/known.json`) rather than
+fetched, so the app does not ask a server what exists every time it starts. A
+plugin that is not on it installs exactly the same way, from its address.
+
 ## Writing one
 
 Start with **Settings → Plugins → Write a starter plugin**, which drops a
@@ -58,11 +94,18 @@ working file you can edit a line at a time.
 
 ```json
 {
+    "$schema": "https://raw.githubusercontent.com/rogerwesterbo/k8sdockside/main/docs/plugin.schema.json",
     "id": "acme",
     "name": "Acme Mesh",
+    "version": "1.0.0",
+    "minAppVersion": "0.0.15",
     "tagline": "service mesh",
     "icon": "share",
     "docs": "https://example.com/acme",
+    "links": [
+        { "label": "acme.io", "url": "https://acme.io" },
+        { "label": "GitHub", "url": "https://github.com/acme/mesh" }
+    ],
     "description": "One or two sentences on what this is and what to look at first.",
     "requires": [
         { "kind": "crd:meshes.acme.io", "label": "Meshes" },
@@ -98,6 +141,10 @@ working file you can edit a line at a time.
 | `description` | optional | A paragraph on the overview. Worth writing: it is where you say what to look at first. |
 | `icon` | optional | See [icons](#icons). Defaults to `puzzle`. |
 | `docs` | optional | A link on the overview. `http(s)` only. |
+| `links` | optional | What the plugin is about — the product's own site, its source, its documentation: `[{ "label", "url" }]`, `http(s)` only, at most eight. The label defaults to the address's host. Shown on the plugin's card in Settings, in the generated overview's foot, and handed to a page of its own through `ready()`. |
+| `version` | optional | The plugin's own version, `1.2.0` or `v1.2.0`. Shown on its card. |
+| `minAppVersion` | optional | The oldest release of K8s Dockside the plugin works with. See [Versions](#versions). |
+| `$schema` | optional | Where an editor finds [the schema](#checking-a-plugin). Ignored by the app. |
 | `author` | optional | Yours. |
 | `requires` | optional | The kinds the overview checks this cluster for. |
 | `views` | required¹ | The rows under the plugin in the sidebar. |
@@ -105,9 +152,10 @@ working file you can edit a line at a time.
 | `charts` | optional¹ | Time-series graphs from the cluster's Prometheus. See [Charts](#charts). |
 | `actions` | optional¹ | Buttons on objects' action bars. See [Buttons on an object](#buttons-on-an-object). |
 | `sections` | optional¹ | Panels of the plugin's own in objects' detail views. See [Panels on an object](#panels-on-an-object). |
+| `overview` | optional¹ | A landing page of the plugin's own, in place of the generated one. See [An overview of its own](#an-overview-of-its-own). |
 
-¹ A plugin needs at least one of `views`, `cards`, `charts`, `actions` or
-`sections` — otherwise there would be nothing to show.
+¹ A plugin needs at least one of `views`, `cards`, `charts`, `actions`,
+`sections` or `overview` — otherwise there would be nothing to show.
 
 ### Kinds
 
@@ -139,7 +187,9 @@ tab is opened.
 **Every plugin gets an Overview view whether or not it declares one**, always
 first. It is where "is this even in this cluster?" is answered, which matters
 most exactly when the CRDs are missing and every other row would open onto the
-same error.
+same error. The app draws it from the manifest — requirements, cards, charts,
+views — so every plugin's looks alike; a plugin that ships pages of its own can
+[draw its own instead](#an-overview-of-its-own).
 
 ### Requirements
 
@@ -230,7 +280,7 @@ code. Those come from the cluster's Prometheus.
 | --- | --- | --- |
 | a kind — `pods`, `nodes`, `crd:…` | the detail panel of any object of that kind | `$namespace`, `$name`, `$node` |
 | `dashboard` | the cluster's own dashboard tab | none |
-| `overview` | the plugin's own overview | none |
+| `overview` | the plugin's own overview — never another plugin's | none |
 
 The three variables are the only things interpolable into a query, and a chart
 attached to `dashboard` or `overview` may not use them — there is no object to
@@ -304,13 +354,21 @@ wants a proxy in front of it, or the service form.
 
 ### Icons
 
-Any of: `alert`, `bell`, `box`, `check`, `chip`, `clock`, `copies`, `dashboard`,
-`database`, `display`, `drive`, `edit`, `file`, `folder`, `forward`, `gateway`,
-`gauge`, `globe`, `grant`, `helm`, `info`, `layers`, `link`, `lock`, `monitor`,
-`pause`, `play`, `policy`, `power`, `priority`, `puzzle`, `refresh`, `repeat`,
-`rocket`, `route`, `rows`, `scale`, `search`, `server`, `settings`, `share`,
-`shield`, `sliders`, `stop`, `terminal`, `trash`, `type`, `webhook`.
-An unrecognised name draws a plain box.
+Any of: `alert`, `bell`, `book`, `box`, `check`, `chevron-down`, `chevron-left`,
+`chevron-right`, `chevron-up`, `chip`, `clock`, `close`, `collapse-all`,
+`columns`, `copies`, `dashboard`, `database`, `display`, `dock-bottom`,
+`dock-left`, `dock-right`, `dot`, `download`, `drive`, `edit`, `expand-all`,
+`file`, `folder`, `folder-plus`, `forward`, `gateway`, `gauge`, `globe`,
+`grant`, `graph`, `helm`, `help`, `info`, `layers`, `link`, `lock`, `monitor`,
+`moon`, `pause`, `pin`, `play`, `plus`, `policy`, `power`, `priority`, `puzzle`,
+`refresh`, `repeat`, `restore`, `rocket`, `route`, `rows`, `save`, `scale`,
+`search`, `server`, `settings`, `share`, `shield`, `sliders`, `sort-asc`,
+`sort-desc`, `sort-off`, `stop`, `sun`, `terminal`, `trash`, `type`, `undo`,
+`unlock`, `user`, `users`, `webhook`.
+
+The same names go for views and actions. Any other name is refused when the
+file is read, with the nearest real one suggested, rather than drawing an
+empty square.
 
 ## Views of its own
 
@@ -348,8 +406,10 @@ my-plugin/
 | `ui.write` | optional | Lets the views *ask* to merge-patch objects of those kinds. |
 
 A plugin with a custom view and no `ui` block gets the defaults: a `ui/` folder,
-read-only. Only a plugin read from a folder can have one; a built-in has no
-folder to serve.
+read-only. A built-in's pages are embedded in the app from
+`internal/plugins/builtin/ui/<id>/` rather than read from a folder beside a file;
+`ui.dir` means nothing for one. Everything else — the sandbox, the declared
+kinds, the confirmation before a write — is the same.
 
 The page includes the bridge, which the app serves, and uses it:
 
@@ -357,7 +417,7 @@ The page includes the bridge, which the app serves, and uses it:
 <script src="/plugin-ui/_sdk/k8sdockside.js"></script>
 <script>
     k8sdockside.ready().then(async (ctx) => {
-        // ctx: { pluginId, viewId, contextId, contextName, readable, write, theme }
+        // ctx: { pluginId, viewId, contextId, contextName, readable, write, plugin, theme }
         const meshes = await k8sdockside.list({ kind: 'crd:meshes.acme.io', namespace: '' });
         // ...draw them
     });
@@ -366,11 +426,13 @@ The page includes the bridge, which the app serves, and uses it:
 
 | Call | |
 | --- | --- |
-| `ready()` | Resolves with what the view is looking at, once the app has answered. |
+| `ready()` | Resolves with what the view is looking at, once the app has answered. `plugin` in it is `{ id, name, version, docs, links }`, what the manifest says about the plugin itself — for a page to link to what it is about. |
 | `list({ kind, namespace?, selector? })` | Objects of a kind, whole — `status` and all. |
 | `get({ kind, namespace, name })` | One object, read live. |
 | `watch(query, onItems, onError?)` | Polls `list` (`query.interval`, default 5 s). Returns a stop function. |
 | `namespaces()` | The cluster's namespace names. |
+| `summary()` | What the generated overview is made of for this plugin and cluster: `{ installed, checked, requirements, cards, error }`. `checked` false means the cluster could not be asked — not the same as "not installed". |
+| `charts({ minutes? })` | This plugin's `overview` charts from the cluster's Prometheus, as `{ attached, range, source: { available, error, describe }, charts: [{ id, label, unit, description, error, series: [{ name, points: [{ t, v }] }] }] }`. `t` is Unix seconds. Only ever this plugin's own. |
 | `patch({ kind, namespace, name, patch })` | A merge patch. Needs `ui.write`; the user sees it and confirms first. Rejects if they decline. |
 | `open({ kind, namespace?, name? })` | The object in the details panel, or the kind's own tab. |
 | `openView(viewId)` | Another of this plugin's views, or `overview`. |
@@ -382,9 +444,41 @@ The SDK sets the app's colour tokens on the page's `:root` — `var(--bg)`,
 `var(--text)`, `var(--accent)`, `var(--ok)`, `var(--error)` and the rest — and
 keeps them in step with the app, so a view looks like the app without trying.
 
-`examples/plugins/argocd-ui` is a complete one: every Argo CD Application as a
-card with health and sync, unfolding into its resources, with Sync and Refresh.
-`examples/plugins/README.md` covers building a view with Svelte or Vite.
+Complete ones to read: [k8sdockside-metallb](https://github.com/rogerwesterbo/k8sdockside-metallb)
+and [k8sdockside-certmanager](https://github.com/rogerwesterbo/k8sdockside-certmanager)
+in plain script — views, panels and an overview of their own — and the built-in
+Argo CD plugin's pages, in `internal/plugins/builtin/ui/argocd/`, which are the
+same thing shipped with the app.
+
+### Writing the pages in TypeScript, or with a framework
+
+[k8sdockside-example-plugin-typescript](https://github.com/rogerwesterbo/k8sdockside-example-plugin-typescript)
+is a complete plugin written in TypeScript and built with esbuild — an overview,
+a view and a panel over core kinds, so it works on any cluster — meant to be
+copied as the start of your own. The bridge's types are
+`internal/plugins/sdk/k8sdockside.d.ts`; copy that file into a project to type
+`window.k8sdockside`.
+
+Anything that ends up as static files works — TypeScript, Svelte, Preact, Vue,
+Lit, plain DOM. Three things differ from building for a normal web page:
+
+1. **Include the bridge** before your own script, from the path the app serves
+   it at: `<script src="/plugin-ui/_sdk/k8sdockside.js"></script>`.
+2. **Bundle to a classic script, not an ES module.** The view runs in a
+   sandboxed frame with an opaque origin, so `<script type="module">` is a
+   cross-origin load, which not every webview allows from the app's own scheme.
+   With esbuild, `--bundle --format=iife`. With Vite, `build.rollupOptions.output`
+   `{ format: 'iife', inlineDynamicImports: true }`, `modulePreload: false` and
+   `base: './'`, and drop `type="module"` / `crossorigin` from the built HTML if
+   Vite leaves them in. Vite builds one IIFE per page, so a plugin with several
+   pages builds each on its own.
+3. **No network.** `fetch`, XHR and websockets are refused by the page's
+   Content-Security-Policy; everything about the cluster comes through
+   `window.k8sdockside`. Bundle fonts and images, or inline them.
+
+Commit what the build produces. Installing from a repository clones it and
+reads `plugin.json` and the ui folder as they are; nothing is built on the
+user's machine.
 
 ### What a view can and cannot do
 
@@ -411,6 +505,40 @@ those kinds.
 
 Switching away from a custom view's tab unloads the page, the way it closes a
 table's watch; keep anything worth keeping in the URL hash, or re-read it.
+
+## An overview of its own
+
+The generated overview is all a plugin that is only data can have, which is
+why every one of them looks the same. A plugin that already ships pages can
+replace it:
+
+```json
+"overview": { "entry": "overview.html" }
+```
+
+| Field | | |
+| --- | --- | --- |
+| `overview.entry` | optional | The file its Overview tab opens, relative to the ui folder. Defaults to `index.html`. |
+
+The Overview row stays first under the plugin in the sidebar and opens the page
+in the same sandboxed frame as a custom view, with the same bridge and the same
+limits; `ready()` gives it `viewId: "overview"`. Two calls exist for it in
+particular:
+
+- `summary()` answers what the generated page leads with — which of the kinds
+  in `requires` this cluster serves, and the manifest's card counts — so the
+  page can still say first whether the solution is here at all. Say it: a page
+  that shows an empty dashboard for a cluster without the CRDs is worse than
+  the generated one.
+- `charts({ minutes })` hands over the plugin's `overview` charts, for the page
+  to draw its own way. The generated chart panel is not on screen, so without
+  it those charts would go nowhere.
+
+[k8sdockside-metallb](https://github.com/rogerwesterbo/k8sdockside-metallb) has
+one: a verdict and a sentence on what MetalLB is doing, the addresses in use as
+a ring by pool, the path an address takes drawn as five stages that turn red
+where it is broken, what needs attention, MetalLB's recent events, its charts,
+and the plugin's links in its foot.
 
 ## Buttons on an object
 
@@ -467,8 +595,8 @@ API groups or the core group.
 The bar reads each object's offered actions when it opens and every few seconds
 after, so a stopped machine offers Start and, a moment after pressing it, Pause.
 A plugin from outside the app that brings actions for a kind the app has its own
-product buttons for — the built-in KubeVirt bar — takes over from them rather
-than adding a second set.
+product buttons for — the app's own virtual machine buttons — takes over from
+them rather than adding a second set.
 
 ## Panels on an object
 
@@ -496,10 +624,10 @@ The page gets these on top of the calls above:
 
 The panel's page is reloaded when the detail view moves to another object.
 
-`examples/plugins/kubevirt-ui` has both: the seven lifecycle actions on the
-action bar, and a *Machine* panel with the state, the node, the addresses, the
-conditions and recent migrations, and a round icon button group drawn from
-`actions()`.
+[k8sdockside-kubevirt](https://github.com/rogerwesterbo/k8sdockside-kubevirt)
+has both: the seven lifecycle actions on the action bar, and a *Machine* panel
+with the state, the node, the addresses, the conditions and recent migrations,
+and a round icon button group drawn from `actions()`.
 
 ## Installing from a repository
 
@@ -511,6 +639,12 @@ the card gets an **Update from repository** button that runs
 are accepted; git never prompts, so a private repository needs credentials git
 can find on its own. `package.json`, `tsconfig*.json` and the like at the root
 are skipped rather than read as plugins.
+
+A clone that worked but holds nothing that loads is reported as a failure, with
+the reasons — "installed" followed by nothing appearing would leave you with
+nowhere to look. The folder is kept, so a plugin waiting on a newer app loads
+once the app is updated, and one with a mistake in it can be fixed and updated
+in place.
 
 ## Shipping several at once
 
@@ -533,23 +667,94 @@ retune the Flux plugin's view list without renaming it everywhere. Two *user*
 plugins claiming the same id is a mistake: the first found wins, the other is
 reported under **would not load**.
 
+## Versions
+
+`minAppVersion` is the oldest release of K8s Dockside a plugin works with:
+
+```json
+"minAppVersion": "0.0.15"
+```
+
+An older app refuses the plugin with that said — `plugin "metallb" needs K8s
+Dockside 0.0.15 or newer, and this is 0.0.14 -- update the app to use it` —
+before reading anything else in it, so a plugin using fields the older app has
+never heard of is not reported field by field. A development build of the app
+loads every plugin whatever it asks for. Leave it out and every app tries to
+load the plugin; set it to the first release with everything the plugin uses.
+0.0.15 is the first with pages' own overviews, links and this field itself.
+
+`version` is the plugin's own, shown on its card. Neither is compared with
+anything else yet.
+
+## Checking a plugin
+
+A plugin is checked when it is read, and the checks are strict about what is
+put in:
+
+- **The JSON**, with the line and column of a syntax error.
+- **Every field name.** A member the manifest has no field for is refused, with
+  the one it was probably meant to be: `unknown field "lable" in views[0]
+  (line 12, column 9) -- did you mean "label"?`. A misspelling read leniently
+  would be a plugin that loads and quietly does nothing.
+- **Every field's type**: `views[0].label should be a string, not a number`.
+- **Every kind** in `requires`, views, cards, charts, actions, sections and
+  `ui.kinds` is one the app can open, and no page may read Secrets.
+- **Ids** are lowercase letters, digits and dashes, and unique within the plugin.
+- **Icons** are the app's; **links** and `docs` are `http(s)`; `version` and
+  `minAppVersion` are versions.
+- **Queries** parse as PromQL, units are known, and cluster-wide ones do not ask
+  about one object.
+- **Selectors** parse and **namespaces** are namespace names.
+- **Actions**' requests are complete and do not write what no plugin may write.
+- **Pages**: the ui folder exists, and every page a view, section or overview
+  opens is in it and is an HTML file.
+
+Everything wrong with a plugin is reported at once, one reason per line, under
+**Settings → Plugins → Would not load**, and the status bar says so once a
+session so nobody has to go looking.
+
+The same checks run outside the app:
+
+```
+go run github.com/rogerwesterbo/k8sdockside/cmd/plugincheck@main .
+```
+
+reads the folder it is given exactly as the app reads it once cloned — the
+`.json` files at its root — and prints what it found or why it would not load,
+exiting non-zero on anything wrong. `-app 0.0.14` checks as that release would.
+The repositories listed above run it in CI.
+
+For an editor, `docs/plugin.schema.json` is a JSON Schema of the manifest; name
+it in `$schema` and the editor checks field names, types, icons and versions as
+you type. It cannot know which kinds a cluster serves or whether a query
+parses; `plugincheck` does.
+
 ## When something is wrong
 
 Nothing about a plugin is fatal. One unreadable file does not cost you the
 plugins either side of it; one bad plugin inside a pack does not cost you the
-rest of the pack; and anything refused is named with a reason under **would not
-load** rather than silently missing.
+rest of the pack; and anything refused is named with its reasons under **would
+not load** rather than silently missing.
 
 A tab left open on a plugin that has since been uninstalled says so, and keeps
 your tab, rather than showing an empty table.
 
-## The built-in three
+## The built-ins
 
 `internal/plugins/builtin/*.json` are in exactly the format above and are worth
 reading as worked examples:
 
-- **`argocd.json`** — health and sync as two separate cards over the same kind,
-  and a view of a *built-in* kind narrowed by a label selector.
+- **`argocd.json`** — the whole format at once. Its pages are in
+  `builtin/ui/argocd/`: its own [overview](#an-overview-of-its-own) (a verdict,
+  every Application as a honeycomb cell coloured by health and rimmed when it
+  has drifted from Git, what needs you with the button that fixes it, the
+  deploy stream, Argo CD's own components and its charts), an *Application
+  board* view (every application as a tile, filtered from a rail, one of them
+  in a drawer with its resource tree, last sync and history), a panel in every
+  Application's detail view, and Sync, Refresh and Hard refresh
+  [on its action bar](#buttons-on-an-object). Also health and sync as two
+  separate cards over the same kind, and a view of a *built-in* kind narrowed
+  by a label selector.
 - **`flux.json`** — thirteen views over five API groups, all summarised through
   the one `status.conditions[Ready]` path every Flux controller answers on.
 - **`prometheus.json`** — the Prometheus Operator's CRDs, plus every chart in the
@@ -579,7 +784,9 @@ A custom view's tab carries the same kind; `Pane.svelte` sees the view's type
 and hosts it in `PluginFrame.svelte` instead of a table.
 
 - `internal/plugins/` — the format, the validator, the loader, the overview
-  builder, and the three built-ins.
+  builder, the three built-ins, and `known.json`, the plugins offered for
+  installing.
+- `cmd/plugincheck/` — the loader's checks, run on a folder.
 - `internal/plugins/ui.go` — serving custom views, their Content-Security-Policy,
   and the guard that refuses the runtime to them; `sdk/` is the bridge's client.
 - `frontend/src/lib/components/PluginFrame.svelte` — the frame, and the bridge's

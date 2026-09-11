@@ -185,6 +185,11 @@ func scan[T Identified](dir string, parse Parse[T]) ([]T, []Problem) {
 	return items, problems
 }
 
+// FilesIn lists the add-on files directly inside dir: what is read from a
+// folder cloned or copied into an add-on folder, and so what a check of such a
+// folder on its own should read.
+func FilesIn(dir string) []string { return jsonFilesIn(dir) }
+
 // jsonFilesIn lists the add-on files directly inside a subdirectory.
 func jsonFilesIn(dir string) []string {
 	entries, err := os.ReadDir(dir)

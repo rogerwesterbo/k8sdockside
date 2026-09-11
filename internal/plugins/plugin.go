@@ -9,11 +9,12 @@
 // That part is as safe to install as a theme, and keeps working as the app
 // grows.
 //
-// A plugin read from disk may also ship views of its own -- HTML and script in
-// a folder beside its file, drawn in a sandboxed frame. Those are code, and are
-// treated as such: they reach the cluster only through a narrow bridge the app
-// answers, only for the kinds the plugin declares, and never write without the
-// user saying yes. See ui.go.
+// A plugin may also ship views of its own -- HTML and script in a folder beside
+// its file, or for a built-in, embedded in the app -- drawn in a sandboxed
+// frame. Those are code, and are treated as such wherever they came from: they
+// reach the cluster only through a narrow bridge the app answers, only for the
+// kinds the plugin declares, and never write without the user saying yes. See
+// ui.go.
 //
 // A plugin is installed on *this machine*. Whether the thing it describes is
 // installed in the cluster in front of you is a separate question, asked per
@@ -22,8 +23,11 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -32,6 +36,7 @@ import (
 	"github.com/rogerwesterbo/k8sdockside/internal/addons"
 	"github.com/rogerwesterbo/k8sdockside/internal/kube"
 	"github.com/rogerwesterbo/k8sdockside/internal/metrics"
+	"github.com/rogerwesterbo/k8sdockside/internal/updates"
 	"k8s.io/apimachinery/pkg/labels"
 )
 
@@ -246,6 +251,10 @@ type UI struct {
 
 // Plugin is one solution the app knows how to show.
 type Plugin struct {
+	// Schema is where an editor finds the JSON schema for the file. Accepted so
+	// a manifest can name it, and otherwise ignored. First, so a file written
+	// from this struct names it first.
+	Schema  string `json:"$schema,omitzero"`
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Tagline string `json:"tagline,omitzero"`
@@ -253,12 +262,24 @@ type Plugin struct {
 	Author  string `json:"author,omitzero"`
 	// Docs is a link shown on the overview. Only http(s) is accepted; a plugin
 	// file is not allowed to hand the app an arbitrary URL scheme to open.
-	Docs        string        `json:"docs,omitzero"`
-	Description string        `json:"description,omitzero"`
-	Requires    []Requirement `json:"requires,omitzero"`
-	Views       []View        `json:"views"`
-	Cards       []Card        `json:"cards,omitzero"`
-	Charts      []Chart       `json:"charts,omitzero"`
+	Docs string `json:"docs,omitzero"`
+	// Links point at what the plugin is about -- the product's own site, its
+	// source, its documentation -- and are shown on the plugin's card in
+	// settings and on its overview. Held to the same rule as Docs.
+	Links []Link `json:"links,omitzero"`
+	// Version is the plugin's own version, shown on its card. Optional; when
+	// given it is a semantic version, "1.2.0" or "v1.2.0".
+	Version string `json:"version,omitzero"`
+	// MinAppVersion is the oldest release of this app the plugin works with.
+	// A plugin wanting a newer app than the one reading it is refused on load
+	// with that said, rather than half-working because a field it relies on
+	// means nothing here yet. See LoadAt.
+	MinAppVersion string        `json:"minAppVersion,omitzero"`
+	Description   string        `json:"description,omitzero"`
+	Requires      []Requirement `json:"requires,omitzero"`
+	Views         []View        `json:"views"`
+	Cards         []Card        `json:"cards,omitzero"`
+	Charts        []Chart       `json:"charts,omitzero"`
 	// Usage is optional: a plugin that knows a Prometheus can offer it as a
 	// stand-in for metrics-server. Absent for almost every plugin.
 	Usage *UsageQueries `json:"usage,omitzero"`
@@ -267,8 +288,11 @@ type Plugin struct {
 	// Actions are buttons on the action bar of objects of a kind. See actions.go.
 	Actions []Action `json:"actions,omitzero"`
 	// Sections are the plugin's own panels in the detail view of objects of a
-	// kind. Like custom views, only a plugin read from a folder can have them.
+	// kind. Like custom views, their pages come from the plugin's UI files.
 	Sections []Section `json:"sections,omitzero"`
+	// Overview replaces the generated landing page with one of the plugin's
+	// own, from its UI files like a custom view.
+	Overview *Overview `json:"overview,omitzero"`
 
 	// Origin is filled in by the loader and ignored on the way in: BuiltinOrigin
 	// or the path of the file it was read from.
@@ -285,6 +309,32 @@ type Plugin struct {
 	// instead. Ignored on the way in, like Origin.
 	Disabled bool `json:"disabled"`
 }
+
+// Overview is a plugin's own landing page, standing in for the one the app
+// generates from its requirements, cards and charts.
+//
+// The generated page is the right answer for a plugin that is only data --
+// it is all such a plugin can have, so every one of them gets the same page.
+// A plugin that already ships pages of its own can say more about its solution
+// than a list of counts, and this is where it does. The page is told whether
+// the solution is installed through the bridge's summary call, so "is this
+// even in this cluster?" can still be answered first.
+type Overview struct {
+	// Entry is the file it opens, relative to the plugin's UI folder. Defaults
+	// to DefaultEntry.
+	Entry string `json:"entry,omitzero"`
+}
+
+// Link is one place a plugin points its reader at.
+type Link struct {
+	// Label is what the link reads as. Defaults to the address's host.
+	Label string `json:"label,omitzero"`
+	URL   string `json:"url"`
+}
+
+// maxLinks bounds a plugin's links. They are a row on a card, not a page of
+// bookmarks.
+const maxLinks = 8
 
 // BuiltinOrigin marks the plugins that ship with the app.
 const BuiltinOrigin = "builtin"
@@ -348,7 +398,8 @@ func (c Catalogue) Enabled() []Plugin {
 }
 
 // Attachments names every surface some enabled plugin draws a chart on: a
-// resource kind, AttachDashboard or AttachOverview.
+// resource kind, AttachDashboard, or one plugin's overview as OverviewSurface
+// names it.
 //
 // It hangs off the catalogue rather than taking a list because it is what
 // decides whether a chart panel is drawn at all, and a caller that passed the
@@ -359,14 +410,49 @@ func (c Catalogue) Attachments() []string {
 	var out []string
 	for _, plugin := range c.Enabled() {
 		for _, chart := range plugin.Charts {
-			if seen[chart.Attach] {
+			surface := chart.Attach
+			if surface == AttachOverview {
+				surface = OverviewSurface(plugin.ID)
+			}
+			if seen[surface] {
 				continue
 			}
-			seen[chart.Attach] = true
-			out = append(out, chart.Attach)
+			seen[surface] = true
+			out = append(out, surface)
 		}
 	}
 	return out
+}
+
+// OverviewSurface is what one plugin's overview is called as a chart surface:
+// its overview tab's own kind, "plugin:<id>/overview".
+//
+// The dashboard and a pod's detail panel are the same surface whichever plugin
+// draws on them, so every plugin's charts for them belong together. An
+// overview is not: it is one plugin's page, and bare "overview" as a surface
+// put every plugin's overview charts on every plugin's overview.
+func OverviewSurface(pluginID string) string {
+	return ViewKind(pluginID, OverviewID)
+}
+
+// Surface turns a surface a chart panel asks for into the attachment its
+// charts name and the plugins that may draw there. A plugin's overview is
+// asked for as OverviewSurface and narrows the list to that one plugin; bare
+// AttachOverview belongs to no plugin and draws nothing. Every other surface
+// is shared, and keeps the list as it is.
+func Surface(surface string, list []Plugin) (string, []Plugin) {
+	if pluginID, viewID, ok := ParseViewKind(surface); ok && viewID == OverviewID {
+		for _, p := range list {
+			if p.ID == pluginID {
+				return AttachOverview, []Plugin{p}
+			}
+		}
+		return AttachOverview, nil
+	}
+	if surface == AttachOverview {
+		return AttachOverview, nil
+	}
+	return surface, list
 }
 
 // Find returns the plugin with the given id.
@@ -400,22 +486,39 @@ func (c Catalogue) Resolve(kind string) (Plugin, View, bool) {
 // theme, it is forgiving about what is left out and strict about what is put
 // in: a missing label has a defensible answer, a kind that does not exist does
 // not.
+//
+// Past the id, every mistake is gathered rather than returned on the first,
+// one per line of the error: someone writing a plugin should see all of what
+// is wrong with the file at once, not one thing per reload.
 func validate(p Plugin) (Plugin, error) {
 	p.ID = strings.TrimSpace(p.ID)
 	p.Name = strings.TrimSpace(p.Name)
 
+	// Every other message names the plugin by its id, so without a usable one
+	// there is nothing further worth saying.
 	if p.ID == "" {
 		return p, fmt.Errorf("plugin has no id")
 	}
 	if !addons.ValidID(p.ID) {
 		return p, fmt.Errorf("plugin id %q must be lowercase letters, digits and dashes", p.ID)
 	}
+
+	var errs []error
+	fail := func(err error) {
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	if p.Name == "" {
 		p.Name = p.ID
 	}
 	if p.Docs != "" && !webLink(p.Docs) {
-		return p, fmt.Errorf("plugin %q has a docs link that is not http(s): %q", p.ID, p.Docs)
+		fail(fmt.Errorf("plugin %q has a docs link that is not http(s): %q", p.ID, p.Docs))
 	}
+	fail(validateLinks(&p))
+	fail(validateVersions(&p))
+	fail(checkIcon(p.ID, "itself", p.Icon))
 	if p.Icon == "" {
 		p.Icon = "puzzle"
 	}
@@ -423,7 +526,8 @@ func validate(p Plugin) (Plugin, error) {
 	for i, req := range p.Requires {
 		req.Kind = strings.TrimSpace(req.Kind)
 		if !kube.IsKnownKind(req.Kind) {
-			return p, fmt.Errorf("plugin %q requires %q, which is not a kind this app can open", p.ID, req.Kind)
+			fail(fmt.Errorf("plugin %q requires %q, which is not a kind this app can open", p.ID, req.Kind))
+			continue
 		}
 		if req.Label == "" {
 			req.Label = req.Kind
@@ -436,10 +540,12 @@ func validate(p Plugin) (Plugin, error) {
 	for _, view := range p.Views {
 		view, err := validateView(p.ID, view)
 		if err != nil {
-			return p, err
+			fail(err)
+			continue
 		}
 		if seen[view.ID] {
-			return p, fmt.Errorf("plugin %q has two views with id %q", p.ID, view.ID)
+			fail(fmt.Errorf("plugin %q has two views with id %q", p.ID, view.ID))
+			continue
 		}
 		seen[view.ID] = true
 		views = append(views, view)
@@ -449,7 +555,8 @@ func validate(p Plugin) (Plugin, error) {
 	for i, card := range p.Cards {
 		card, err := validateCard(p.ID, card)
 		if err != nil {
-			return p, err
+			fail(err)
+			continue
 		}
 		p.Cards[i] = card
 	}
@@ -458,10 +565,12 @@ func validate(p Plugin) (Plugin, error) {
 	for i, chart := range p.Charts {
 		chart, err := validateChart(p.ID, chart)
 		if err != nil {
-			return p, err
+			fail(err)
+			continue
 		}
 		if seenCharts[chart.ID] {
-			return p, fmt.Errorf("plugin %q has two charts with id %q", p.ID, chart.ID)
+			fail(fmt.Errorf("plugin %q has two charts with id %q", p.ID, chart.ID))
+			continue
 		}
 		seenCharts[chart.ID] = true
 		p.Charts[i] = chart
@@ -469,27 +578,85 @@ func validate(p Plugin) (Plugin, error) {
 
 	if p.Usage != nil {
 		usage, err := validateUsage(p.ID, *p.Usage)
-		if err != nil {
-			return p, err
-		}
+		fail(err)
 		p.Usage = &usage
 	}
 
-	if err := validateActions(&p); err != nil {
-		return p, err
-	}
-	if err := validateSections(&p); err != nil {
-		return p, err
-	}
+	fail(validateActions(&p))
+	fail(validateSections(&p))
+	fail(validateOverview(&p))
+	fail(validateUI(&p))
 
-	if err := validateUI(&p); err != nil {
-		return p, err
+	if len(errs) > 0 {
+		return p, errors.Join(errs...)
 	}
-
-	if len(p.Views) == 0 && len(p.Cards) == 0 && len(p.Charts) == 0 && len(p.Actions) == 0 && len(p.Sections) == 0 {
+	// Only asked of a plugin that is otherwise sound: one whose every view was
+	// just refused would read as empty, and saying so would be beside the point.
+	if len(p.Views) == 0 && len(p.Cards) == 0 && len(p.Charts) == 0 && len(p.Actions) == 0 && len(p.Sections) == 0 && p.Overview == nil {
 		return p, fmt.Errorf("plugin %q has no views, actions or sections, nothing to summarise and nothing to chart, so there would be nothing to show", p.ID)
 	}
 	return p, nil
+}
+
+// validateLinks checks a plugin's links: http(s) only, like Docs, and a label
+// for each, taken from the address where the file gives none.
+func validateLinks(p *Plugin) error {
+	if len(p.Links) > maxLinks {
+		return fmt.Errorf("plugin %q has %d links; at most %d are shown, so trim the list", p.ID, len(p.Links), maxLinks)
+	}
+	var errs []error
+	for i, link := range p.Links {
+		link.Label = strings.TrimSpace(link.Label)
+		link.URL = strings.TrimSpace(link.URL)
+		parsed, err := url.Parse(link.URL)
+		if err != nil || !webLink(link.URL) || parsed.Host == "" {
+			errs = append(errs, fmt.Errorf("plugin %q has a link %q that is not an http(s) address", p.ID, link.URL))
+			continue
+		}
+		if link.Label == "" {
+			link.Label = parsed.Host
+		}
+		p.Links[i] = link
+	}
+	return errors.Join(errs...)
+}
+
+// validateVersions checks the plugin's own version and the app version it
+// asks for are versions at all. Whether this app is new enough is a separate
+// question, asked by the loader, which knows what this app is.
+func validateVersions(p *Plugin) error {
+	p.Version = strings.TrimSpace(p.Version)
+	p.MinAppVersion = strings.TrimSpace(p.MinAppVersion)
+
+	var errs []error
+	if p.Version != "" && !updates.IsVersion(p.Version) {
+		errs = append(errs, fmt.Errorf("plugin %q has version %q; it must be a semantic version such as \"1.2.0\"", p.ID, p.Version))
+	}
+	if p.MinAppVersion != "" && !updates.IsVersion(p.MinAppVersion) {
+		errs = append(errs, fmt.Errorf("plugin %q asks for app version %q; minAppVersion must be a release such as \"0.0.15\"", p.ID, p.MinAppVersion))
+	}
+	return errors.Join(errs...)
+}
+
+// NeedsNewerApp reports whether the plugin asks for a newer release of this
+// app than appVersion, and says so in words when it does.
+//
+// A version that is not a release -- a development build -- is taken as new
+// enough for anything: it is built from a tree at least as new as the last
+// release, and refusing plugins there would make them impossible to work on.
+func (p Plugin) NeedsNewerApp(appVersion string) (string, bool) {
+	if p.MinAppVersion == "" || !updates.IsVersion(appVersion) || !updates.IsVersion(p.MinAppVersion) {
+		return "", false
+	}
+	if updates.Compare(appVersion, p.MinAppVersion) >= 0 {
+		return "", false
+	}
+	who := "this plugin"
+	if p.ID != "" {
+		who = fmt.Sprintf("plugin %q", p.ID)
+	}
+	return fmt.Sprintf("%s needs K8s Dockside %s or newer, and this is %s -- update the app to use it",
+		who, strings.TrimPrefix(p.MinAppVersion, "v"), strings.TrimPrefix(appVersion, "v")), true
 }
 
 // validateUsage checks a plugin's usage queries, which are held to a stricter
@@ -625,6 +792,9 @@ func validateView(pluginID string, v View) (View, error) {
 	if v.Label == "" {
 		v.Label = v.ID
 	}
+	if err := checkIcon(pluginID, fmt.Sprintf("view %q", v.ID), v.Icon); err != nil {
+		return v, err
+	}
 	if v.Icon == "" {
 		v.Icon = "puzzle"
 	}
@@ -672,13 +842,34 @@ func validateCustomView(pluginID string, v View) (View, error) {
 	return v, nil
 }
 
+// validateOverview checks a plugin's own landing page.
+//
+// Charts attached to "overview" stay allowed: the page asks for them through
+// the bridge's charts call and draws them its own way, since the generated
+// panel they would otherwise sit in is not on screen.
+func validateOverview(p *Plugin) error {
+	if p.Overview == nil {
+		return nil
+	}
+	entry := strings.TrimSpace(p.Overview.Entry)
+	if entry == "" {
+		entry = DefaultEntry
+	}
+	if !fs.ValidPath(entry) || entry == "." {
+		return fmt.Errorf("plugin %q has an overview opening %q, which is not a file inside its UI folder", p.ID, entry)
+	}
+	p.Overview = &Overview{Entry: entry}
+	return nil
+}
+
 // validateUI checks what a plugin's own views may do, and works out the one
 // list of kinds they may read.
 //
 // A plugin with a custom view and no ui block gets one with the defaults, so
 // the simplest plugin with a view of its own is still just "type": "custom".
 func validateUI(p *Plugin) error {
-	hasCustom := slices.ContainsFunc(p.Views, func(v View) bool { return v.Type == ViewCustom }) || len(p.Sections) > 0
+	hasCustom := slices.ContainsFunc(p.Views, func(v View) bool { return v.Type == ViewCustom }) ||
+		len(p.Sections) > 0 || p.Overview != nil
 	if p.UI == nil {
 		if !hasCustom {
 			return nil
@@ -758,13 +949,42 @@ func (p Plugin) CanWrite(kind string) bool {
 	return p.CanRead(kind) && p.UI.Write
 }
 
-// UIRoot is the folder the plugin's own views are served from. Only a plugin
-// read from a file has one: a built-in has no folder on disk to serve.
+// UIRoot is the folder on disk the plugin's own views are served from. Only a
+// plugin read from a file has one; a built-in's pages are embedded instead --
+// see UIFiles, which serves both.
 func (p Plugin) UIRoot() (string, bool) {
 	if p.UI == nil || p.Builtin() || p.Origin == "" {
 		return "", false
 	}
 	return filepath.Join(filepath.Dir(p.Origin), filepath.FromSlash(p.UI.Dir)), true
+}
+
+// UIFiles opens the files the plugin's own views are served from: its ui
+// folder on disk, or for a built-in the folder embedded in the app. Call done
+// when finished with it.
+//
+// A folder on disk is opened through os.Root, which refuses a path that
+// escapes it through a symlink; an embedded one has nothing to escape to.
+func (p Plugin) UIFiles() (files fs.FS, done func(), ok bool) {
+	if p.UI == nil {
+		return nil, nil, false
+	}
+	if p.Builtin() {
+		sub, err := fs.Sub(builtinFS, builtinUIDir+"/"+p.ID)
+		if err != nil {
+			return nil, nil, false
+		}
+		return sub, func() {}, true
+	}
+	root, ok := p.UIRoot()
+	if !ok {
+		return nil, nil, false
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, nil, false
+	}
+	return dir.FS(), func() { _ = dir.Close() }, true
 }
 
 func validateCard(pluginID string, c Card) (Card, error) {
@@ -813,8 +1033,8 @@ func checkFilter(namespace, selector string) error {
 // file comes from outside the app, and handing the platform an arbitrary scheme
 // to open is not something a list of colours and kind names has any business
 // doing.
-func webLink(url string) bool {
-	return strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://")
+func webLink(address string) bool {
+	return strings.HasPrefix(address, "https://") || strings.HasPrefix(address, "http://")
 }
 
 // dnsLabel is the Kubernetes name format a namespace has to be in.
@@ -886,16 +1106,22 @@ func (c Catalogue) ResolveKind(kind string) (Resolved, error) {
 	}
 
 	// Every plugin has an overview whether or not it declares one, so it is
-	// answered here rather than looked up.
+	// answered here rather than looked up. One the plugin draws itself is
+	// also custom, and opens its own page.
 	if viewID == OverviewID {
-		return Resolved{
+		resolved := Resolved{
 			PluginID:   plugin.ID,
 			PluginName: plugin.Name,
 			ViewID:     OverviewID,
 			Label:      plugin.Name,
 			Icon:       plugin.Icon,
 			Overview:   true,
-		}, nil
+		}
+		if plugin.Overview != nil {
+			resolved.Custom = true
+			resolved.Entry = plugin.Overview.Entry
+		}
+		return resolved, nil
 	}
 
 	view, ok := plugin.View(viewID)

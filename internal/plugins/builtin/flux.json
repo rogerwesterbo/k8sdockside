@@ -4,6 +4,20 @@
     "tagline": "GitOps toolkit",
     "icon": "repeat",
     "docs": "https://fluxcd.io/flux/",
+    "links": [
+        {
+            "label": "fluxcd.io",
+            "url": "https://fluxcd.io"
+        },
+        {
+            "label": "Documentation",
+            "url": "https://fluxcd.io/flux/"
+        },
+        {
+            "label": "GitHub",
+            "url": "https://github.com/fluxcd/flux2"
+        }
+    ],
     "description": "Flux is a set of controllers that each reconcile one kind of thing: a source fetches, a Kustomization or HelmRelease applies. Every one of them answers the same question the same way \u2014 the Ready condition \u2014 so a red row here is a controller telling you why it has stopped.",
     "requires": [
         {
