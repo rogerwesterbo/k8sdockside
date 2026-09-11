@@ -58,15 +58,15 @@ credentials leaving your machine. Free and open source under Apache 2.0.
 
 <img src="./docs/images/cluster_dashboard.png" alt="Cluster dashboard" width="1000" >
 
-### Plugins in settings
+### List pods, view pod metrics, follow pod log
 
-<img src="./docs/images/settings_plugins.png" alt="Plugins in settings" width="1000" >
+<img src="./docs/images/list_pods_pod_metrics_pod_log.png" alt="List pods, view pod metrics, follow pod log" width="1000" >
 
-### Kuberentes help pages
+### Activate plugins, or install your own
 
-<img src="./docs/images/kubernetes_help.png" alt="Kubernetes help pages" width="1000" >
+<img src="./docs/images/settings_plugins.png" alt="Activate plugins, or install you own" width="1000" >
 
-
+[See more screenshots](./docs/images/)
 
 ## Install
 
