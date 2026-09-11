@@ -46,6 +46,28 @@ credentials leaving your machine. Free and open source under Apache 2.0.
   releases page, to tell you when a newer version is out — and that can be
   switched off.
 
+## Screenshots
+
+<!-- ![Cluster dashboard with metrics](./docs/images/cluster_dashboard.png "Cluster dashboard with metrics")
+
+![Plugins in settings](./docs/images/settings_plugins.png "Plugins in settings")
+
+![Kubernetes help pages](./docs/images/kubernetes_help.png "Kubernetes help pages") -->
+
+### Cluster dashboard
+
+<img src="./docs/images/cluster_dashboard.png" alt="Cluster dashboard" width="1000" >
+
+### Plugins in settings
+
+<img src="./docs/images/settings_plugins.png" alt="Plugins in settings" width="1000" >
+
+### Kuberentes help pages
+
+<img src="./docs/images/kubernetes_help.png" alt="Kubernetes help pages" width="1000" >
+
+
+
 ## Install
 
 Grab the build for your platform from the
