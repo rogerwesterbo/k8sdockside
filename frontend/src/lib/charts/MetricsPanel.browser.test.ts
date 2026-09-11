@@ -180,8 +180,8 @@ test('a chart with no series says so and repeats what the plugin says it needs',
             }],
         }),
     );
-    render(MetricsPanel, { props: { contextId: PROD, attach: 'overview' } });
-    workspace.metricsAttachments = ['overview'];
+    render(MetricsPanel, { props: { contextId: PROD, attach: 'plugin:argocd/overview' } });
+    workspace.metricsAttachments = ['plugin:argocd/overview'];
 
     await expect.element(page.getByText('No data came back', { exact: false })).toBeVisible();
     await expect.element(page.getByText('Needs its ServiceMonitor scraped', { exact: false })).toBeVisible();

@@ -21,6 +21,7 @@
     import HelmRelease from './HelmRelease.svelte';
     import Icon from './Icon.svelte';
     import ObjectActions from './ObjectActions.svelte';
+    import PluginFrame from './PluginFrame.svelte';
     import { detail } from '../state/detail.svelte';
 
     let target = $derived(detail.target);
@@ -214,6 +215,19 @@
                 />
             {/if}
 
+            <!-- Panels plugins bring for this kind: a page of the plugin's own
+                 in a sandboxed frame, told which object it is drawn for. After
+                 the app's own summary, before the report. -->
+            {#each workspace.pluginSectionsFor(target.kind) as entry (entry.plugin.id + '/' + entry.section.id)}
+                <div class="plugin-section">
+                    <h3>{entry.section.label} <span>· {entry.plugin.name}</span></h3>
+                    <PluginFrame
+                        contextId={target.contextId}
+                        section={{ pluginId: entry.plugin.id, sectionId: entry.section.id, object: target }}
+                    />
+                </div>
+            {/each}
+
             {#if isRelease}
                 <HelmRelease
                     release={{
@@ -326,6 +340,24 @@
         flex: 1 1 auto;
         overflow: auto;
         min-height: 0;
+    }
+
+    .plugin-section {
+        margin: 12px 12px 16px;
+    }
+
+    .plugin-section h3 {
+        margin: 0 0 6px;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+    }
+
+    .plugin-section h3 span {
+        text-transform: none;
+        letter-spacing: 0;
     }
 
     pre {

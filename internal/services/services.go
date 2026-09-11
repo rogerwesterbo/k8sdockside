@@ -11,8 +11,10 @@ import (
 )
 
 // New wires the twelve services the frontend calls and returns them ready to
-// register with the application.
-func New(settings *appconfig.Store) []application.Service {
+// register with the application, along with the asset middleware that serves
+// plugins' own views -- which needs the plugin catalogue, and so comes from
+// here rather than from main.go.
+func New(settings *appconfig.Store) ([]application.Service, application.Middleware) {
 	configs := NewKubeconfigService(settings)
 	// The action service borrows the resource service's watcher rather than
 	// opening its own: acting on an object in a context already showing in a
@@ -57,5 +59,5 @@ func New(settings *appconfig.Store) []application.Service {
 		application.NewService(shells),
 		application.NewService(tunnels),
 		application.NewService(news),
-	}
+	}, solutions.assetMiddleware()
 }

@@ -497,9 +497,13 @@ type Settings struct {
 	// ones on purpose: a plugin shipped in a later release, or dropped into a
 	// watched folder, is on the moment it appears, and a settings file written
 	// before this field existed reads as "nothing disabled".
-	DisabledPlugins []string                `json:"disabledPlugins"`
-	Contexts        map[string]ContextPrefs `json:"contexts"`
-	TabOrder        []TabRef                `json:"tabOrder"`
+	DisabledPlugins []string `json:"disabledPlugins"`
+	// HiddenPluginSuggestions are known plugins the user has told the sidebar
+	// to stop suggesting. One answer for every cluster: "not for me" is about
+	// the plugin, not about where it was offered.
+	HiddenPluginSuggestions []string                `json:"hiddenPluginSuggestions"`
+	Contexts                map[string]ContextPrefs `json:"contexts"`
+	TabOrder                []TabRef                `json:"tabOrder"`
 	// Dock is the bottom strip: its tabs in the order the user left them, and
 	// whether it is showing them. Kept apart from TabOrder rather than merged
 	// into it: the two strips are reordered independently and hold different
@@ -528,16 +532,17 @@ type Settings struct {
 // been saved, and that also fills in any field missing from an older file.
 func Defaults() Settings {
 	return Settings{
-		ManualFiles:      []string{},
-		ManualFolders:    []string{},
-		ExcludedFiles:    []string{},
-		ExcludedContexts: []string{},
-		ThemeFolders:     []string{},
-		PluginFolders:    []string{},
-		DisabledPlugins:  []string{},
-		Contexts:         map[string]ContextPrefs{},
-		TabOrder:         []TabRef{},
-		Dock:             Dock{Tabs: []DockTabRef{}},
+		ManualFiles:             []string{},
+		ManualFolders:           []string{},
+		ExcludedFiles:           []string{},
+		ExcludedContexts:        []string{},
+		ThemeFolders:            []string{},
+		PluginFolders:           []string{},
+		DisabledPlugins:         []string{},
+		HiddenPluginSuggestions: []string{},
+		Contexts:                map[string]ContextPrefs{},
+		TabOrder:                []TabRef{},
+		Dock:                    Dock{Tabs: []DockTabRef{}},
 		Panes: &Panes{
 			Left: PaneState{
 				Tabs: []PaneTabRef{{Type: ViewClusters, Kind: KindClusters}},
@@ -1019,6 +1024,23 @@ func (s *Store) SetPluginEnabled(id string, enabled bool) (Settings, error) {
 	})
 }
 
+// HidePluginSuggestion stops the sidebar suggesting one known plugin, or
+// lets it suggest it again. Like SetPluginEnabled it takes the wanted state.
+func (s *Store) HidePluginSuggestion(id string, hidden bool) (Settings, error) {
+	if id == "" {
+		return s.Get(), errors.New("plugin id is required")
+	}
+	return s.update(func(d *Settings) {
+		if !hidden {
+			d.HiddenPluginSuggestions = slices.DeleteFunc(d.HiddenPluginSuggestions, func(p string) bool { return p == id })
+			return
+		}
+		if !slices.Contains(d.HiddenPluginSuggestions, id) {
+			d.HiddenPluginSuggestions = append(d.HiddenPluginSuggestions, id)
+		}
+	})
+}
+
 // SetLayout records the sidebar width and detail-panel dock and size.
 func (s *Store) SetLayout(l Layout) (Settings, error) {
 	return s.update(func(d *Settings) { d.Layout = l })
@@ -1214,6 +1236,9 @@ func normalise(s Settings) Settings {
 	}
 	if s.DisabledPlugins == nil {
 		s.DisabledPlugins = []string{}
+	}
+	if s.HiddenPluginSuggestions == nil {
+		s.HiddenPluginSuggestions = []string{}
 	}
 	if s.Contexts == nil {
 		s.Contexts = map[string]ContextPrefs{}
@@ -1601,6 +1626,7 @@ func clone(s Settings) Settings {
 	out.ThemeFolders = slices.Clone(s.ThemeFolders)
 	out.PluginFolders = slices.Clone(s.PluginFolders)
 	out.DisabledPlugins = slices.Clone(s.DisabledPlugins)
+	out.HiddenPluginSuggestions = slices.Clone(s.HiddenPluginSuggestions)
 	out.TabOrder = slices.Clone(s.TabOrder)
 	out.Dock.Tabs = slices.Clone(s.Dock.Tabs)
 	// A copy of the struct shares the pointer, and every pane behind it shares

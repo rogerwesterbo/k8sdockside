@@ -151,16 +151,18 @@ type Panel struct {
 
 // Charts draws every chart the installed plugins attach to one surface.
 //
-// `attach` is a resource kind, "dashboard" or "overview". `namespace` and `name`
-// identify the object for a per-object surface and are ignored for the other
-// two. `minutes` is how far back to look.
-func (s *MetricsService) Charts(contextID, attach, namespace, name string, minutes int) Panel {
+// `surface` is a resource kind, "dashboard", or one plugin's overview as
+// plugins.OverviewSurface names it. `namespace` and `name` identify the object
+// for a per-object surface and are ignored for the others. `minutes` is how
+// far back to look.
+func (s *MetricsService) Charts(contextID, surface, namespace, name string, minutes int) Panel {
 	panel := Panel{Range: minutes, Charts: []plugins.ChartResult{}}
 
 	// Enabled rather than every plugin: switching one off has to take its
 	// charts with it, or the dashboard would go on drawing for something the
-	// user has said they do not want to see.
-	installed := s.plugins.List().Enabled()
+	// user has said they do not want to see. An overview narrows it further,
+	// to the one plugin whose page it is.
+	attach, installed := plugins.Surface(surface, s.plugins.List().Enabled())
 	panel.Attached = plugins.HasChartsFor(installed, attach)
 	if !panel.Attached {
 		// Nothing to draw here, so the cluster is not asked where its

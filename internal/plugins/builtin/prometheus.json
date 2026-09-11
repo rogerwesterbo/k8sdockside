@@ -4,6 +4,20 @@
     "tagline": "monitoring, as the Prometheus Operator installs it",
     "icon": "gauge",
     "docs": "https://prometheus-operator.dev/docs/getting-started/introduction/",
+    "links": [
+        {
+            "label": "prometheus.io",
+            "url": "https://prometheus.io"
+        },
+        {
+            "label": "Prometheus Operator",
+            "url": "https://prometheus-operator.dev"
+        },
+        {
+            "label": "GitHub",
+            "url": "https://github.com/prometheus-operator/prometheus-operator"
+        }
+    ],
     "description": "The Prometheus Operator turns monitoring into Kubernetes objects: a Prometheus is a running server, and the ServiceMonitors, PodMonitors and ScrapeConfigs around it are what it has been told to scrape. This plugin also draws the graphs on pods, nodes, namespaces and the cluster dashboard — those queries assume the metric and label names the kube-prometheus-stack sets up (cAdvisor with a node label, kube-state-metrics, node-exporter). CPU throttling is read from cAdvisor's CFS counters and works on any cluster; pressure (PSI) needs node-exporter on a kernel with PSI for the node charts, and a cgroup v2 kubelet exporting cAdvisor's container_pressure metrics for the pod and namespace ones. If your Prometheus is set up differently, copy this plugin into your own plugins folder under the same id and change the queries.",
     "requires": [
         {

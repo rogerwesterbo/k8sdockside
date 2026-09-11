@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Argo CD</title>
+        <link rel="stylesheet" href="argo.css" />
+        <!-- The bridge to the app. Served by k8sdockside itself, always at this path. -->
+        <script src="/plugin-ui/_sdk/k8sdockside.js"></script>
+    </head>
+    <body class="page page-overview">
+        <p id="error" class="banner error" hidden></p>
+
+        <!-- A verdict, what Argo CD is doing, and every application at once. -->
+        <section id="hero" class="hero">
+            <div class="loading"><span class="pulse"></span><span>Looking for Argo CD…</span></div>
+        </section>
+
+        <section id="bars" class="bars" hidden></section>
+
+        <div id="columns" class="columns" hidden>
+            <section id="needs" class="card"></section>
+            <section id="stream" class="card"></section>
+        </div>
+
+        <div id="lower" class="columns" hidden>
+            <section id="system" class="card"></section>
+            <section id="projects" class="card"></section>
+        </div>
+
+        <section id="history" class="history" hidden></section>
+
+        <footer id="foot" class="foot" hidden></footer>
+
+        <!-- Classic scripts, not type="module": a sandboxed frame has an opaque
+             origin, so a module would be a cross-origin load. -->
+        <script src="model.js"></script>
+        <script src="kit.js"></script>
+        <script src="overview.js"></script>
+    </body>
+</html>

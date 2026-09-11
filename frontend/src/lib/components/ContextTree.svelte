@@ -479,7 +479,8 @@
                          is installed here, not there -- and whether the cluster
                          actually has it is said in the margin. -->
                     {#if group.label === PLUGINS_GROUP}
-                        {#if workspace.enabledPlugins.length === 0}
+                        {@const suggested = workspace.pluginSuggestionsFor(context.id)}
+                        {#if workspace.enabledPlugins.length === 0 && suggested.length === 0}
                             <p class="note">No plugins installed</p>
                         {:else}
                             {#each workspace.enabledPlugins as plugin (plugin.id)}
@@ -532,6 +533,35 @@
                                         </button>
                                     {/each}
                                 {/if}
+                            {/each}
+
+                            <!-- Known plugins for what this cluster runs and
+                                 this machine has no plugin for: a quiet row
+                                 each, opening Settings where the plugin is
+                                 described and installed -- nothing is cloned
+                                 from the sidebar. The cross hides the
+                                 suggestion for good. -->
+                            {#each suggested as offer (offer.id)}
+                                <div class="suggestion">
+                                    <button
+                                        class="plugin suggested"
+                                        onclick={() => workspace.openPluginSettings()}
+                                        title="{offer.name} runs in this cluster, and there is a plugin for it — open Settings to install it"
+                                    >
+                                        <Icon name="plus" size={11} />
+                                        <Icon name={offer.icon} size={14} />
+                                        <span>{offer.name}</span>
+                                        <span class="missing get">get plugin</span>
+                                    </button>
+                                    <button
+                                        class="hide"
+                                        onclick={() => void workspace.hidePluginSuggestion(offer.id)}
+                                        title="Stop suggesting the {offer.name} plugin"
+                                        aria-label="Stop suggesting the {offer.name} plugin"
+                                    >
+                                        <Icon name="close" size={10} />
+                                    </button>
+                                </div>
                             {/each}
                         {/if}
                     {/if}
@@ -1074,6 +1104,51 @@
         padding-left: var(--indent);
         font-size: 11px;
         color: var(--text-faint);
+    }
+
+    /* A plugin this machine could have for what the cluster runs: drawn like
+       a plugin row, but faint and with the accent on its badge, so it reads as
+       an offer rather than as something installed. */
+    .suggestion {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .plugin.suggested {
+        color: var(--text-faint);
+        padding-right: 28px;
+    }
+
+    .plugin.suggested:hover {
+        color: var(--text);
+    }
+
+    .missing.get {
+        color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    .suggestion .hide {
+        position: absolute;
+        right: 6px;
+        display: grid;
+        place-items: center;
+        width: 16px;
+        height: 16px;
+        border-radius: var(--radius-sm);
+        color: var(--text-faint);
+        opacity: 0;
+    }
+
+    .suggestion:hover .hide,
+    .suggestion .hide:focus-visible {
+        opacity: 1;
+    }
+
+    .suggestion .hide:hover {
+        background: var(--bg-hover);
+        color: var(--text);
     }
 
     .note.failed {

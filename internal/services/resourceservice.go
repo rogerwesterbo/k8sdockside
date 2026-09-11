@@ -119,6 +119,9 @@ func (s *ResourceService) view(kind string, namespaces []string) (string, []stri
 	if resolved.Overview {
 		return "", nil, "", fmt.Errorf("%s is a plugin overview, which is not a resource listing", kind)
 	}
+	if resolved.Custom {
+		return "", nil, "", fmt.Errorf("%s is one of the plugin's own views, which is not a resource listing", kind)
+	}
 	if resolved.Namespace != "" {
 		namespaces = []string{resolved.Namespace}
 	}

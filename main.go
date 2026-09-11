@@ -29,15 +29,20 @@ func main() {
 		log.Fatalf("k8sdockside: %v", err)
 	}
 
+	registered, pluginViews := services.New(settings)
+
 	app := application.New(application.Options{
 		Name: "K8s Dockside",
 		// Wails renders Name as the title and Description as the body of the
 		// About dialog under the app menu, and uses Description nowhere else,
 		// so the version goes here to be seen there.
 		Description: "A Kubernetes workspace for your local kubeconfig contexts\n\nVersion " + services.DisplayVersion(),
-		Services:    services.New(settings),
+		Services:    registered,
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
+			// Serves plugins' own views from their folders, and refuses those
+			// views' sandboxed frames any direct call into the services above.
+			Middleware: pluginViews,
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,

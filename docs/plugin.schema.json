@@ -1,0 +1,784 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://raw.githubusercontent.com/rogerwesterbo/k8sdockside/main/docs/plugin.schema.json",
+    "title": "K8s Dockside plugin",
+    "description": "A K8s Dockside solution plugin, or a pack of them. See docs/plugins.md. The app checks more than this schema can say (that kinds exist, that queries parse, that pages are in the ui folder): run plugincheck for the whole of it.",
+    "if": {
+        "type": "object",
+        "required": [
+            "plugins"
+        ]
+    },
+    "then": {
+        "$ref": "#/definitions/pack"
+    },
+    "else": {
+        "$ref": "#/definitions/plugin"
+    },
+    "definitions": {
+        "pack": {
+            "type": "object",
+            "description": "Several plugins in one file.",
+            "additionalProperties": false,
+            "required": [
+                "plugins"
+            ],
+            "properties": {
+                "$schema": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "author": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                },
+                "plugins": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/plugin"
+                    }
+                }
+            }
+        },
+        "plugin": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "$schema": {
+                    "type": "string",
+                    "description": "Where an editor finds this schema. Ignored by the app."
+                },
+                "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$",
+                    "description": "Stable id: lowercase letters, digits and dashes. Saved tabs are found by it."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Shown in the sidebar. Defaults to the id."
+                },
+                "tagline": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string",
+                    "enum": [
+                        "dashboard",
+                        "server",
+                        "layers",
+                        "bell",
+                        "box",
+                        "rocket",
+                        "database",
+                        "repeat",
+                        "check",
+                        "clock",
+                        "share",
+                        "globe",
+                        "sliders",
+                        "lock",
+                        "unlock",
+                        "play",
+                        "pause",
+                        "stop",
+                        "power",
+                        "drive",
+                        "gateway",
+                        "route",
+                        "grant",
+                        "puzzle",
+                        "terminal",
+                        "forward",
+                        "chevron-left",
+                        "chevron-right",
+                        "chevron-down",
+                        "copies",
+                        "scale",
+                        "gauge",
+                        "shield",
+                        "priority",
+                        "chip",
+                        "webhook",
+                        "policy",
+                        "link",
+                        "graph",
+                        "user",
+                        "users",
+                        "helm",
+                        "refresh",
+                        "download",
+                        "expand-all",
+                        "collapse-all",
+                        "sort-asc",
+                        "sort-desc",
+                        "sort-off",
+                        "plus",
+                        "folder-plus",
+                        "folder",
+                        "close",
+                        "dot",
+                        "edit",
+                        "save",
+                        "chevron-up",
+                        "alert",
+                        "file",
+                        "search",
+                        "trash",
+                        "undo",
+                        "dock-right",
+                        "dock-bottom",
+                        "dock-left",
+                        "pin",
+                        "settings",
+                        "sun",
+                        "moon",
+                        "monitor",
+                        "display",
+                        "rows",
+                        "columns",
+                        "type",
+                        "restore",
+                        "info",
+                        "help",
+                        "book"
+                    ],
+                    "description": "One of the app's icons."
+                },
+                "author": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string",
+                    "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+                    "description": "The plugin's own version, e.g. 1.0.0."
+                },
+                "minAppVersion": {
+                    "type": "string",
+                    "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+                    "description": "The oldest K8s Dockside release the plugin works with, e.g. 0.0.15. An older app refuses the plugin and says so."
+                },
+                "docs": {
+                    "type": "string",
+                    "pattern": "^https?://[^\\s]+$",
+                    "description": "A documentation link shown on the overview."
+                },
+                "links": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "$ref": "#/definitions/link"
+                    },
+                    "description": "What the plugin is about: the product's site, its source."
+                },
+                "description": {
+                    "type": "string"
+                },
+                "requires": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/requirement"
+                    }
+                },
+                "views": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/view"
+                    }
+                },
+                "cards": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/card"
+                    }
+                },
+                "charts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/chart"
+                    }
+                },
+                "usage": {
+                    "$ref": "#/definitions/usage"
+                },
+                "ui": {
+                    "$ref": "#/definitions/ui"
+                },
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/action"
+                    }
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/section"
+                    }
+                },
+                "overview": {
+                    "$ref": "#/definitions/overview"
+                }
+            }
+        },
+        "link": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "description": "Defaults to the address's host."
+                },
+                "url": {
+                    "type": "string",
+                    "pattern": "^https?://[^\\s]+$"
+                }
+            }
+        },
+        "requirement": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "kind"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                },
+                "label": {
+                    "type": "string"
+                },
+                "optional": {
+                    "type": "boolean",
+                    "description": "Reported, but does not decide whether the solution counts as installed."
+                }
+            }
+        },
+        "view": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$",
+                    "not": {
+                        "const": "overview"
+                    }
+                },
+                "label": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string",
+                    "enum": [
+                        "dashboard",
+                        "server",
+                        "layers",
+                        "bell",
+                        "box",
+                        "rocket",
+                        "database",
+                        "repeat",
+                        "check",
+                        "clock",
+                        "share",
+                        "globe",
+                        "sliders",
+                        "lock",
+                        "unlock",
+                        "play",
+                        "pause",
+                        "stop",
+                        "power",
+                        "drive",
+                        "gateway",
+                        "route",
+                        "grant",
+                        "puzzle",
+                        "terminal",
+                        "forward",
+                        "chevron-left",
+                        "chevron-right",
+                        "chevron-down",
+                        "copies",
+                        "scale",
+                        "gauge",
+                        "shield",
+                        "priority",
+                        "chip",
+                        "webhook",
+                        "policy",
+                        "link",
+                        "graph",
+                        "user",
+                        "users",
+                        "helm",
+                        "refresh",
+                        "download",
+                        "expand-all",
+                        "collapse-all",
+                        "sort-asc",
+                        "sort-desc",
+                        "sort-off",
+                        "plus",
+                        "folder-plus",
+                        "folder",
+                        "close",
+                        "dot",
+                        "edit",
+                        "save",
+                        "chevron-up",
+                        "alert",
+                        "file",
+                        "search",
+                        "trash",
+                        "undo",
+                        "dock-right",
+                        "dock-bottom",
+                        "dock-left",
+                        "pin",
+                        "settings",
+                        "sun",
+                        "moon",
+                        "monitor",
+                        "display",
+                        "rows",
+                        "columns",
+                        "type",
+                        "restore",
+                        "info",
+                        "help",
+                        "book"
+                    ],
+                    "description": "One of the app's icons."
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "table",
+                        "custom"
+                    ],
+                    "description": "table (the default) lists a kind; custom opens a page of the plugin's own."
+                },
+                "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                },
+                "entry": {
+                    "type": "string",
+                    "pattern": "\\.html?$",
+                    "description": "A page inside the plugin's ui folder, e.g. index.html."
+                },
+                "namespace": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$",
+                    "description": "Pins to one namespace."
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "A label selector in the usual a=b,c in (d,e) syntax."
+                }
+            }
+        },
+        "card": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "kind"
+            ],
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                },
+                "groupBy": {
+                    "type": "string",
+                    "description": "A field path: status.health.status, or status.conditions[Ready] for a condition's status."
+                },
+                "tones": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "enum": [
+                            "ok",
+                            "warn",
+                            "error",
+                            "info"
+                        ]
+                    }
+                },
+                "namespace": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$",
+                    "description": "Pins to one namespace."
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "A label selector in the usual a=b,c in (d,e) syntax."
+                }
+            }
+        },
+        "chart": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id",
+                "attach",
+                "query"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "attach": {
+                    "type": "string",
+                    "description": "\"dashboard\", \"overview\", or a kind whose detail panel draws it."
+                },
+                "query": {
+                    "type": "string",
+                    "description": "PromQL. May use $namespace, $name and $node when attached to a kind."
+                },
+                "legend": {
+                    "type": "string",
+                    "description": "The Prometheus label each series is titled by."
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": [
+                        "cores",
+                        "bytes",
+                        "bytes/s",
+                        "percent",
+                        "ops/s",
+                        "seconds",
+                        "count"
+                    ]
+                },
+                "description": {
+                    "type": "string"
+                }
+            }
+        },
+        "usagePair": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "cpu": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "string"
+                }
+            }
+        },
+        "usage": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "node": {
+                    "$ref": "#/definitions/usagePair"
+                },
+                "pod": {
+                    "$ref": "#/definitions/usagePair"
+                }
+            }
+        },
+        "ui": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "dir": {
+                    "type": "string",
+                    "description": "The folder the pages are read from, beside plugin.json. Defaults to ui."
+                },
+                "kinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                    },
+                    "description": "Kinds the pages may read beyond those the plugin already names. Never secrets."
+                },
+                "write": {
+                    "type": "boolean",
+                    "description": "Lets the pages ask to merge-patch those kinds. Every patch is confirmed by the user."
+                }
+            }
+        },
+        "condition": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "field"
+            ],
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "description": "A field path: status.health.status, or status.conditions[Ready] for a condition's status."
+                },
+                "in": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "notIn": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "type"
+            ],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "patch",
+                        "subresource",
+                        "create"
+                    ]
+                },
+                "patch": {
+                    "type": "object",
+                    "description": "The merge patch, for a patch request. Strings may use {name} and {namespace}."
+                },
+                "subresource": {
+                    "type": "string"
+                },
+                "apiGroup": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "PUT",
+                        "POST",
+                        "put",
+                        "post"
+                    ]
+                },
+                "body": {
+                    "type": "object"
+                },
+                "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                },
+                "object": {
+                    "type": "object",
+                    "description": "The object a create request makes, with apiVersion and kind."
+                }
+            }
+        },
+        "action": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id",
+                "kind",
+                "request"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "icon": {
+                    "type": "string",
+                    "enum": [
+                        "dashboard",
+                        "server",
+                        "layers",
+                        "bell",
+                        "box",
+                        "rocket",
+                        "database",
+                        "repeat",
+                        "check",
+                        "clock",
+                        "share",
+                        "globe",
+                        "sliders",
+                        "lock",
+                        "unlock",
+                        "play",
+                        "pause",
+                        "stop",
+                        "power",
+                        "drive",
+                        "gateway",
+                        "route",
+                        "grant",
+                        "puzzle",
+                        "terminal",
+                        "forward",
+                        "chevron-left",
+                        "chevron-right",
+                        "chevron-down",
+                        "copies",
+                        "scale",
+                        "gauge",
+                        "shield",
+                        "priority",
+                        "chip",
+                        "webhook",
+                        "policy",
+                        "link",
+                        "graph",
+                        "user",
+                        "users",
+                        "helm",
+                        "refresh",
+                        "download",
+                        "expand-all",
+                        "collapse-all",
+                        "sort-asc",
+                        "sort-desc",
+                        "sort-off",
+                        "plus",
+                        "folder-plus",
+                        "folder",
+                        "close",
+                        "dot",
+                        "edit",
+                        "save",
+                        "chevron-up",
+                        "alert",
+                        "file",
+                        "search",
+                        "trash",
+                        "undo",
+                        "dock-right",
+                        "dock-bottom",
+                        "dock-left",
+                        "pin",
+                        "settings",
+                        "sun",
+                        "moon",
+                        "monitor",
+                        "display",
+                        "rows",
+                        "columns",
+                        "type",
+                        "restore",
+                        "info",
+                        "help",
+                        "book"
+                    ],
+                    "description": "One of the app's icons."
+                },
+                "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                },
+                "tone": {
+                    "type": "string",
+                    "enum": [
+                        "danger"
+                    ]
+                },
+                "confirm": {
+                    "type": "string",
+                    "description": "Asked before the request is made. {name} and {namespace} are filled in."
+                },
+                "done": {
+                    "type": "string"
+                },
+                "when": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/condition"
+                    }
+                },
+                "request": {
+                    "$ref": "#/definitions/request"
+                }
+            }
+        },
+        "section": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "id",
+                "kind"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A kind the app can open: a built-in name such as \"deployments\", or \"crd:<plural>.<group>\" for a custom resource."
+                },
+                "entry": {
+                    "type": "string",
+                    "pattern": "\\.html?$",
+                    "description": "A page inside the plugin's ui folder, e.g. index.html."
+                },
+                "height": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "overview": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "entry": {
+                    "type": "string",
+                    "pattern": "\\.html?$",
+                    "description": "A page inside the plugin's ui folder, e.g. index.html."
+                }
+            }
+        }
+    }
+}

@@ -55,10 +55,13 @@ func TestBuiltinPluginsLoad(t *testing.T) {
 }
 
 // Every kind a built-in names has to be one the app can actually open, or the
-// view is a row that opens onto an error.
+// view is a row that opens onto an error. A page of its own lists no kind.
 func TestBuiltinPluginKindsAreOpenable(t *testing.T) {
 	for _, p := range Builtin() {
 		for _, v := range p.Views {
+			if v.Type == ViewCustom {
+				continue
+			}
 			if !kube.IsKnownKind(v.Kind) {
 				t.Errorf("%s/%s lists %q, which is not an openable kind", p.ID, v.ID, v.Kind)
 			}
@@ -701,101 +704,4 @@ func chartIDs(p Plugin) map[string]bool {
 		out[c.ID] = true
 	}
 	return out
-}
-
-// ----- kubevirt -------------------------------------------------------------
-
-func builtinKubeVirt(t *testing.T) Plugin {
-	t.Helper()
-	for _, p := range Builtin() {
-		if p.ID == "kubevirt" {
-			return p
-		}
-	}
-	t.Fatal("no builtin kubevirt plugin")
-	return Plugin{}
-}
-
-// The views somebody running KubeVirt actually goes looking for. Listed by id
-// rather than counted, so adding a view is free and losing one is not.
-func TestTheKubeVirtPluginCoversWhatARunningInstallHas(t *testing.T) {
-	kv := builtinKubeVirt(t)
-
-	byID := map[string]View{}
-	for _, v := range kv.Views {
-		byID[v.ID] = v
-	}
-	for _, id := range []string{
-		// The guests, and the machinery that moves them.
-		"virtualmachines", "instances", "migrations", "pools",
-		// Storage: what a VM boots from and where it came from.
-		"datavolumes", "datasources", "dataimportcrons", "storageprofiles",
-		"networks",
-		// What a VM is described as. Cluster-wide and namespaced are separate
-		// objects in KubeVirt, so they are separate views.
-		"instancetypes", "clusterinstancetypes", "preferences", "clusterpreferences",
-		// Point-in-time copies and what is done with them.
-		"snapshots", "restores", "clones", "exports",
-		// The installation itself.
-		"settings", "cdisettings", "components",
-	} {
-		if _, ok := byID[id]; !ok {
-			t.Errorf("the kubevirt plugin has no %q view", id)
-		}
-	}
-}
-
-// CDI and Multus are separate operators. Plenty of installs run KubeVirt
-// without either -- booting from PVCs somebody else made, on the pod network --
-// and that is a working install, not a broken one.
-func TestOnlyTheCoreKubeVirtKindsAreRequired(t *testing.T) {
-	kv := builtinKubeVirt(t)
-
-	required := map[string]bool{}
-	for _, r := range kv.Requires {
-		if !r.Optional {
-			required[r.Kind] = true
-		}
-	}
-	if len(required) != 2 {
-		t.Errorf("required kinds = %v, want only the two kubevirt.io ones", required)
-	}
-	for _, kind := range []string{
-		"crd:virtualmachines.kubevirt.io",
-		"crd:virtualmachineinstances.kubevirt.io",
-	} {
-		if !required[kind] {
-			t.Errorf("%s should be required: without it this is not a KubeVirt cluster", kind)
-		}
-	}
-}
-
-// A guest's readings are not its pod's: a VM's own CPU excludes the emulator
-// threads its virt-launcher pod is charged for. Charting them on the object
-// somebody is actually looking at is the point of the plugin.
-func TestTheKubeVirtPluginChartsTheGuestsThemselves(t *testing.T) {
-	kv := builtinKubeVirt(t)
-
-	for _, attach := range []string{
-		AttachOverview,
-		"crd:virtualmachines.kubevirt.io",
-		"crd:virtualmachineinstances.kubevirt.io",
-	} {
-		if len(kv.ChartsFor(attach)) == 0 {
-			t.Errorf("%s has no charts", attach)
-		}
-	}
-
-	// A VirtualMachine and its instance are different objects, but the metrics
-	// are the guest's either way -- somebody on the VirtualMachine should not
-	// be told to go and find its instance first.
-	vm := map[string]bool{}
-	for _, c := range kv.ChartsFor("crd:virtualmachines.kubevirt.io") {
-		vm[strings.TrimPrefix(c.ID, "vm-")] = true
-	}
-	for _, c := range kv.ChartsFor("crd:virtualmachineinstances.kubevirt.io") {
-		if !vm[strings.TrimPrefix(c.ID, "vmi-")] {
-			t.Errorf("chart %q is drawn on the instance but not on the VirtualMachine", c.ID)
-		}
-	}
 }

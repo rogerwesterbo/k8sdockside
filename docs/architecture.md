@@ -78,8 +78,15 @@ internal/appconfig/          the settings file
 internal/addons/             finding and merging add-on files, shared by the two below
 internal/themes/             the theme format, loader and built-in palettes
 internal/themes/builtin/     the thirteen themes, as JSON in the public format
-internal/plugins/            the plugin format, loader and overview builder
-internal/plugins/builtin/    Argo CD, Flux and Prometheus, in the public format
+internal/plugins/            the plugin format, loader and overview builder; object actions and
+                             panels (actions.go); serving plugins' own views (ui.go) with the
+                             bridge's client and its types (sdk/); installing from a repository
+                             (git.go); strict reading and its messages (decode.go); the plugins
+                             offered for installing (known.go, known.json)
+internal/plugins/builtin/    Argo CD, Flux and Prometheus, in the public format; builtin/ui/ holds
+                             the pages of those that have any
+cmd/plugincheck/             the loader's checks, run on a plugin's folder outside the app
+docs/plugin.schema.json      the plugin manifest as a JSON Schema, for editors
 internal/metrics/            PromQL, Prometheus discovery, and reading its answers
 internal/termapp/            the terminal emulators on this machine, and how to run one in it
 internal/updates/            asking GitHub for the latest release, and ordering versions
@@ -94,6 +101,7 @@ frontend/src/
   lib/state/views.ts              how each open list is sorted and filtered, for as long as its tab is
   lib/theme/apply.ts         writing a theme's colours onto the document
   lib/plugins/               the plugin catalogue as the sidebar and overview see it
+  lib/components/PluginFrame.svelte   a plugin's own view or detail panel, sandboxed, and the bridge it talks through
   lib/charts/                the SVG line chart, and the panel that hosts them
   lib/budget/                the requested/limits/used bars, and the throttling reading under them
   lib/catalogue.ts           the resource kinds the sidebar offers

@@ -1,0 +1,57 @@
+[
+    {
+        "id": "cert-manager",
+        "name": "cert-manager",
+        "tagline": "TLS certificates, issued and renewed inside the cluster",
+        "icon": "lock",
+        "description": "When every certificate expires, which renewals are stuck and exactly where — the request, the ACME order or the challenge — and why, in plain words. Panels on certificates, issuers, Ingresses and Gateways.",
+        "repo": "https://github.com/rogerwesterbo/k8sdockside-certmanager.git",
+        "detect": ["crd:certificates.cert-manager.io"],
+        "links": [
+            { "label": "cert-manager.io", "url": "https://cert-manager.io" },
+            { "label": "GitHub", "url": "https://github.com/cert-manager/cert-manager" }
+        ],
+        "official": true
+    },
+    {
+        "id": "metallb",
+        "name": "MetalLB",
+        "tagline": "load balancer addresses for bare-metal clusters",
+        "icon": "gateway",
+        "description": "Every address pool as a map of its addresses, the route each address takes out of the cluster, and what is wrong with it. Services still waiting for an address come first, with the reason and a fix.",
+        "repo": "https://github.com/rogerwesterbo/k8sdockside-metallb.git",
+        "detect": ["crd:ipaddresspools.metallb.io"],
+        "links": [
+            { "label": "metallb.io", "url": "https://metallb.io" },
+            { "label": "GitHub", "url": "https://github.com/metallb/metallb" }
+        ],
+        "official": true
+    },
+    {
+        "id": "kubevirt",
+        "name": "KubeVirt",
+        "tagline": "virtual machines as Kubernetes objects",
+        "icon": "display",
+        "description": "Your fleet of virtual machines at a glance, the nodes hosting them and the migrations in flight, with Start, Pause, Restart, Migrate and Stop on every machine and guest charts from Prometheus.",
+        "repo": "https://github.com/rogerwesterbo/k8sdockside-kubevirt.git",
+        "detect": ["crd:virtualmachines.kubevirt.io"],
+        "links": [
+            { "label": "kubevirt.io", "url": "https://kubevirt.io" },
+            { "label": "GitHub", "url": "https://github.com/kubevirt/kubevirt" }
+        ],
+        "official": true
+    },
+    {
+        "id": "image-inventory",
+        "name": "Image inventory",
+        "tagline": "which container images run where",
+        "icon": "layers",
+        "description": "Every image in the cluster by registry, the workloads using it, and the risky ones — unpinned tags and images that will not pull. Works on any cluster. Also the starting point for writing a plugin of your own in TypeScript.",
+        "repo": "https://github.com/rogerwesterbo/k8sdockside-example-plugin-typescript.git",
+        "links": [
+            { "label": "Container images", "url": "https://kubernetes.io/docs/concepts/containers/images/" },
+            { "label": "Source", "url": "https://github.com/rogerwesterbo/k8sdockside-example-plugin-typescript" }
+        ],
+        "official": true
+    }
+]

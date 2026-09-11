@@ -4,7 +4,11 @@
 // the sidebar and the overview.
 
 import type * as bindings from '../../../bindings/github.com/rogerwesterbo/k8sdockside/internal/plugins/models.js';
-import type { Plugin, PluginCatalogue, PluginSummary } from './types';
+import type { KnownPlugin, Plugin, PluginCatalogue, PluginLink, PluginSummary } from './types';
+
+function adoptLinks(links: bindings.Link[] | null | undefined): PluginLink[] {
+    return (links ?? []).map((l) => ({ label: l.label || l.url, url: l.url }));
+}
 
 export function adoptPlugin(plugin: bindings.Plugin): Plugin {
     return {
@@ -14,6 +18,9 @@ export function adoptPlugin(plugin: bindings.Plugin): Plugin {
         icon: plugin.icon || 'puzzle',
         author: plugin.author ?? '',
         docs: plugin.docs ?? '',
+        links: adoptLinks(plugin.links),
+        version: plugin.version ?? '',
+        minAppVersion: plugin.minAppVersion ?? '',
         description: plugin.description ?? '',
         requires: (plugin.requires ?? []).map((req) => ({
             kind: req.kind,
@@ -28,9 +35,23 @@ export function adoptPlugin(plugin: bindings.Plugin): Plugin {
             kind: view.kind ?? '',
             namespace: view.namespace ?? '',
             selector: view.selector ?? '',
+            entry: view.entry ?? '',
         })),
+        ui: plugin.ui
+            ? { readable: [...(plugin.ui.readable ?? [])], write: plugin.ui.write ?? false }
+            : null,
+        actions: (plugin.actions ?? []).map((a) => ({ id: a.id, label: a.label, kind: a.kind })),
+        sections: (plugin.sections ?? []).map((s) => ({
+            id: s.id,
+            label: s.label,
+            kind: s.kind,
+            entry: s.entry || 'index.html',
+            height: s.height || 240,
+        })),
+        overview: plugin.overview ? { entry: plugin.overview.entry || 'index.html' } : null,
         origin: plugin.origin,
         pack: plugin.pack,
+        repo: plugin.repo ?? '',
         disabled: plugin.disabled ?? false,
     };
 }
@@ -65,5 +86,20 @@ export function adoptPluginSummary(summary: bindings.Summary): PluginSummary {
             error: card.error,
         })),
         error: summary.error,
+    };
+}
+
+export function adoptKnownPlugin(known: bindings.KnownOffer): KnownPlugin {
+    return {
+        id: known.id,
+        name: known.name,
+        tagline: known.tagline ?? '',
+        icon: known.icon || 'puzzle',
+        description: known.description ?? '',
+        repo: known.repo,
+        detect: [...(known.detect ?? [])],
+        links: adoptLinks(known.links),
+        official: known.official ?? false,
+        installed: known.installed,
     };
 }

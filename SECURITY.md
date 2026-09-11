@@ -52,9 +52,37 @@ and no account.
   counts only. The YAML editor is the deliberate exception: it reads the object
   live, because an editor opened on a redacted copy would write the redaction
   back over the secret.
-- **Themes and plugins are data, not code.** Both formats are JSON — a theme is
-  colours, a plugin names resource kinds and PromQL the app already knows how to
-  render. Neither can ship CSS or execute anything.
+- **Themes and plugin manifests are data, not code.** Both formats are JSON — a
+  theme is colours, a plugin names resource kinds and PromQL the app already
+  knows how to render. Neither can ship CSS or execute anything.
+- **A plugin's own views are code, and fenced as code.** A plugin installed from
+  a folder may ship HTML pages ("custom views"). They run in an
+  `<iframe sandbox="allow-scripts">` with an opaque origin, under a
+  Content-Security-Policy that forbids network access and limits what they load
+  to their own folder; the asset server refuses the app's runtime to any request
+  from a sandboxed frame. A view reads the cluster only through a message bridge
+  the app answers, only for the kinds its plugin declares (never Secrets), and
+  any patch it asks for is shown to the user and applied only on confirmation.
+  A view can still send what it is allowed to read elsewhere by navigating its
+  frame, so install views only from people you would trust with read access to
+  the kinds they declare. See [docs/plugins.md](docs/plugins.md#what-a-view-can-and-cannot-do).
+- **A plugin's object actions are data.** A button a plugin puts on an object
+  names one request in its manifest — a merge patch, a subresource call under
+  the object's own API group, or a create in the object's namespace — and the
+  backend reads that request from the manifest; the webview only says which
+  action on which object. No action may write Secrets, ServiceAccounts, RBAC,
+  admission webhooks or CRDs. A plugin's own page asking to run one always
+  gets a confirmation from the app first.
+- **Installing a plugin from a repository runs `git clone`** into the plugins
+  folder, for `https://`, `ssh://` and `git@host:path` addresses only, with
+  prompts disabled. The plugins offered under *Settings → Plugins → Available*
+  are a list compiled into the app, each with a fixed `https://` repository;
+  the frontend names the plugin, never the address, and nothing is fetched to
+  find out what exists. Suggestions in the sidebar only open Settings.
+- **Plugin files are read strictly.** A member the manifest has no field for,
+  an icon the app does not draw, a link that is not `http(s)`, or a page that is
+  not in the plugin's own folder refuses the plugin, with the reason, rather
+  than being ignored.
 
 The app is only as privileged as the kubeconfig you point it at. Treat a
 context's RBAC as the boundary: **Shell** on a node, for example, creates the

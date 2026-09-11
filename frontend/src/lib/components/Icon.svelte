@@ -38,6 +38,12 @@
         // The same padlock with the shackle swung open, so the pair reads as
         // one control in two states rather than as two different icons.
         unlock: ['M6 10h12v10H6z', 'M9 10V7a3 3 0 0 1 6 0'],
+        // Media-style controls, for plugins whose objects start and stop:
+        // a virtual machine, a suspended job, a paused rollout.
+        play: ['M7 4.5v15l12-7.5z'],
+        pause: ['M7 5h3.5v14H7z', 'M13.5 5H17v14h-3.5z'],
+        stop: ['M6 6h12v12H6z'],
+        power: ['M12 3v8', 'M6.3 6.3a8 8 0 1 0 11.4 0'],
         drive: ['M5 12l2-6h10l2 6v6H5v-6z', 'M5 12h14', 'M8 15.5h.01', 'M11 15.5h.01'],
         // A gateway: two posts with traffic passing between them.
         gateway: ['M5 4v16', 'M19 4v16', 'M9 12h6', 'M12.5 9l3 3-3 3'],

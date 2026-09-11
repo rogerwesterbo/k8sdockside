@@ -185,6 +185,11 @@ func scan[T Identified](dir string, parse Parse[T]) ([]T, []Problem) {
 	return items, problems
 }
 
+// FilesIn lists the add-on files directly inside dir: what is read from a
+// folder cloned or copied into an add-on folder, and so what a check of such a
+// folder on its own should read.
+func FilesIn(dir string) []string { return jsonFilesIn(dir) }
+
 // jsonFilesIn lists the add-on files directly inside a subdirectory.
 func jsonFilesIn(dir string) []string {
 	entries, err := os.ReadDir(dir)
@@ -204,7 +209,20 @@ func jsonFilesIn(dir string) []string {
 }
 
 func isJSON(name string) bool {
-	return strings.EqualFold(filepath.Ext(name), ".json")
+	return strings.EqualFold(filepath.Ext(name), ".json") && !toolingFile(name)
+}
+
+// toolingFile is a JSON file a repository keeps for its tools rather than for
+// us. An add-on kept in a repository of its own -- cloned straight into the
+// folder -- has these beside its manifest, and reading them as add-ons would
+// only fill the settings view with complaints about files nobody meant.
+func toolingFile(name string) bool {
+	lower := strings.ToLower(name)
+	switch lower {
+	case "package.json", "package-lock.json", "jsconfig.json", "deno.json", "renovate.json", "composer.json":
+		return true
+	}
+	return strings.HasPrefix(lower, "tsconfig") || strings.HasPrefix(lower, ".")
 }
 
 // readFile hands one file's bytes to the parser, having first checked it is
