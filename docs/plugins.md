@@ -640,6 +640,12 @@ are accepted; git never prompts, so a private repository needs credentials git
 can find on its own. `package.json`, `tsconfig*.json` and the like at the root
 are skipped rather than read as plugins.
 
+Installing a plugin whose folder is already there as a clone of the same
+repository updates that clone instead of refusing — which is what gets a
+repository cloned before its plugin was pushed out of the way. A folder of that
+name holding anything else is left alone, and a clone in the plugins folder
+with no plugin file at its root is listed under **would not load**.
+
 A clone that worked but holds nothing that loads is reported as a failure, with
 the reasons — "installed" followed by nothing appearing would leave you with
 nowhere to look. The folder is kept, so a plugin waiting on a newer app loads

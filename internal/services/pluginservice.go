@@ -362,7 +362,8 @@ func (s *PluginService) CreateExample() (string, error) {
 }
 
 // InstallFromGit clones a plugin repository into the plugins folder and reads
-// it. The repository's plugin.json has to be at its root.
+// it, or updates the clone already there -- see plugins.Install. The
+// repository's plugin.json has to be at its root.
 //
 // A clone that worked but holds nothing that loads is still an error, with
 // what was wrong: "installed" followed by nothing appearing is the one outcome
@@ -370,7 +371,7 @@ func (s *PluginService) CreateExample() (string, error) {
 // way, so a plugin waiting on a newer app loads once the app is updated, and
 // one with a mistake in it can be fixed and updated in place.
 func (s *PluginService) InstallFromGit(url string) (plugins.Catalogue, error) {
-	dest, err := plugins.Clone(s.store.PluginsDir(), url)
+	dest, err := plugins.Install(s.store.PluginsDir(), url)
 	if err != nil {
 		return s.catalogue(), err
 	}

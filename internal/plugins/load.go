@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,6 +145,7 @@ func LoadAt(appVersion, dir string, extra []string, disabled []string) Catalogue
 		return parseFile(path, raw, appVersion)
 	}
 	loaded, problems := addons.Load(Builtin(), folders, parse)
+	problems = append(problems, emptyClones(dir)...)
 
 	off := make(map[string]bool, len(disabled))
 	for _, id := range disabled {
@@ -160,6 +162,37 @@ func LoadAt(appVersion, dir string, extra []string, disabled []string) Catalogue
 		Folders:  append([]string{}, extra...),
 		Problems: problems,
 	}
+}
+
+// emptyClones names the repositories in the plugins folder with no plugin
+// file at their root. Nothing loads from one, and nothing else would say so:
+// the folder reader looks for files, and there are none to report on. The
+// usual cause is a repository cloned before its plugin was pushed to it, and
+// the plugin it was meant to be is then offered for installing again -- which
+// updates the clone, and is what the message says to do.
+func emptyClones(dir string) []Problem {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []Problem
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		folder := filepath.Join(dir, entry.Name())
+		if info, err := os.Stat(filepath.Join(folder, ".git")); err != nil || !info.IsDir() {
+			continue
+		}
+		if len(addons.FilesIn(folder)) > 0 {
+			continue
+		}
+		out = append(out, Problem{
+			Path:    folder,
+			Message: "this repository has no plugin.json at its root, so nothing in it loads -- it may have been cloned before its plugin was pushed. Installing the plugin again updates it; so does git pull in the folder",
+		})
+	}
+	return out
 }
 
 // packFile is a pack as it is first read: its plugins kept as they are

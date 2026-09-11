@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,9 +69,15 @@ func gitPath() (string, error) {
 }
 
 func runGit(dir string, args ...string) error {
+	_, err := gitOutput(dir, args...)
+	return err
+}
+
+// gitOutput runs git and returns what it printed.
+func gitOutput(dir string, args ...string) (string, error) {
 	git, err := gitPath()
 	if err != nil {
-		return err
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
@@ -81,14 +88,14 @@ func runGit(dir string, args ...string) error {
 	// clone waiting on one would hang until the timeout.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=")
 	out, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
 	if err != nil {
-		text := strings.TrimSpace(string(out))
 		if text == "" {
 			text = err.Error()
 		}
-		return fmt.Errorf("git %s: %s", args[0], text)
+		return "", fmt.Errorf("git %s: %s", args[0], text)
 	}
-	return nil
+	return text, nil
 }
 
 // Clone installs a plugin repository into dir and returns the folder it made.
@@ -116,6 +123,79 @@ func Clone(dir, url string) (string, error) {
 		return "", err
 	}
 	return dest, nil
+}
+
+// Install puts a plugin repository in dir: a fresh clone, or -- when the
+// folder it would clone into is already a clone of that same repository --
+// that clone brought up to date. Returns the folder.
+//
+// The second case is not rare. A repository cloned before its plugin was
+// pushed holds no plugin.json, so nothing loads from it, so the plugin is
+// offered for installing again -- and a clone that refused because the folder
+// is taken would leave no way forward in the app at all. A folder of that
+// name holding anything else is still left alone.
+func Install(dir, url string) (string, error) {
+	url = strings.TrimSpace(url)
+	if !ValidGitURL(url) {
+		return "", fmt.Errorf("%q is not a repository address this app will clone -- use https://, ssh:// or git@host:owner/repo", url)
+	}
+	folder, err := RepoFolder(url)
+	if err != nil {
+		return "", err
+	}
+	dest := filepath.Join(dir, folder)
+	if info, err := os.Stat(filepath.Join(dest, ".git")); err == nil && info.IsDir() {
+		origin, err := OriginOf(dest)
+		if err != nil {
+			return "", fmt.Errorf("%s is already there, and which repository it came from could not be read: %w", dest, err)
+		}
+		if !SameRepository(origin, url) {
+			return "", fmt.Errorf("%s is already there, cloned from %s rather than %s -- remove the folder first", dest, origin, url)
+		}
+		if err := Pull(dest); err != nil {
+			return "", err
+		}
+		return dest, nil
+	}
+	return Clone(dir, url)
+}
+
+// OriginOf is the address a clone was made from.
+func OriginOf(repo string) (string, error) {
+	return gitOutput(repo, "config", "--get", "remote.origin.url")
+}
+
+// SameRepository reports whether two addresses name one repository, however
+// each is spelt: https, ssh:// or git@host:path, with or without .git or a
+// trailing slash, in any case.
+func SameRepository(a, b string) bool {
+	ka, kb := repoKey(a), repoKey(b)
+	return ka != "" && ka == kb
+}
+
+// repoKey reduces a repository address to host/path.
+func repoKey(address string) string {
+	address = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(address), "/"), ".git")
+	var host, path string
+	if strings.Contains(address, "://") {
+		parsed, err := neturl.Parse(address)
+		if err != nil {
+			return ""
+		}
+		host, path = parsed.Hostname(), parsed.Path
+	} else {
+		at := strings.Index(address, "@")
+		colon := strings.Index(address, ":")
+		if at < 0 || colon < at {
+			return ""
+		}
+		host, path = address[at+1:colon], address[colon+1:]
+	}
+	path = strings.Trim(path, "/")
+	if host == "" || path == "" {
+		return ""
+	}
+	return strings.ToLower(host + "/" + path)
 }
 
 // RepoOf is the repository a plugin's file is in, if it is in one: its own
