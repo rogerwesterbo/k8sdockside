@@ -156,6 +156,22 @@ func (s *PluginService) Patch(contextID, pluginID, kind, namespace, name, patch 
 	return nil
 }
 
+// Create makes one object a plugin's own view asked for and returns the name
+// it was given. As with Patch, the user has already seen the object and said
+// yes; this checks the plugin may ask, and that the kind is one no plugin may
+// write.
+func (s *PluginService) Create(contextID, pluginID, kind, namespace, object string) (string, error) {
+	plugin, ctx, err := s.forView(contextID, pluginID, kind, true)
+	if err != nil {
+		return "", err
+	}
+	obj, err := plugin.NewObject(kind, namespace, object)
+	if err != nil {
+		return "", err
+	}
+	return s.watcher.Create(ctx, kind, namespace, obj)
+}
+
 // forView checks a plugin's view may touch a kind, and finds the context.
 func (s *PluginService) forView(contextID, pluginID, kind string, write bool) (plugins.Plugin, kube.Context, error) {
 	plugin, ok := s.catalogue().Find(pluginID)

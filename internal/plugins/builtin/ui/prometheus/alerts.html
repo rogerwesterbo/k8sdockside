@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Alerts &amp; rules</title>
+        <link rel="stylesheet" href="prom.css" />
+        <!-- The bridge to the app. Served by k8sdockside itself, always at this path. -->
+        <script src="/plugin-ui/_sdk/k8sdockside.js"></script>
+    </head>
+    <body class="page page-alerts">
+        <p id="error" class="banner error" hidden></p>
+
+        <header class="top">
+            <div class="brand">
+                <span id="logo" class="logo"></span>
+                <div>
+                    <h1>Alerts &amp; rules</h1>
+                    <div id="sub" class="faint small">Reading rules…</div>
+                </div>
+            </div>
+            <div class="filters">
+                <input id="q" class="search" type="search" placeholder="Search names, expressions, rule objects" aria-label="Search" />
+                <div id="sev" class="segmented" role="group" aria-label="Severity">
+                    <button type="button" data-sev="all" class="on">All</button>
+                    <button type="button" data-sev="critical">Critical</button>
+                    <button type="button" data-sev="warning">Warning</button>
+                    <button type="button" data-sev="info">Info</button>
+                </div>
+                <select id="st" aria-label="State">
+                    <option value="all">Any state</option>
+                    <option value="firing">Firing</option>
+                    <option value="pending">Pending</option>
+                    <option value="inactive">Inactive</option>
+                </select>
+                <button id="new" type="button" class="primary" disabled><span>New alert</span></button>
+            </div>
+        </header>
+
+        <div class="split">
+            <section id="list" class="list">
+                <div class="loading"><span class="pulse"></span><span>Reading rules…</span></div>
+            </section>
+            <aside id="side" class="side"></aside>
+        </div>
+
+        <!-- Classic scripts, not type="module": a sandboxed frame has an opaque
+             origin, so a module would be a cross-origin load. -->
+        <script src="prom.js"></script>
+        <script src="kit.js"></script>
+        <script src="alerts.js"></script>
+    </body>
+</html>

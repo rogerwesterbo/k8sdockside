@@ -403,7 +403,7 @@ my-plugin/
 | view `entry` | optional | The file it opens, relative to the ui folder. Defaults to `index.html`. One page can serve several views and tell them apart by `viewId`. A custom view takes no `kind`, `namespace` or `selector`. |
 | `ui.dir` | optional | The folder, relative to the plugin's file. Defaults to `ui`. It may not leave the file's folder. |
 | `ui.kinds` | optional | Kinds the views may read, beyond those the plugin already names in `requires`, `views` and `cards`. |
-| `ui.write` | optional | Lets the views *ask* to merge-patch objects of those kinds. |
+| `ui.write` | optional | Lets the views *ask* to merge-patch and create objects of those kinds. |
 
 A plugin with a custom view and no `ui` block gets the defaults: a `ui/` folder,
 read-only. A built-in's pages are embedded in the app from
@@ -434,6 +434,7 @@ The page includes the bridge, which the app serves, and uses it:
 | `summary()` | What the generated overview is made of for this plugin and cluster: `{ installed, checked, requirements, cards, error }`. `checked` false means the cluster could not be asked — not the same as "not installed". |
 | `charts({ minutes? })` | This plugin's `overview` charts from the cluster's Prometheus, as `{ attached, range, source: { available, error, describe }, charts: [{ id, label, unit, description, error, series: [{ name, points: [{ t, v }] }] }] }`. `t` is Unix seconds. Only ever this plugin's own. |
 | `patch({ kind, namespace, name, patch })` | A merge patch. Needs `ui.write`; the user sees it and confirms first. Rejects if they decline. |
+| `create({ kind, namespace?, object })` | Creates one object — the whole of it, `apiVersion`, `kind` and `metadata.name` included — in `namespace`, whatever its own metadata says. Needs `ui.write`; the user sees the object and confirms first. Secrets, ServiceAccounts, RBAC, admission webhooks and CRDs are refused whatever is declared, as they are for actions. Resolves with `{ name }`; rejects if they decline. |
 | `open({ kind, namespace?, name? })` | The object in the details panel, or the kind's own tab. |
 | `openView(viewId)` | Another of this plugin's views, or `overview`. |
 | `edit(ref)`, `logs(ref)` | The YAML editor or the log view, in the app. |
@@ -491,9 +492,9 @@ sandboxed frame. What the page learns about the cluster, it asks the app for.
 
 - It reads **only the kinds the plugin declares**, checked in the frame and
   again in Go. **Secrets are never readable**, whatever is declared.
-- It **never writes without you**: each patch is shown in a dialog the page
-  cannot reach, with the object and cluster it is for, and applied only on
-  **Apply change**.
+- It **never writes without you**: each patch or new object is shown in a
+  dialog the page cannot reach, with the object and cluster it is for, and
+  applied only on **Apply change** or **Create**.
 - It sees only the cluster of the tab it is in.
 - **Settings → Plugins** lists, on the plugin's card, how many kinds its views
   read (hover for which) and whether they may ask to change them.
@@ -766,7 +767,13 @@ reading as worked examples:
 - **`prometheus.json`** — the Prometheus Operator's CRDs, plus every chart in the
   app: CPU, memory and network per pod; CPU, memory and pod count per node; and
   cluster CPU, memory, pods by phase and API server request rate on the
-  dashboard. Its queries assume the metric and label names the
+  dashboard. Its pages are in `builtin/ui/prometheus/`: its own overview (a
+  verdict, targets up as a ring, tiles with sparklines, what is firing now,
+  every alert over the last hours as a timeline, scrape health per job, the
+  servers, and which rule objects no Prometheus loads), and an *Alerts & rules*
+  view — every alerting rule with its state, and a builder that writes new
+  ones into a PrometheusRule labelled so a Prometheus's `ruleSelector` picks it
+  up, through the bridge's `create` and `patch`. Its queries assume the metric and label names the
   kube-prometheus-stack sets up (cAdvisor with a `node` label,
   kube-state-metrics). If your monitoring is set up differently, copy the file
   into your own plugins folder under the same id and change the queries — a

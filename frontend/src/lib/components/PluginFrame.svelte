@@ -308,6 +308,27 @@
                 await PluginService.Patch(contextId, p.id, target.kind, target.namespace, target.name, patch);
                 return null;
             }
+            case 'create': {
+                const kind = readable(params.kind);
+                if (!p.ui?.write) throw new Error(`${p.name} does not declare "ui": { "write": true }`);
+                const body = text(params.object);
+                let name = '';
+                try {
+                    const parsed = JSON.parse(body) as { metadata?: { name?: string; generateName?: string } };
+                    name = parsed.metadata?.name || parsed.metadata?.generateName || '';
+                } catch {
+                    throw new Error('the object to create is not JSON');
+                }
+                const target: DetailTarget = { contextId, kind, namespace: text(params.namespace), name };
+                const yes = await ask({
+                    title: `${p.name} wants to create ${name || 'an object'}`,
+                    target,
+                    detail: body,
+                    apply: 'Create',
+                });
+                if (!yes) throw new Error('the creation was declined');
+                return { name: await PluginService.Create(contextId, p.id, kind, target.namespace, body) };
+            }
             case 'open': {
                 const target = targetOf(params);
                 if (target.name) void detail.open(target);

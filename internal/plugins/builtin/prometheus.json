@@ -34,7 +34,23 @@
             "optional": true
         }
     ],
+    "ui": {
+        "kinds": [
+            "namespaces"
+        ],
+        "write": true
+    },
+    "overview": {
+        "entry": "overview.html"
+    },
     "views": [
+        {
+            "id": "alerts",
+            "label": "Alerts & rules",
+            "icon": "bell",
+            "type": "custom",
+            "entry": "alerts.html"
+        },
         {
             "id": "servers",
             "label": "Prometheus servers",
@@ -129,6 +145,23 @@
             "legend": "job",
             "description": "How many targets each job is scraping. A job that drops to nothing has lost its endpoints.",
             "query": "count by (job) (up)"
+        },
+        {
+            "id": "targets-up-by-job",
+            "label": "Scrape targets up by job",
+            "attach": "overview",
+            "unit": "count",
+            "legend": "job",
+            "description": "How many of each job's targets answered their last scrape. Read against the count by job, it is each job's health.",
+            "query": "sum by (job) (up)"
+        },
+        {
+            "id": "alerts-active",
+            "label": "Active alerts",
+            "attach": "overview",
+            "unit": "count",
+            "description": "Every alert that is pending or firing, one series per alert, state, severity and namespace. The overview draws it as the alert timeline and reads what is firing now from its last samples.",
+            "query": "max by (alertname, alertstate, severity, namespace) (ALERTS)"
         },
         {
             "id": "targets-down",

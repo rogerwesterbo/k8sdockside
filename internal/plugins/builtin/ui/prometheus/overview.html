@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Prometheus</title>
+        <link rel="stylesheet" href="prom.css" />
+        <!-- The bridge to the app. Served by k8sdockside itself, always at this path. -->
+        <script src="/plugin-ui/_sdk/k8sdockside.js"></script>
+    </head>
+    <body class="page page-overview">
+        <p id="error" class="banner error" hidden></p>
+
+        <!-- A verdict, what Prometheus is doing, and its targets at a glance. -->
+        <section id="hero" class="hero">
+            <div class="loading"><span class="pulse"></span><span>Looking for Prometheus…</span></div>
+        </section>
+
+        <section id="tiles" class="tiles" hidden></section>
+
+        <div id="columns" class="columns" hidden>
+            <section id="firing" class="card"></section>
+            <section id="jobs" class="card"></section>
+        </div>
+
+        <section id="timeline" class="card timeline" hidden></section>
+
+        <div id="lower" class="columns" hidden>
+            <section id="servers" class="card"></section>
+            <section id="rules" class="card"></section>
+        </div>
+
+        <footer id="foot" class="foot" hidden></footer>
+
+        <!-- Classic scripts, not type="module": a sandboxed frame has an opaque
+             origin, so a module would be a cross-origin load. -->
+        <script src="prom.js"></script>
+        <script src="kit.js"></script>
+        <script src="overview.js"></script>
+    </body>
+</html>

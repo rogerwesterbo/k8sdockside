@@ -365,6 +365,23 @@ declare namespace K8sDockside {
         patch: object | string;
     }
 
+    interface CreateRequest {
+        kind: Kind;
+        /** Where it is created, whatever the object's own metadata says. `''` for a cluster-scoped kind. */
+        namespace?: string;
+        /**
+         * The whole object -- `apiVersion`, `kind`, `metadata.name` (or
+         * `generateName`) and the rest -- as an object, sent as JSON, or JSON
+         * text.
+         */
+        object: object | string;
+    }
+
+    interface CreateResult {
+        /** The name the object was given -- the only way to know it for a `generateName`. */
+        name: string;
+    }
+
     // ----- pushes from the app -----------------------------------------------------
 
     /** The events `on` can listen for, and what each listener is called with. */
@@ -467,6 +484,15 @@ declare namespace K8sDockside {
          * one is still on screen.
          */
         patch(request: PatchRequest): Promise<null>;
+
+        /**
+         * Asks to create one object. Needs `"ui": { "write": true }` and a kind
+         * the plugin declares; Secrets, RBAC, admission webhooks and CRDs are
+         * refused whatever is declared. The user sees the object, the namespace
+         * and the cluster, and it is created only if they press Create. Rejects
+         * with "the creation was declined" if they do not.
+         */
+        create(request: CreateRequest): Promise<CreateResult>;
 
         /** Opens an object in the app's details panel, or -- with no `name` -- the kind's own tab. */
         open(ref: OpenRef): Promise<null>;

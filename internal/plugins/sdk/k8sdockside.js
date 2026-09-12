@@ -245,6 +245,20 @@
             return call('patch', params);
         },
 
+        /**
+         * Asks to create one object: { kind, namespace, object }. `object` is
+         * the whole object -- apiVersion, kind, metadata.name and the rest --
+         * as an object or JSON text; it lands in `namespace` whatever its own
+         * metadata says. Needs "ui": { "write": true }, and the user sees the
+         * object and confirms it first. Resolves with { name }; rejects if
+         * they decline.
+         */
+        create: function (request) {
+            var params = Object.assign({}, request);
+            if (typeof params.object !== 'string') params.object = JSON.stringify(params.object, null, 2);
+            return call('create', params);
+        },
+
         /** Opens an object in the details panel, or a kind's own tab if no name is given. */
         open: function (ref) {
             return call('open', ref);
