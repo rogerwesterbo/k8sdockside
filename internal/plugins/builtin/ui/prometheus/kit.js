@@ -215,6 +215,101 @@
         );
     }
 
+    // ----- the grip ----------------------------------------------------------
+
+    // A grab strip on the inner edge of a panel on the right: drag it, or
+    // focus it and use the arrow keys, to make the panel wider or narrower; a
+    // double-click puts it back. The width is a custom property on the root,
+    // so the panel and whatever makes room for it read the one value -- unset,
+    // the stylesheet's own width stands. The page places the strip, and keeps
+    // the width wherever it keeps the rest of its state.
+    // opts: { panel, prop, min, room, initial, label, className, onResize(px, done) }
+    //   room      what the panel always leaves of the window
+    //   onResize  px is 0 once the panel is back to the stylesheet's width;
+    //             done is false while a drag goes on, true when it ends
+    function grip(opts) {
+        var root = document.documentElement;
+        var node = el('div', 'grip' + (opts.className ? ' ' + opts.className : ''));
+        node.tabIndex = 0;
+        node.title = 'Drag to resize · double-click to reset';
+        node.setAttribute('role', 'separator');
+        node.setAttribute('aria-orientation', 'vertical');
+        node.setAttribute('aria-label', opts.label || 'Resize the panel');
+        var wanted = opts.initial > 0 ? opts.initial : 0;
+        var drag = null;
+        var frame = 0;
+
+        function fit(px) {
+            return Math.round(Math.max(opts.min, Math.min(px, window.innerWidth - opts.room)));
+        }
+
+        // The width asked for is kept as asked: a smaller window takes what it
+        // must from the panel and gives it back when it grows again.
+        function apply() {
+            if (wanted) root.style.setProperty(opts.prop, fit(wanted) + 'px');
+            else root.style.removeProperty(opts.prop);
+        }
+
+        // While a drag goes on the page hears of it once a frame at most.
+        function tell(done) {
+            if (!opts.onResize) return;
+            cancelAnimationFrame(frame);
+            frame = 0;
+            if (done) opts.onResize(wanted, true);
+            else
+                frame = requestAnimationFrame(function () {
+                    frame = 0;
+                    opts.onResize(wanted, false);
+                });
+        }
+
+        function resize(px, done) {
+            wanted = px ? fit(px) : 0;
+            apply();
+            tell(done);
+        }
+
+        function release(event) {
+            if (!drag) return;
+            drag = null;
+            document.body.classList.remove('gripping');
+            if (node.hasPointerCapture(event.pointerId)) node.releasePointerCapture(event.pointerId);
+            tell(true);
+        }
+
+        node.addEventListener('pointerdown', function (event) {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            node.setPointerCapture(event.pointerId);
+            drag = { x: event.clientX, from: opts.panel.getBoundingClientRect().width };
+            document.body.classList.add('gripping');
+        });
+        node.addEventListener('pointermove', function (event) {
+            // The panel is on the right: it grows as the pointer goes left.
+            if (drag) resize(drag.from + drag.x - event.clientX, false);
+        });
+        node.addEventListener('pointerup', release);
+        node.addEventListener('pointercancel', release);
+        node.addEventListener('dblclick', function () {
+            resize(0, true);
+        });
+        node.addEventListener('keydown', function (event) {
+            var step = event.shiftKey ? 48 : 16;
+            var now = wanted || opts.panel.getBoundingClientRect().width;
+            if (event.key === 'ArrowLeft') resize(now + step, true);
+            else if (event.key === 'ArrowRight') resize(now - step, true);
+            else return;
+            event.preventDefault();
+        });
+        window.addEventListener('resize', function () {
+            if (!wanted) return;
+            apply();
+            tell(false);
+        });
+        apply();
+        return node;
+    }
+
     window.PromKit = {
         el: el,
         add: add,
@@ -229,5 +324,6 @@
         ring: ring,
         stackBar: stackBar,
         apply: apply,
+        grip: grip,
     };
 })();

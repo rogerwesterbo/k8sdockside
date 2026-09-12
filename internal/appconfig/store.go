@@ -220,6 +220,21 @@ type Layout struct {
 	CollapsedGroups []string `json:"collapsedGroups"`
 }
 
+// Window is where the main window was last left and how big, in the screen
+// coordinates the window itself reports: from the top-left of the primary
+// screen, Y downwards, so a screen to the left of it or above it gives
+// negative values. The zero value is "never recorded", and the window opens
+// centred at its default size.
+type Window struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+	// Maximised is kept apart from the size, which stays the one the window
+	// had before it was maximised: that is where un-maximising returns to.
+	Maximised bool `json:"maximised,omitzero"`
+}
+
 // Terminal is how the app opens a shell, and what it opens it with.
 //
 // It is one record rather than five loose preferences because the fields only
@@ -521,6 +536,9 @@ type Settings struct {
 	Updates     Updates     `json:"updates,omitzero"`
 	Layout      Layout      `json:"layout"`
 	Preferences Preferences `json:"preferences"`
+	// Window is where the main window was left. The app keeps it itself as the
+	// window moves; nothing in the frontend reads or sets it.
+	Window Window `json:"window,omitzero"`
 	// PortForwards are the tunnels the user set up, remembered as requests
 	// rather than as connections. They sit here rather than in Preferences for
 	// the reason ManualFolders does: this is a list of things, not a choice
@@ -1044,6 +1062,11 @@ func (s *Store) HidePluginSuggestion(id string, hidden bool) (Settings, error) {
 // SetLayout records the sidebar width and detail-panel dock and size.
 func (s *Store) SetLayout(l Layout) (Settings, error) {
 	return s.update(func(d *Settings) { d.Layout = l })
+}
+
+// SetWindow records where the main window is and how big.
+func (s *Store) SetWindow(w Window) (Settings, error) {
+	return s.update(func(d *Settings) { d.Window = w })
 }
 
 // SetPreferences records the app-wide preferences. It replaces the block

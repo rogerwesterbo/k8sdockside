@@ -1072,6 +1072,29 @@
         });
     });
 
+    // The side panel is as wide as it was left: the width is kept in the
+    // frame's hash, which outlives the page when its tab is switched away.
+    var keptSide = /(?:^#|&)side=(\d+)/.exec(location.hash || '');
+    $('side').parentNode.insertBefore(
+        K.grip({
+            panel: $('side'),
+            prop: '--side-w',
+            min: 320,
+            room: 300,
+            initial: keptSide ? Number(keptSide[1]) : 0,
+            label: 'Resize the side panel',
+            onResize: function (px, done) {
+                if (!done) return;
+                try {
+                    history.replaceState(null, '', '#' + (px ? 'side=' + px : ''));
+                } catch (e) {
+                    // A sandboxed frame may refuse; the panel still resizes.
+                }
+            },
+        }),
+        $('side'),
+    );
+
     sdk.ready()
         .then(function (context) {
             state.ctx = context;

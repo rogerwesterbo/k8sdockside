@@ -1438,14 +1438,14 @@ button.tile.sel {
     margin-bottom: 8px;
 }
 
-/* The drawer: one application in full. */
+/* The drawer: one application in full, as wide as its grip was dragged. */
 .drawer {
     position: fixed;
     z-index: 20;
     top: 0;
     right: 0;
     bottom: 0;
-    width: min(480px, 100%);
+    width: min(var(--drawer-w, 480px), 100%);
     overflow-y: auto;
     padding: 0 18px 24px;
     background: var(--a-panel);
@@ -1461,15 +1461,77 @@ button.tile.sel {
     }
 }
 
-/* Room for the drawer, so the tiles it covers can still be reached. */
+/* Room for the drawer, so the tiles and the controls it covers can still be
+   reached. */
 body.drawer-open .board {
-    margin-right: min(480px, 100%);
+    margin-right: min(var(--drawer-w, 480px), 100%);
+}
+
+@media (min-width: 1101px) {
+    body.drawer-open .top {
+        padding-right: calc(min(var(--drawer-w, 480px), 100%) + 22px);
+    }
 }
 
 @media (max-width: 1100px) {
     body.drawer-open .board {
         margin-right: 0;
     }
+}
+
+/* The grab strip on a side panel's inner edge. It sits over the seam, so the
+   whole edge is grabbable rather than the one pixel of the border; its line
+   shows while it is pointed at, held or focused. */
+.grip {
+    position: relative;
+    z-index: 3;
+    align-self: stretch;
+    width: 9px;
+    margin: 0 -4px;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+}
+
+.grip::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 3px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.12s ease;
+}
+
+.grip:hover::after,
+.grip:focus-visible::after,
+body.gripping .grip::after {
+    background: var(--a-accent);
+}
+
+/* A drag keeps its cursor wherever the pointer goes, and selects nothing. */
+body.gripping,
+body.gripping * {
+    cursor: col-resize !important;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* On the drawer's inner edge, for as long as there is a drawer. */
+.drawer-grip {
+    position: fixed;
+    z-index: 21;
+    top: 0;
+    bottom: 0;
+    right: calc(min(var(--drawer-w, 480px), 100%) - 5px);
+    margin: 0;
+    display: none;
+}
+
+body.drawer-open .drawer-grip {
+    display: block;
 }
 
 .drawer-head {

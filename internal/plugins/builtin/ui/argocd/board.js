@@ -31,6 +31,8 @@
         project: '',
         selected: '',
         notice: '',
+        // How wide the drawer was dragged; empty is the stylesheet's width.
+        width: '',
     };
 
     var $ = function (id) {
@@ -48,7 +50,7 @@
 
     // The selection and the filters live in the frame's own hash, so switching
     // tabs away and back -- which unloads the page -- comes back to them.
-    var REMEMBERED = ['group', 'health', 'sync', 'project', 'selected'];
+    var REMEMBERED = ['group', 'health', 'sync', 'project', 'selected', 'width'];
 
     function saveHash() {
         var parts = [];
@@ -264,6 +266,24 @@
         return row;
     }
 
+    // The tree is drawn to the drawer's width, so it is drawn again whenever
+    // the drawer is made wider or narrower.
+    function drawTree() {
+        var box = $('tree-box');
+        var app = state.model && state.selected && state.model.apps.find(function (a) {
+            return a.key === state.selected;
+        });
+        if (!box || !app || $('drawer').hidden) return;
+        box.textContent = '';
+        box.appendChild(
+            K.resourceTree(app, {
+                width: Math.max(320, ($('drawer').clientWidth || 460) - 36),
+                readable: state.ctx.readable,
+                onOpen: open,
+            }),
+        );
+    }
+
     function drawDrawer(model) {
         var drawer = $('drawer');
         var app = state.selected && model.apps.find(function (a) {
@@ -353,14 +373,9 @@
         drawer.appendChild(resHead);
         if (app.resources.length) {
             var treeBox = el('div', 'tree-box');
-            treeBox.appendChild(
-                K.resourceTree(app, {
-                    width: Math.max(320, (drawer.clientWidth || 460) - 36),
-                    readable: state.ctx.readable,
-                    onOpen: open,
-                }),
-            );
+            treeBox.id = 'tree-box';
             drawer.appendChild(treeBox);
+            drawTree();
         } else {
             drawer.appendChild(el('p', 'quiet', 'Argo CD has not reported any resources for it yet.'));
         }
@@ -521,6 +536,26 @@
 
     loadHash();
     drawGroupControl();
+    // The drawer is as wide as it was left: the width is kept in the hash
+    // with the rest of the board's state.
+    document.body.appendChild(
+        K.grip({
+            panel: $('drawer'),
+            prop: '--drawer-w',
+            className: 'drawer-grip',
+            min: 380,
+            room: 320,
+            initial: Number(state.width) || 0,
+            label: 'Resize the application drawer',
+            onResize: function (px, done) {
+                if (done) {
+                    state.width = px ? String(px) : '';
+                    saveHash();
+                }
+                drawTree();
+            },
+        }),
+    );
 
     sdk.ready()
         .then(function (context) {

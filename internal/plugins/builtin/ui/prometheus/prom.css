@@ -1048,7 +1048,9 @@ input.code {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.15fr);
+    /* The middle track is the grip's, on the seam; the side panel takes the
+       width it was dragged to, or else its share of the page. */
+    grid-template-columns: minmax(300px, 1fr) 0 var(--side-w, minmax(380px, 1.15fr));
 }
 
 .list {
@@ -1062,6 +1064,46 @@ input.code {
     padding: 16px 18px 28px;
 }
 
+/* The grab strip on a side panel's inner edge. It sits over the seam, so the
+   whole edge is grabbable rather than the one pixel of the border; its line
+   shows while it is pointed at, held or focused. */
+.grip {
+    position: relative;
+    z-index: 3;
+    align-self: stretch;
+    width: 9px;
+    margin: 0 -4px;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+}
+
+.grip::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 3px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 0.12s ease;
+}
+
+.grip:hover::after,
+.grip:focus-visible::after,
+body.gripping .grip::after {
+    background: var(--p-accent);
+}
+
+/* A drag keeps its cursor wherever the pointer goes, and selects nothing. */
+body.gripping,
+body.gripping * {
+    cursor: col-resize !important;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
 @media (max-width: 820px) {
     .page-alerts {
         height: auto;
@@ -1069,6 +1111,9 @@ input.code {
     }
     .split {
         grid-template-columns: 1fr;
+    }
+    .split .grip {
+        display: none;
     }
     .list {
         border-right: 0;

@@ -26,6 +26,12 @@
      * every glance at another tab is a filter nobody will use.
      */
     const remembered = new Map<string, { mode: Mode; filter: GraphFilter; selected: string | null }>();
+
+    /**
+     * How wide the detail panel was dragged, for the session and whichever
+     * cluster is looked at: 0 is the stylesheet's own width.
+     */
+    let keptSideWidth = 0;
 </script>
 
 <script lang="ts">
@@ -65,6 +71,55 @@
     $effect(() => {
         remembered.set(contextId, { mode, filter: { ...filter }, selected });
     });
+
+    // ----- the detail panel's width ------------------------------------------
+
+    /** The narrowest the detail panel goes, and what it always leaves the graph. */
+    const MIN_SIDE = 280;
+    const GRAPH_ROOM = 320;
+
+    let mapEl = $state<HTMLElement | null>(null);
+    let sideEl = $state<HTMLElement | null>(null);
+    /** 0 is the stylesheet's own width. */
+    let sideWidth = $state(keptSideWidth);
+    let sideDrag = $state<{ x: number; from: number } | null>(null);
+
+    $effect(() => {
+        keptSideWidth = sideWidth;
+    });
+
+    function fitSide(px: number): number {
+        const room = (mapEl?.clientWidth ?? window.innerWidth) - GRAPH_ROOM;
+        return Math.round(Math.max(MIN_SIDE, Math.min(px, room)));
+    }
+
+    function startSideResize(event: PointerEvent): void {
+        if (event.button !== 0 || !sideEl) return;
+        event.preventDefault();
+        sideDrag = { x: event.clientX, from: sideEl.getBoundingClientRect().width };
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    }
+
+    function onSideResize(event: PointerEvent): void {
+        // The panel is on the right: it grows as the pointer goes left.
+        if (sideDrag) sideWidth = fitSide(sideDrag.from + sideDrag.x - event.clientX);
+    }
+
+    function endSideResize(event: PointerEvent): void {
+        if (!sideDrag) return;
+        sideDrag = null;
+        (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    }
+
+    /** Arrow keys resize the panel for anyone not using a pointer. */
+    function onSideHandleKey(event: KeyboardEvent): void {
+        const step = event.shiftKey ? 48 : 16;
+        const now = sideWidth || sideEl?.getBoundingClientRect().width || 400;
+        if (event.key === 'ArrowLeft') sideWidth = fitSide(now + step);
+        else if (event.key === 'ArrowRight') sideWidth = fitSide(now - step);
+        else return;
+        event.preventDefault();
+    }
 
     let access = $state<Access | null>(null);
     let error = $state<string | null>(null);
@@ -284,7 +339,7 @@
                 <span class="muted">Point at anything to trace it; click to pin and explain.</span>
             </div>
 
-            <div class="map" class:with-detail={selected !== null}>
+            <div class="map" class:with-detail={selected !== null} bind:this={mapEl}>
                 <div class="canvas">
                     {#if graph.bindings.length === 0 && graph.roles.length === 0}
                         <div class="empty">
@@ -300,7 +355,28 @@
                     {/if}
                 </div>
                 {#if selected}
-                    <div class="side">
+                    <div class="side" bind:this={sideEl} style:--side-w={sideWidth ? `${sideWidth}px` : null}>
+                        <!-- A focusable separator is the ARIA "window splitter" pattern, as
+                             on the panes; the a11y rules only key off the role, which they
+                             treat as static. -->
+                        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+                        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                        <div
+                            class="handle"
+                            class:active={sideDrag !== null}
+                            role="separator"
+                            aria-label="Resize the detail panel"
+                            aria-orientation="vertical"
+                            aria-valuemin={MIN_SIDE}
+                            tabindex="0"
+                            title="Drag to resize · double-click to reset"
+                            onpointerdown={startSideResize}
+                            onpointermove={onSideResize}
+                            onpointerup={endSideResize}
+                            onpointercancel={endSideResize}
+                            ondblclick={() => (sideWidth = 0)}
+                            onkeydown={onSideHandleKey}
+                        ></div>
                         <NodeDetail {contextId} {access} {idx} id={selected} onselect={(id) => (selected = id)} />
                     </div>
                 {/if}
@@ -605,13 +681,37 @@
     }
 
     .side {
-        flex: 0 0 400px;
-        max-width: 45%;
+        flex: 0 0 var(--side-w, 400px);
+        /* Dragged wider, it may take all but the graph's share of the row;
+           never less than it always had. */
+        max-width: max(45%, calc(100% - 320px));
         position: sticky;
         top: 0;
         max-height: calc(100vh - 140px);
         display: flex;
         flex-direction: column;
+    }
+
+    /* The grab strip sits in the gap beside the panel, so the whole edge is
+       grabbable rather than the one pixel of its border. */
+    .handle {
+        position: absolute;
+        z-index: 2;
+        top: 0;
+        bottom: 0;
+        left: -12px;
+        width: 8px;
+        border-radius: 4px;
+        cursor: col-resize;
+        touch-action: none;
+        background: transparent;
+        transition: background 120ms ease;
+    }
+
+    .handle:hover,
+    .handle.active,
+    .handle:focus-visible {
+        background: var(--accent);
     }
 
     .empty {

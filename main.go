@@ -49,24 +49,28 @@ func main() {
 		},
 	})
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "K8s Dockside",
-		// Wide enough for the sidebar, a tab bar and a docked detail panel
-		// side by side without anything collapsing.
-		Width:     1440,
-		Height:    900,
-		MinWidth:  960,
-		MinHeight: 600,
+	windowOptions := application.WebviewWindowOptions{
+		Title:     "K8s Dockside",
+		Width:     defaultWidth,
+		Height:    defaultHeight,
+		MinWidth:  minWidth,
+		MinHeight: minHeight,
 		Mac: application.MacWindow{
 			// Matches the height of the frontend's own top bar, so the traffic
 			// lights sit centred in it rather than over the content below.
-			InvisibleTitleBarHeight: 44,
+			InvisibleTitleBarHeight: titleBarHeight,
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
 		BackgroundColour: application.NewRGB(0x0f, 0x13, 0x1a),
 		URL:              "/",
-	})
+	}
+	// The window opens where it was last left, and the app keeps note of
+	// where that is as it moves: see window.go.
+	saved := settings.Get().Window
+	placeWindow(&windowOptions, saved)
+	window := app.Window.NewWithOptions(windowOptions)
+	app.OnShutdown(keepWindow(app, window, saved, settings).save)
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
