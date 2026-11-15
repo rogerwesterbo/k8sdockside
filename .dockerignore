@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+dist
+charts
+diagrams
+*.pdf
+*.local
+.vite-inspect
+.remote-assets
+# never bake cluster credentials into the image
+kubeconfig*
+talosconfig*

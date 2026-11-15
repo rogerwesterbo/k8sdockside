@@ -1,0 +1,122 @@
+# Default values for k8sdockside-slides.
+
+replicaCount: 1
+revisionHistoryLimit: 10
+
+image:
+  repository: ghcr.io/rogerwesterbo/k8sdockside-slides
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+# e.g. [{ name: ghcr-image-pull-secret }] if the ghcr package is private
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  # Static site – no need for Kubernetes API credentials in the pod
+  automount: false
+  annotations: {}
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 2000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 101
+  runAsGroup: 101
+
+prestop:
+  sleep: 15
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: k8sdockside-slides.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: k8sdockside-tls
+  #    hosts:
+  #      - k8sdockside-slides.example.com
+
+# Gateway API HTTPRoute (e.g. Envoy Gateway)
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs:
+    - name: eg
+      namespace: envoy-gateway-system
+      # sectionName: https-k8sdockside
+  hostnames:
+    - k8sdockside-slides.example.com
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 32Mi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# nginx needs writable dirs when readOnlyRootFilesystem is true
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: var-cache-nginx
+    emptyDir: {}
+  - name: var-run
+    emptyDir: {}
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: var-cache-nginx
+    mountPath: /var/cache/nginx
+  - name: var-run
+    mountPath: /var/run
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: k8sdockside-slides
+description: K8s Dockside presentation (Slidev) served as a static site by unprivileged nginx
+type: application
+home: https://k8sdockside.westerbo.no
+sources:
+  - https://github.com/rogerwesterbo/k8sdockside
+keywords:
+  - k8sdockside
+  - slidev
+  - presentation
+# version and appVersion are overwritten from the git tag by the release workflow
+version: 0.1.0
+appVersion: "0.1.0"

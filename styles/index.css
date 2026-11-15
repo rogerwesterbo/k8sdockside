@@ -1,0 +1,54 @@
+/* Palette taken from the K8s Dockside logo */
+:root {
+  --kd-navy: #0f2a3a;
+  --kd-deep: #0d2434;
+  --kd-teal: #62c8b4;
+  --kd-blue: #4a9bd4;
+  --kd-orange: #e8a23c;
+  --kd-red: #d4614c;
+  --kd-green: #5cb87a;
+}
+
+.slidev-layout {
+  background: radial-gradient(ellipse at top, #123044 0%, var(--kd-deep) 70%);
+}
+
+.slidev-layout h1 {
+  color: var(--kd-teal);
+}
+
+.slidev-layout a {
+  color: var(--kd-teal);
+  border-color: var(--kd-teal);
+}
+
+/* Small rounded box used for cards and callouts */
+.kd-card {
+  border: 1px solid rgba(98, 200, 180, 0.35);
+  background: rgba(15, 42, 58, 0.7);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+.kd-tag {
+  display: inline-block;
+  border-radius: 9999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.75rem;
+  background: rgba(98, 200, 180, 0.15);
+  color: var(--kd-teal);
+}
+
+/* The five container colours from the logo, as a thin rule */
+.kd-stripe {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--kd-orange) 0 20%,
+    var(--kd-blue) 20% 40%,
+    var(--kd-red) 40% 60%,
+    var(--kd-green) 60% 80%,
+    var(--kd-teal) 80% 100%
+  );
+}
