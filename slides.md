@@ -33,7 +33,7 @@ Every Kubernetes cluster you have, in one window
 
 ---
 
-# 📊 Quick poll
+# 📊 Quick poll, k8s tools
 
 <div class="mt-8 text-2xl">
 Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
@@ -50,12 +50,35 @@ Point: there are more clients than kubectl, and each one makes different trade-o
 
 ---
 
+# What is K8s Dockside?
+
+<div v-click>
+Yet another Kubernetes client!
+</div>
+
+<div v-click>
+Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
+</div>
+
+<div class="relative mt-6" style="height: 330px">
+  <img v-click src="/k8sdockside_start_page.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 0; top: 0" />
+  <img v-click src="/k8sdockside_settings_start_page.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 190px; top: 15px" />
+  <img v-click src="/k8sdockside_settings_plugins.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 380px; top: 30px" />
+</div>
+
+
+---
+
 # But why? 🤔
 
 <div class="grid grid-cols-2 gap-10 mt-6">
 <div>
 
+<v-click>
+
 ### 😩
+
+</v-click>
 
 <v-clicks>
 
@@ -69,7 +92,11 @@ Point: there are more clients than kubectl, and each one makes different trade-o
 </div>
 <div>
 
+<v-click>
+
 ### ☺️
+
+</v-click>
 
 <v-clicks>
 
@@ -87,23 +114,6 @@ Point: there are more clients than kubectl, and each one makes different trade-o
 <!--
 
 -->
-
----
-
-# What is K8s Dockside?
-
-Yet another Kubernetes client!
-
-<div v-click>
-Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
-</div>
-
-<div class="relative mt-6" style="height: 330px">
-  <img v-click src="/k8sdockside_start_page.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 0; top: 0" />
-  <img v-click src="/k8sdockside_settings_start_page.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 190px; top: 15px" />
-  <img v-click src="/k8sdockside_settings_plugins.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 380px; top: 30px" />
-</div>
-
 
 ---
 
@@ -316,28 +326,36 @@ Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
 <div class="grid grid-cols-2 gap-10 mt-4">
 <div>
 
+<v-click>
+
 ### 🧑‍💻 Me
+
+</v-click>
 
 <v-clicks>
 
-- Architecture and the **invariants** ("Secrets never reach a cache")
-- Writing them down so the agent can follow them
-- Reviewing the diff, saying **no**, and committing
-- Knowing what "done" looks like: `make precheck`
+- I decide how the app is built, and the **rules that must never break** ("Secret values are never cached")
+- I write those rules down, so Claude knows them too
+- I read every change, say **no** when it's wrong, and commit
+- I decide when it's done: `make precheck` must pass, and perhaps more
 
 </v-clicks>
 
 </div>
 <div>
 
+<v-click>
+
 ### 🤖 Claude
+
+</v-click>
 
 <v-clicks>
 
-- (Plan →) implement → test, in loops
-- Specialised **subagents** for Go, Svelte, docs and security review
-- Runs builds, linters and tests by itself (allowed list)
-- Asks before `kubectl`, `helm install` or `git push`
+- Writes the code, tests it, fixes it, and repeats
+- Hands work to **helper agents** for Go, Svelte, docs and security review
+- Runs builds and tests on its own, but only the ones I allow
+- Asks me first before `kubectl`, `helm install` or `git push`
 
 </v-clicks>
 
@@ -345,27 +363,27 @@ Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
 </div>
 
 <!--
-TODO: one story where Claude got it wrong (e.g. a "simplification" that broke an invariant),
-and what you put in CLAUDE.md / an agent afterwards so it didn't happen again.
--->
+1. "Architecture and the invariants"
 
----
+You decide how the app is put together: Go backend, shared informers, plugins in a sandboxed iframe, server mode with the pod's credentials. Claude doesn't make those decisions.
 
-# 🎓 Learn it properly: Anthropic Academy
+An invariant is a rule that must always hold, whatever feature is being built. It isn't a task, it's a boundary. In K8s Dockside, examples are:
 
-<div class="grid grid-cols-2 gap-6 mt-6">
-  <div class="kd-card">🧭 <b>AI Fluency</b><br/><span class="text-sm opacity-70">How to work with AI, not just prompt it</span></div>
-  <div class="kd-card">⌨️ <b>Claude Code in Action</b><br/><span class="text-sm opacity-70">Context, CLAUDE.md, hooks, subagents</span></div>
-  <div class="kd-card">🔌 <b>Introduction to MCP</b><br/><span class="text-sm opacity-70">Model Context Protocol: tools for agents</span></div>
-  <div class="kd-card">🛠️ <b>Building with the Claude API</b><br/><span class="text-sm opacity-70">When you build AI into your own apps</span></div>
-</div>
+Secret values never end up in a cache, a table, a log or a plugin page.
+The kubeconfig is only ever read, never written.
+No telemetry.
+These are the rules an agent breaks without noticing. Ask it to "make the Secrets table faster" and the obvious fix is to cache Secrets in an informer like every other kind. That works, the tests pass, and you've broken a security promise. Only you know the rule is there, because it comes from why you built the app, not from the code.
 
-<div class="mt-8 text-center">
-Free: <b>anthropic.skilljar.com</b> · docs: <b>docs.claude.com</b>
-</div>
+2. "Writing them down so the agent can follow them"
 
-<!--
-TODO: check the course list on anthropic.skilljar.com the day before and say which ones you took.
+Claude starts every session knowing nothing. A rule that only lives in your head doesn't exist for it. So you write the invariants into CLAUDE.md (the "Rules that are easy to break" section on your later slide) and into the agent files, like security-reviewer.md. Every session, and every subagent, reads them first.
+
+That's the link to the later slides: point 1 is the thinking, and point 2 is what CLAUDE.md and .claude/agents/ are for.
+
+If the wording feels unclear, plainer versions could be:
+
+The architecture, and the rules that must never break ("Secrets never reach a cache")
+Writing those rules into CLAUDE.md, because the agent can't follow rules it hasn't been told
 -->
 
 ---
@@ -389,37 +407,158 @@ Checked into git: the whole team (and every agent) gets the same rules
 
 ---
 
-# `CLAUDE.md`: the rules that are easy to break
+# `<repo>/CLAUDE.md`: the rules that are easy to break
 
-```md {all|4-5|6|7-8|all}{maxHeight:'380px'}
+```md {all|5|8-9|10|16|all}
 # K8s Dockside
 
 ## Rules that are easy to break
 
-- **Build both tags.** Code that compiles without `-tags server`
-  can still fail with it, and the reverse.
-- **`frontend/bindings/` is generated.** Never edit it. Run `make generate`.
-- **Secrets are redacted before they are cached.** Never add a path that
-  puts Secret values into an informer cache, a table, a log or a plugin page.
+- **Build both tags.**
+- **`frontend/bindings/` is generated.** Never edit it.
+- **Everything goes through the dynamic client.**
+- **Secrets are redacted before they are cached.**
 - **The kubeconfig is read, never written.**
 - **No telemetry, and no network calls the user didn't ask for.**
-- **Plugins are strict.** Unknown manifest fields are errors, not warnings.
-- **Server mode defaults to read-only.** Chart defaults must stay safe.
+- **Plugins are strict.**
+- **Server mode defaults to read-only.**
 
 ## Commands
 
-make precheck # everything CI runs. Run it before saying "done".
+make precheck   # everything CI runs. Run it before saying "done".
 ```
 
+<div class="text-sm opacity-70 text-center mt-2">
+The real file is ~70 lines: layout, commands, these rules (each with a short <i>why</i>), style
+</div>
+
 <!--
-Real excerpt from k8sdockside/CLAUDE.md. Point: short, specific, the *why* behind the rules.
-Not documentation of everything: links to docs/ for the rest.
+The rule headlines from github.com/k8sdockside/k8sdockside/CLAUDE.md, word for word.
+In the file, each rule has a sentence or two saying why, e.g.:
+  "Secrets are redacted before they are cached. Only the editor reads a Secret live."
+  "Build both tags. Code that compiles without -tags server can still fail with it, and the reverse."
+Point: short and specific. Not documentation of everything: it links to docs/ for the rest.
 Optional: open the real file in the editor.
 -->
 
 ---
 
-# `.claude/settings.json`: what it may do alone
+# Memory, skills, hooks & MCP
+
+<div class="grid grid-cols-2 gap-3 kd-extras">
+
+<div v-click class="kd-card">
+
+### 🧠 Memory <span class="kd-tag">Claude writes it</span>
+
+What Claude learnt, kept for next time
+
+<div class="kd-path">📁 ~/.claude/projects/…/memory/project_k8sdockside_frontend_workflow.md</div>
+
+```md
+---
+name: k8sdockside-frontend-workflow
+type: project
+---
+frontend/bindings/ is generated: regenerate
+after every Go API change, or the TS types lag.
+**Why:** it cost a whole session to rediscover.
+```
+
+</div>
+
+<div v-click class="kd-card">
+
+### 📚 Skills <span class="kd-tag">read when relevant</span>
+
+A how-to, loaded only when the task matches
+
+<div class="kd-path">📁 superpowers plugin › skills/test-driven-development/SKILL.md</div>
+
+```md
+---
+name: test-driven-development
+description: Use when implementing any feature
+  or bugfix, before writing implementation code
+---
+Write the test first. Watch it fail.
+Write minimal code to pass.
+```
+
+</div>
+
+<div v-click class="kd-card">
+
+### 🪝 Hooks <span class="kd-tag">always runs</span>
+
+A script the app runs, not something Claude has to remember
+
+<div class="kd-path">📁 security-guidance plugin › hooks/hooks.json</div>
+
+```json
+"PostToolUse": [{
+  "matcher": "Edit|Write",
+  "hooks": [{ "type": "command",
+    "command": "security_reminder_hook.py" }]
+}]
+```
+
+</div>
+
+<div v-click class="kd-card">
+
+### 🔌 MCP <span class="kd-tag">new tools</span>
+
+Lets Claude use other systems: issues, PRs, CI
+
+<div class="kd-path">📁 github plugin › .mcp.json</div>
+
+```json
+"github": {
+  "type": "http",
+  "url": "https://api.githubcopilot.com/mcp/"
+}
+```
+
+</div>
+
+</div>
+
+<style>
+.kd-extras.grid > .kd-card { padding: 0.5rem 0.85rem; }
+.kd-extras h3 { font-size: 1rem; margin: 0; }
+.kd-extras p { font-size: 0.75rem; opacity: 0.75; margin: 0 0 0.15rem; }
+.kd-extras .kd-path { font-family: var(--slidev-code-font-family, monospace); font-size: 0.55rem; color: var(--kd-teal); margin-bottom: 0.25rem; white-space: nowrap; }
+.kd-extras .slidev-code { font-size: 0.58rem !important; line-height: 1.3 !important; padding: 0.4rem 0.6rem !important; margin: 0 !important; }
+</style>
+
+<!--
+All four are real, from my own setup (shortened):
+- Memory: ~/.claude/projects/<project>/memory/*.md. Claude writes these itself when something cost
+  time, or when I say "remember". An index (MEMORY.md) is loaded every session.
+  Private to my machine. CLAUDE.md is the rules I write and share; memory is Claude's own notebook.
+- Skills: from the superpowers plugin (skills/test-driven-development/SKILL.md). Only the
+  description is always in context; the rest is read when the task matches it. That's how you
+  can have dozens without filling the context.
+- Hooks: from the security-guidance plugin (hooks/hooks.json). After every Edit/Write, a script
+  checks the change for security patterns. Point: CLAUDE.md is a request, a hook is enforced.
+- MCP: the github plugin's .mcp.json. Token comes from an env var, never in the file.
+
+Where your own go (no plugin needed):
+- Skills: ~/.claude/skills/<name>/SKILL.md (you) or <repo>/.claude/skills/<name>/SKILL.md (team)
+- Hooks: "hooks" in ~/.claude/settings.json or <repo>/.claude/settings.json
+- MCP: <repo>/.mcp.json (team) or `claude mcp add` (you)
+- Memory: Claude writes it; you don't create it by hand (but you can edit or delete it)
+
+One-liner: CLAUDE.md = always read · skill = read when it fits · hook = always runs · MCP = new tools.
+
+Don't show the other memory files: they name my clusters and kubeconfigs.
+The cilium memory is a good story to tell out loud ("Claude broke my cluster, now it's written down").
+-->
+
+---
+
+# `<repo>/.claude/settings.json`: what it may do alone
 
 ```json {all|3-10|11-17|18-23}{maxHeight:'400px'}
 {
@@ -456,7 +595,7 @@ Note: deny Read(~/.kube/**): the agent never sees my cluster credentials.
 
 ---
 
-# `.claude/agents/`: a team of specialists
+# `<repo>/.claude/agents/`: a team of specialists
 
 <div class="grid grid-cols-2 gap-6 mt-2">
 <div class="text-sm whitespace-nowrap">
@@ -497,21 +636,60 @@ The reviewer can't edit: it has to convince me, not just change the code.
 
 ---
 
+# 🎓 Learn it properly: Anthropic Academy
+
+<div class="grid grid-cols-2 gap-6 mt-6">
+  <div class="kd-card">🧭 <b>AI Fluency</b><br/><span class="text-sm opacity-70">How to work with AI, not just prompt it</span></div>
+  <div class="kd-card">⌨️ <b>Claude Code in Action</b><br/><span class="text-sm opacity-70">Context, CLAUDE.md, subagents</span></div>
+  <div class="kd-card">🔌 <b>Introduction to MCP</b><br/><span class="text-sm opacity-70">Model Context Protocol: tools for agents</span></div>
+  <div class="kd-card">🛠️ <b>Building with the Claude API</b><br/><span class="text-sm opacity-70">When you build AI into your own apps</span></div>
+</div>
+
+<div class="mt-8 text-center">
+Free: <b>anthropic.skilljar.com</b> · docs: <b>docs.claude.com</b>
+</div>
+
+<!--
+TODO: check the course list on anthropic.skilljar.com the day before and say which ones you took.
+-->
+
+---
+
 # What I've learnt
 
 <v-clicks>
 
-- ✍️ **Write down the invariants**: the agent can't respect a rule that lives in your head
-- 🔁 **Small loops with a hard check**: tests, lint, `make precheck`
-- 🧑‍⚖️ **Review like it's a colleague's PR**: confident is not the same as correct
-- 🔒 **Least privilege for agents too**: allow, ask, deny
-- 🚀 **Seniority matters more, not less**: knowing what to build, and what to say no to
+- 🐘 **Eat the elephant one bite at a time**: AI still struggles with big problems, but is great at small ones
+- ✍️ **Write your rules down**: Claude can't follow a rule that's only in your head
+- 🔁 **Small steps, and test every step**: (plan, ) implement, test, `make precheck` (build, test, lint, etc)
+- 🧑‍⚖️ **Read the change**: sounding sure is not the same as being right
+- 🔒 **Don't let the agent do everything**: allow some things, ask for others, block the rest
+- 🚀 **Experience matters more, not less**: knowing what to build, and when to say no
 
 </v-clicks>
 
 <!--
 TODO: adjust to your own experience. Add the "what went wrong" story here if it's not on the earlier slide.
 -->
+
+
+---
+
+# 📊 Quick feedback poll
+
+<div class="mt-8 text-2xl">
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
+</div>
+
+<!--
+Multi-select poll in Slido. Switch to Slido to show the live results.
+
+Expected: almost everyone kubectl, many k9s, a few Lens/Freelens/Headlamp.
+K8s Dockside will probably get 0–1 votes: "Let's fix that tonight."
+
+Point: there are more clients than kubectl, and each one makes different trade-offs.
+-->
+
 
 ---
 
