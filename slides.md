@@ -190,7 +190,6 @@ One watch per kind, shared by every tab · everything goes through <code>unstruc
 <div>🧩 Installing a plugin</div>
 <div class="flex items-center gap-2"><img src="/cert-manager.svg" class="h-5" /> cert-manager</div>
 <div class="flex items-center gap-2"><img src="/argocd.svg" class="h-5" /> Argo CD</div>
-<div class="flex items-center gap-2"><img src="/prometheus.svg" class="h-5" /> Prometheus metrics</div>
 <div class="flex items-center gap-2"><img src="/pixelagents.svg" class="h-5" /> Pixel agents 👾</div>
 
 </div>
