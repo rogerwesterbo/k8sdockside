@@ -189,7 +189,7 @@ One watch per kind, shared by every tab · everything goes through <code>unstruc
 <div>⚡ Live tables, CRDs, <kbd>⌘K</kbd> search</div>
 <div>🧩 Installing a plugin</div>
 <div class="flex items-center gap-2"><img src="/cert-manager.svg" class="h-5" /> cert-manager</div>
-<div class="flex items-center gap-2"><img src="/argocd.svg" class="h-5" /> Argo CD</div>
+<div class="flex items-center gap-2">💻 Show some plugins</div>
 <div class="flex items-center gap-2"><img src="/pixelagents.svg" class="h-5" /> Pixel agents 👾</div>
 
 </div>
@@ -650,6 +650,168 @@ Free: <b>anthropic.skilljar.com</b> · docs: <b>docs.claude.com</b>
 
 <!--
 TODO: check the course list on anthropic.skilljar.com the day before and say which ones you took.
+-->
+
+---
+
+# 🏠 Local LLMs
+
+<div class="grid grid-cols-[1fr_1fr] gap-8 mt-2">
+<div>
+
+<v-click>
+
+### My setup
+
+- **LM Studio** on a MacBook M5 Pro, 48 GB
+- **Qwen3.6-35B-A3B**, 4-bit MLX (~20 GB)
+
+```sh
+M=qwen3.6-35b-a3b        # name from `lms ls`
+lms server start
+lms load $M -c 65536     # context, default is small
+export ANTHROPIC_BASE_URL=http://localhost:1234
+export ANTHROPIC_AUTH_TOKEN=lmstudio
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=$M
+claude --model $M
+```
+
+<div class="text-sm opacity-70">Same Claude Code, different brain</div>
+<div class="text-sm opacity-70">..or use <a href="https://opencode.ai/" target="_blank">OpenCode</a>, <a href="https://omp.sh"  target="_blank">omp.sh</a> or <a href="https://cline.bot/"  target="_blank">Cline</a></div>
+
+
+</v-click>
+
+</div>
+<div class="text-sm">
+
+<v-click>
+
+### 👍 Good, because
+
+</v-click>
+
+<v-clicks>
+
+- **Private:** code and prompts never leave the laptop
+- **Free and offline:** no token bill, works on a plane
+- **Fast enough:** MoE, only 3B of the 35B weights work per token
+
+</v-clicks>
+
+<v-click>
+
+### 👎 Not there (yet), because
+
+</v-click>
+
+<v-clicks>
+
+- **Smaller brain:** squeezed to 4 bits to fit in RAM, so it knows less and reasons worse than frontier models
+- **Errors add up:** an agent makes 50+ tool calls, so small mistakes pile up and it loses the thread
+- **RAM is the ceiling:** the weights and the context share it, so the context is shorter and long prompts are slow
+
+</v-clicks>
+
+</div>
+</div>
+
+<v-click>
+
+<div class="mt-4 text-center kd-card">
+Local for small, private tasks. Claude for building K8s Dockside.
+</div>
+
+</v-click>
+
+<!--
+TODO: adjust the pros/cons to what you actually saw, and add a real number:
+tokens/sec in LM Studio for Qwen3.6-35B-A3B on the M5 Pro (shown under the chat while it answers).
+
+LM Studio has an Anthropic-compatible endpoint, so Claude Code can talk to it
+with just ANTHROPIC_BASE_URL. Ollama works the same way (port 11434).
+
+Why each line:
+- --model: Claude Code sends a model name with every request, it must match the key in `lms ls`.
+- lms load -c: LM Studio would auto-load (JIT) on the first request, but with its default context length.
+  Claude Code's system prompt + tools alone are tens of thousands of tokens.
+- ANTHROPIC_DEFAULT_HAIKU_MODEL: Claude Code also makes small background calls on the "haiku" model,
+  which LM Studio doesn't have. ANTHROPIC_DEFAULT_SONNET_MODEL / _OPUS_MODEL do the same for subagents (Explore).
+- Optional: CLAUDE_CODE_MAX_CONTEXT_TOKENS=65536 (tell Claude Code the real window),
+  CLAUDE_CODE_ATTRIBUTION_HEADER=0 (LM Studio's docs recommend it).
+
+MoE (mixture of experts): all 35B weights must fit in memory, but a router picks
+a few "experts" per token, ~3B parameters, so it runs like a small model and knows like a bigger one.
+
+4-bit: each weight is stored in 4 bits instead of 16, so ~4x smaller, at some cost in quality.
+-->
+
+---
+
+# ⚠️ A model file can run code
+
+<div class="grid grid-cols-2 gap-6 mt-4">
+
+<v-click>
+
+<div class="kd-card text-sm">
+
+### 🤗 Hugging Face
+
+- **2024:** ~100 models with hidden payloads, one opened a reverse shell <span class="opacity-60">(JFrog)</span>
+- **2025:** "nullifAI", broken pickle files that slipped past HF's own scanner <span class="opacity-60">(ReversingLabs)</span>
+
+<div class="text-sm opacity-70 mt-2">Pickle = Python objects, loading one can run any code</div>
+
+</div>
+
+</v-click>
+
+<v-click>
+
+<div class="kd-card text-sm">
+
+### 🐳 Docker Model Runner
+
+- **CVE-2026-28400:** no-auth API, any container could overwrite files on the host
+- **CVE-2026-5843:** an MLX model's `config.json` could run Python on your Mac
+
+<div class="text-sm opacity-70 mt-2">safetensors are safe, the files next to them may not be</div>
+
+</div>
+
+</v-click>
+
+</div>
+
+<v-click>
+
+<h3 class="mt-6">What I do</h3>
+
+</v-click>
+
+<v-clicks>
+
+- Known publishers (`mlx-community`, `lmstudio-community`), safetensors or GGUF, never pickle
+- Keep the runtime updated, and keep its API on `localhost`
+- Let AI write a `~/update.sh` and run it every morning: macOS, brew, Docker, Go, Node, VS Code
+- Treat a model like any other dependency: it's code from the internet
+
+</v-clicks>
+
+<!--
+Sources:
+- JFrog, Feb 2024: ~100 malicious models on Hugging Face, PyTorch pickle __reduce__ payloads, one reverse shell to a real IP.
+- ReversingLabs, Feb 2025, "nullifAI": 7z-compressed, deliberately broken pickles. Picklescan failed on them and so never flagged them,
+  but Python still ran the payload before hitting the broken part. HF removed them within 24h and fixed Picklescan.
+- Docker Model Runner CVE-2026-28400 (Feb 2026, fixed in DMR 1.0.16 / Desktop 4.61): POST /engines/_configure took
+  llama.cpp flags without auth, --log-file could overwrite any file. Reachable from any container.
+- CVE-2026-5843 (May 2026, fixed in Desktop 4.71): the MLX backend uses MLX-LM, which loads the Python file named by
+  "model_file" in config.json, no trust_remote_code check, no sandbox. Same month CVE-2026-5817: the vllm-metal backend
+  always set trust_remote_code=True.
+  LM Studio's MLX engine is also built on MLX-LM: keep it updated.
+- Bonus: "DockerDash" (Noma, fixed in Desktop 4.50, Nov 2025): instructions hidden in a Docker image LABEL made
+  Ask Gordon (Docker's AI assistant) run commands through MCP tools. Prompt injection: the same risk for every agent.
 -->
 
 ---
