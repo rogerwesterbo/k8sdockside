@@ -36,7 +36,7 @@ Every Kubernetes cluster you have, in one window
 # 📊 Quick poll, k8s tools
 
 <div class="mt-8 text-2xl">
-Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#6275 003</b>
 </div>
 
 <!--
@@ -52,9 +52,13 @@ Point: there are more clients than kubectl, and each one makes different trade-o
 
 # What is K8s Dockside?
 
-<div v-click>
-Yet another Kubernetes client!
-</div>
+<span v-click>
+YaKC 
+</span>
+
+<span v-click>
+(Yet another Kubernetes client!)
+</span>
 
 <div v-click>
 Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
@@ -66,6 +70,11 @@ Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
   <img v-click src="/k8sdockside_settings_plugins.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 380px; top: 30px" />
 </div>
 
+<!--
+Yet another kubernetes client
+
+Multiple contexts, web, desktop (mac, windows and linux), customizable, themes, plugins, etc
+-->
 
 ---
 
@@ -84,7 +93,7 @@ Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
 
 - 💸 Lens from Mirantis is too expensive
 - ⛳️ K9s, FreeLens & HeadLamp shows one context at a time
-- 🛑 Same tool on desktop as in web
+- 🛑 Same tool on desktop as in web (yes HeadLamp is good)
 - 🪟 Tab sorting (Lens, FreeLens) is bad..
 
 </v-clicks>
@@ -104,7 +113,6 @@ Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
 - 💶 Cheap
 - 🧩 Plugins
 - 🌈 Themes
-- ⏰ Watches
 
 </v-clicks>
 
@@ -118,8 +126,6 @@ Built with Wails 3, a Go backend, and a Svelte + TypeScript frontend.
 ---
 
 # Deployments? 💾
-
-
 
 <div class="grid grid-cols-2 gap-8 mt-6">
 
@@ -145,10 +151,8 @@ Sign in with a local account, GitHub, Google, Microsoft, GitLab or any OIDC prov
 </v-clicks>
 </div>
 
-
-
 <!--
-test
+
 -->
 
 ---
@@ -271,6 +275,7 @@ helm install k8sdockside \
 - Sign in: local account, OAuth or OIDC
 - Everyone acts with the **pod's** credentials
 - The chart defaults to **read-only**
+- Demo?
 
 </div>
 </div>
@@ -308,6 +313,8 @@ Numbers from the repo on 12 Nov 2026; update them the day before.
 - hours: 324 commits across 27 repos, 43 days; commits <2h apart = one session, +30 min each (range 60–160h)
 - tokens/$: measured 2–13 Nov from Claude Code logs (79M tokens, $33, 4.7h), extrapolated per hour
 - Max share: monthly fee split by k8sdockside's share of my commits/usage
+
+1.5 billion tokens sounds absurd, but 98% of that is Claude re-reading the same conversation before every step, served from cache at a tenth of the price. The genuinely new material is closer to 30 million tokens
 -->
 
 ---
@@ -315,7 +322,7 @@ Numbers from the repo on 12 Nov 2026; update them the day before.
 # 📊 Quick poll, plugin suggestions 🧩
 
 <div class="mt-8 text-2xl">
-Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#6275 003</b>
 </div>
 
 ---
@@ -362,6 +369,8 @@ Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
 </div>
 
 <!--
+Many people use AI in many different ways! From learning via https://claude.ai to using multiple subagents simultaneously!
+
 1. "Architecture and the invariants"
 
 You decide how the app is put together: Go backend, shared informers, plugins in a sandboxed iframe, server mode with the pod's credentials. Claude doesn't make those decisions.
@@ -403,6 +412,26 @@ flowchart LR
 <div class="text-sm opacity-70 text-center">
 Checked into git: the whole team (and every agent) gets the same rules
 </div>
+
+---
+
+# `~/.claude/CLAUDE.md`: Overall settings
+
+```md {all|4-6|7-8|9-10}
+# How I want you to work
+
+## Don't assume: check first
+- Before you use a function, method, flag, config key, CLI option, env var, file path, or library version, 
+confirm it exists. Check the code, `--help`, the installed source/vendored module, or official docs. 
+Don't rely on what a tool "usually" supports, and don't invent APIs.
+- Before you edit code, read it and its callers. Follow the patterns the repo already uses rather 
+than introducing new ones.
+- If something is ambiguous and the answer changes what you build, ask me. If there's a sensible default, 
+pick it and tell me which one you picked.
+```
+<!--
+
+-->
 
 ---
 
@@ -649,7 +678,7 @@ Free: <b>anthropic.skilljar.com</b> · docs: <b>docs.claude.com</b>
 </div>
 
 <!--
-TODO: check the course list on anthropic.skilljar.com the day before and say which ones you took.
+
 -->
 
 ---
@@ -677,14 +706,19 @@ claude --model $M
 ```
 
 <div class="text-sm opacity-70">Same Claude Code, different brain</div>
-<div class="text-sm opacity-70">..or use <a href="https://opencode.ai/" target="_blank">OpenCode</a>, <a href="https://omp.sh"  target="_blank">omp.sh</a> or <a href="https://cline.bot/"  target="_blank">Cline</a></div>
-
+<br />
 
 </v-click>
 
+<div v-click class="text-sm opacity-70">
+..or use <a href="https://pi.dev" target="_blank">Pi</a>, 
+<a href="https://opencode.ai/" target="_blank">OpenCode</a>,  
+<a href="https://omp.sh"  target="_blank">omp.sh</a> 
+or 
+<a href="https://cline.bot/"  target="_blank">Cline</a></div>
 </div>
-<div class="text-sm">
 
+<div class="text-sm">
 <v-click>
 
 ### 👍 Good, because
@@ -695,7 +729,7 @@ claude --model $M
 
 - **Private:** code and prompts never leave the laptop
 - **Free and offline:** no token bill, works on a plane
-- **Fast enough:** MoE, only 3B of the 35B weights work per token
+- **Fast enough:** only a small part of the model runs for each word
 
 </v-clicks>
 
@@ -786,7 +820,7 @@ a few "experts" per token, ~3B parameters, so it runs like a small model and kno
 
 <v-click>
 
-<h3 class="mt-6">What I do</h3>
+<h3 class="mt-6">Be updated, by:</h3>
 
 </v-click>
 
@@ -820,11 +854,10 @@ Sources:
 
 <v-clicks>
 
-- 🐘 **Eat the elephant one bite at a time**: AI still struggles with big problems, but is great at small ones
+- 🐘 **Eat the elephant one bite at a time**: AI (still) struggles with big problems, but is great at small ones
 - ✍️ **Write your rules down**: Claude can't follow a rule that's only in your head
 - 🔁 **Small steps, and test every step**: (plan, ) implement, test, `make precheck` (build, test, lint, etc)
 - 🧑‍⚖️ **Read the change**: sounding sure is not the same as being right
-- 🔒 **Don't let the agent do everything**: allow some things, ask for others, block the rest
 - 🚀 **Experience matters more, not less**: knowing what to build, and when to say no
 
 </v-clicks>
@@ -839,7 +872,7 @@ TODO: adjust to your own experience. Add the "what went wrong" story here if it'
 # 📊 Quick feedback poll
 
 <div class="mt-8 text-2xl">
-Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>6275003</b>
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#6275 003</b>
 </div>
 
 <!--
