@@ -36,7 +36,11 @@ Every Kubernetes cluster you have, in one window
 # 📊 Quick poll, k8s tools
 
 <div class="mt-8 text-2xl">
-Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#6275 003</b>
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#xxx xxx</b>
+</div>
+
+<div>
+  <img src="/kubernetesclientpoll.png" alt="Kubernetes client poll" class="h-100" />
 </div>
 
 <!--
@@ -322,7 +326,25 @@ Numbers from the repo on 12 Nov 2026; update them the day before.
 # 📊 Quick poll, plugin suggestions 🧩
 
 <div class="mt-8 text-2xl">
-Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#6275 003</b>
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#xxxx xxx</b>
+</div>
+
+<br />
+<span class="text-xl">Results</span>
+<div>
+<ul class="text-sm">
+  <li>Ceph, longhorn</li>
+  <li>CLI variant of K8s Dockside</li>
+  <li>Openshift</li>
+  <li>GatewayAPI resource overview</li>
+  <li>Pizza Tycoon</li>
+  <li>Cert-manager</li>
+  <li>Istio ambient</li>
+  <li>Kata containers</li>
+  <li>Cluster API</li>
+  <li>Kyverno</li>
+  <li>Show which Deployments will land on which nodes based on taints/tolerations</li>
+</ul>
 </div>
 
 ---
@@ -872,7 +894,25 @@ TODO: adjust to your own experience. Add the "what went wrong" story here if it'
 # 📊 Quick feedback poll
 
 <div class="mt-8 text-2xl">
-Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#6275 003</b>
+Go to <span class="kd-tag text-2xl">slido.com</span> and enter <b>#xxxx xxx</b>
+</div>
+
+<br />
+<span class="text-xl">Results</span>
+<div>
+<ul class="text-sm">
+  <li>Local LLM!</li>
+  <li>Local LLM must be tested!</li>
+  <li>Dockside will be tested</li>
+  <li>Cool!</li>
+  <li>😎</li>
+  <li>You love plugins</li>
+  <li>I will test K8s Dockside</li>
+  <li>There is better options than kubectl!</li>
+  <li>🥳</li>
+  <li>Good</li>
+  <li>K8s Dockside is cool</li>
+</ul>
 </div>
 
 <!--
@@ -926,4 +966,23 @@ helm install k8sdockside oci://ghcr.io/k8sdockside/helm/k8sdockside -n k8sdocksi
 
 <div class="mt-4 flex items-center justify-center gap-3 opacity-80 text-sm">
   <img src="/roger.jpg" class="h-8 w-8 rounded-full" /> Roger Westerbø
+</div>
+
+---
+
+# Result of the plugin created 🧩
+
+<!-- <v-click>
+
+<img src="/pod-kubectl-panel.png" alt="pod kubectl panel" class="h-96" />
+<img src="/kubectl-panel-details.png" alt="pod details kubectl panel" class="h-96" />
+
+</v-click> -->
+
+<div class="relative mt-2" style="height: 330px">
+  <img v-click src="/claude-plugin-result.png" class="absolute rounded-lg shadow-xl" style="width: 350px; left: 0; top: 0" />
+  <img v-click src="/pod-kubectl-panel.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 50px; top: 0" />
+  <img v-click src="/kubectl-panel-details.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 90px; top: 15px" />
+  <img v-click src="/deployments-kubectl-panel.png" class="absolute rounded-lg shadow-xl" style="width: 480px; left: 220px; top: 30px" />
+  <img v-click src="/service-kubectl-panel.png" class="absolute rounded-lg shadow-xl" style="width: 600px; left: 320px; top: 35px" />
 </div>
